@@ -9,8 +9,6 @@
 
 ***********************************************************************/
 
-#include "../Experimental.h"
-
 #ifndef __AUDACITY_EFFECT_EQUALIZATION__
 #define __AUDACITY_EFFECT_EQUALIZATION__
 #define NUMBER_OF_BANDS 31
@@ -20,16 +18,7 @@
 #include <wx/setup.h> // for wxUSE_* macros
 
 #include "Effect.h"
-#include "../xml/XMLTagHandler.h"
 #include "../RealFFTf.h"
-#include "../SampleFormat.h"
-
-#define EQUALIZATION_PLUGIN_SYMBOL \
-ComponentInterfaceSymbol{ XO("Equalization") }
-#define GRAPHICEQ_PLUGIN_SYMBOL \
-ComponentInterfaceSymbol{ wxT("GraphicEQ"), XO("Graphic EQ") }
-#define FILTERCURVE_PLUGIN_SYMBOL \
-ComponentInterfaceSymbol{ wxT("FilterCurve"), XO("Filter Curve") }
 
 // Flags to specialise the UI
 const int kEqOptionGraphic =1;
@@ -100,18 +89,21 @@ using EQCurveArray = std::vector<EQCurve>;
 class EffectEqualization48x;
 #endif
 
-class EffectEqualization final : public Effect,
+class EffectEqualization : public Effect,
                            public XMLTagHandler
 {
 public:
-   EffectEqualization(int Options);
+   static const ComponentInterfaceSymbol Symbol;
+
+   EffectEqualization(int Options = kEqLegacy);
+   
    virtual ~EffectEqualization();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 
@@ -124,6 +116,9 @@ public:
    bool SetAutomationParameters(CommandParameters & parms) override;
    bool LoadFactoryDefaults() override;
 
+   RegistryPaths GetFactoryPresets() override;
+   bool LoadFactoryPreset(int id) override;
+
    // EffectUIClientInterface implementation
 
    bool ValidateUI() override;
@@ -134,7 +129,6 @@ public:
    bool Init() override;
    bool Process() override;
 
-   bool PopulateUI(wxWindow *parent) override;
    bool CloseUI() override;
    void PopulateOrExchange(ShuttleGui & S) override;
    bool TransferDataToWindow() override;
@@ -180,7 +174,7 @@ private:
    void UpdateCurves();
    void UpdateDraw();
 
-   void LayoutEQSliders();
+   //void LayoutEQSliders();
    void UpdateGraphic(void);
    void EnvLogToLin(void);
    void EnvLinToLog(void);
@@ -189,6 +183,7 @@ private:
    void spline(double x[], double y[], size_t n, double y2[]);
    double splint(double x[], double y[], size_t n, double y2[], double xr);
 
+   void OnErase( wxEvent &event );
    void OnSize( wxSizeEvent & event );
    void OnSlider( wxCommandEvent & event );
    void OnInterp( wxCommandEvent & event );
@@ -261,7 +256,7 @@ private:
    wxSizerItem *mLeftSpacer;
 
    EqualizationPanel *mPanel;
-   wxPanel *mGraphicPanel;
+   //wxPanel *mGraphicPanel;
    wxRadioButton *mDraw;
    wxRadioButton *mGraphic;
    wxCheckBox *mLinFreq;
@@ -284,6 +279,22 @@ private:
 
    friend class EqualizationPanel;
    friend class EditCurvesDialog;
+};
+
+class EffectEqualizationCurve final : public EffectEqualization
+{
+public:
+   static const ComponentInterfaceSymbol Symbol;
+
+   EffectEqualizationCurve() : EffectEqualization( kEqOptionCurve ) {}
+};
+
+class EffectEqualizationGraphic final : public EffectEqualization
+{
+public:
+   static const ComponentInterfaceSymbol Symbol;
+
+   EffectEqualizationGraphic() : EffectEqualization( kEqOptionGraphic ) {}
 };
 
 class EqualizationPanel final : public wxPanelWrapper

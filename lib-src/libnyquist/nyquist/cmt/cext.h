@@ -19,7 +19,8 @@ Pointer -- pointer to char, a generic pointer
 ABS()     -- absolute value of any type of number
 MAX()     -- maximum of two numbers
 MIN()     -- minimum of two numbers
-ROUND()	  -- round a double to long		     
+ROUND32() -- round a double to int
+ROUNDBIG() -- round a double to intptr_t
 
 NULL     -- pointer to nothing, a constant
 EOS      -- end of string, a constant '\0'
@@ -45,6 +46,8 @@ EXIT(n)  -- calls exit(n) after shutting down/deallocating resources
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
+#include <inttypes.h>
 
 #if HAS_STDLIB_H
 #include <stdlib.h>
@@ -178,11 +181,14 @@ public void EXIT(int);
 MALLOC is not defined!
 #endif
 
-#define ROUND(x) ((long) ((x) + 0.5))
-
-/* for compatibility */
+#define ROUND32(x) ((int) ((x) + 0.5))
+#define ROUNDBIG(x) ((int64_t) ((x) + 0.5))
+/* With the addition of these 2 functions, we never
+   "NEED_ROUND" and trying to use round will cause an error.
+  */
 #ifdef NEED_ROUND
-#define round ROUND
+// #define round ROUND
+#define round you should not use round
 #endif
 
 #ifndef min

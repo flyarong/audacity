@@ -22,8 +22,6 @@ class wxSlider;
 class wxTextCtrl;
 class ShuttleGui;
 
-#define WAHWAH_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Wahwah") }
-
 class EffectWahwahState
 {
 public:
@@ -41,14 +39,16 @@ public:
 class EffectWahwah final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectWahwah();
    virtual ~EffectWahwah();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

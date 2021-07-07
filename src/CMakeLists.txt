@@ -1,536 +1,1414 @@
-#directory src
-project (Audacity)
-find_package(wxWidgets REQUIRED COMPONENTS net core base html qa adv)
-include(${wxWidgets_USE_FILE})
 
-set_property(GLOBAL PROPERTY USE_FOLDERS On) 
+set( TARGET Audacity )
+set( TARGET_ROOT ${topdir}/src )
 
+message( STATUS "========== Configuring ${TARGET} ==========" )
 
-# Needed for configwin.h included by Audacity.h
-include_directories(${top_dir}/win)
+# Allow modules to link against the Audacity executable
+set( CMAKE_ENABLE_EXPORTS ON )
 
-#include_directories(${top_dir}/lib-src/)
-include_directories(${top_dir}/include)
-include_directories(${top_dir}/src) # for AudacityHeaders.h
-include_directories(${top_dir}/lib-src/expat/lib)
-include_directories(${top_dir}/lib-src/FileDialog)
-include_directories(${top_dir}/lib-src/FileDialog/win)
-include_directories(${top_dir}/lib-src/ffmpeg)
-include_directories(${top_dir}/lib-src/ffmpeg/win32)
-include_directories(${top_dir}/lib-src/lib-widget-extra)
-include_directories(${top_dir}/lib-src/libid3tag) #for id3tag.h
-include_directories(${top_dir}/lib-src/libmad/msvc++)
-include_directories(${top_dir}/lib-src/libmad)
-include_directories(${top_dir}/lib-src/libnyquist)
-include_directories(${top_dir}/lib-src/libogg/include)
-include_directories(${top_dir}/lib-src/libscorealign)
-include_directories(${top_dir}/win/Projects/libsndfile) 
-include_directories(${top_dir}/lib-src/libsoxr/src) #really?  Src?
-include_directories(${top_dir}/lib-src/libvamp)
-include_directories(${top_dir}/lib-src/libvorbis/include)
-include_directories(${top_dir}/lib-src/lib-widget-extra)
-include_directories(${top_dir}/lib-src/portaudio-v19/include)
-include_directories(${top_dir}/lib-src/portmixer/include)
-include_directories(${top_dir}/lib-src/portsmf)
-include_directories(${top_dir}/lib-src/sbsms/include)
-include_directories(${top_dir}/lib-src/soundtouch/include)
-include_directories(${top_dir}/lib-src/twolame/libtwolame)
-include_directories(${top_dir}/lib-src/portmidi/pm_common)
-include_directories(${top_dir}/lib-src/portmidi/porttime)
-include_directories(${top_dir}/lib-src/lv2/lilv)
-include_directories(${top_dir}/lib-src/lv2/lv2)
-include_directories(${top_dir}/lib-src/lv2/suil)
-include_directories(${top_dir}/lib-src/lame)
+add_executable( ${TARGET} )
+add_dependencies( ${TARGET} locale )
+add_dependencies( ${TARGET} nyquist )
+add_dependencies( ${TARGET} plug-ins )
 
-#if(MSVC)
-    add_definitions(/FI"AudacityHeaders.h")
-#else()
-    # GCC or Clang
-#    add_definitions(-include AudacityHeaders.h)
-#endif()
+def_vars()
 
-
-
-
-# Consider moving many of these # defines to Audacity.h.
-# disable warning of insecure functions like getEnv
-add_definitions( -D_CRT_SECURE_NO_WARNINGS )
-
-add_definitions( -DBUILDING_AUDACITY )
-add_definitions( -DXML_STATIC )
-add_definitions( -D__STDC_CONSTANT_MACROS )
-add_definitions( -DWXINTL_NO_GETTEXT_MACRO )
-add_definitions( -DWXUSINGDLL )
-add_definitions( -D__WXMSW__ )
-add_definitions( -DwxDEBUG_LEVEL=0 )
-add_definitions( -DNDEBUG )
-add_definitions( -DWIN32 )
-add_definitions( -DSTRICT )
-
-
-
-
-# disable warning of deprecated features.
-# NB we may want this ON for better wx code style.
-add_compile_options(/wd4996)
-
-
-
-
-set( SOURCE 
-   ${CMAKE_SOURCE_DIRECTORY}AudacityHeaders.cpp  #first so cotire can precompile
-   ${CMAKE_SOURCE_DIRECTORY}AboutDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}AColor.cpp
-   ${CMAKE_SOURCE_DIRECTORY}AudacityApp.cpp
-   ${CMAKE_SOURCE_DIRECTORY}AudacityException.cpp
-   ${CMAKE_SOURCE_DIRECTORY}AudacityLogger.cpp
-   ${CMAKE_SOURCE_DIRECTORY}AudioIO.cpp
-   ${CMAKE_SOURCE_DIRECTORY}AutoRecovery.cpp
-   ${CMAKE_SOURCE_DIRECTORY}BatchCommandDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}BatchCommands.cpp
-   ${CMAKE_SOURCE_DIRECTORY}BatchProcessDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Benchmark.cpp
-   ${CMAKE_SOURCE_DIRECTORY}BlockFile.cpp
-   #${CMAKE_SOURCE_DIRECTORY}CrossFade.cpp # abandoned code.
-   ${CMAKE_SOURCE_DIRECTORY}Dependencies.cpp
-   ${CMAKE_SOURCE_DIRECTORY}DeviceChange.cpp
-   ${CMAKE_SOURCE_DIRECTORY}DeviceManager.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Diags.cpp
-   ${CMAKE_SOURCE_DIRECTORY}DirManager.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Dither.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Envelope.cpp
-   ${CMAKE_SOURCE_DIRECTORY}FFmpeg.cpp
-   ${CMAKE_SOURCE_DIRECTORY}FFT.cpp
-   ${CMAKE_SOURCE_DIRECTORY}FileException.cpp
-   ${CMAKE_SOURCE_DIRECTORY}FileFormats.cpp
-   ${CMAKE_SOURCE_DIRECTORY}FileIO.cpp
-   ${CMAKE_SOURCE_DIRECTORY}FileNames.cpp
-   ${CMAKE_SOURCE_DIRECTORY}FreqWindow.cpp
-   ${CMAKE_SOURCE_DIRECTORY}HelpText.cpp
-   ${CMAKE_SOURCE_DIRECTORY}HistoryWindow.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ImageManipulation.cpp
-   ${CMAKE_SOURCE_DIRECTORY}InconsistencyException.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Internat.cpp
-   ${CMAKE_SOURCE_DIRECTORY}InterpolateAudio.cpp
-   ${CMAKE_SOURCE_DIRECTORY}LabelDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}LabelTrack.cpp
-   ${CMAKE_SOURCE_DIRECTORY}LangChoice.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Languages.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Legacy.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Lyrics.cpp
-   ${CMAKE_SOURCE_DIRECTORY}LyricsWindow.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Matrix.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Menus.cpp
-   ${CMAKE_SOURCE_DIRECTORY}#MenusMac.cpp   # Not wanted on Windows.
-   ${CMAKE_SOURCE_DIRECTORY}Mix.cpp
-   ${CMAKE_SOURCE_DIRECTORY}MixerBoard.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ModuleManager.cpp
-   ${CMAKE_SOURCE_DIRECTORY}NoteTrack.cpp
-   ${CMAKE_SOURCE_DIRECTORY}PitchName.cpp
-   ${CMAKE_SOURCE_DIRECTORY}PlatformCompatibility.cpp
-   ${CMAKE_SOURCE_DIRECTORY}PluginManager.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Prefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Printing.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Profiler.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Project.cpp
-   ${CMAKE_SOURCE_DIRECTORY}RealFFTf.cpp
-   ${CMAKE_SOURCE_DIRECTORY}RealFFTf48x.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Resample.cpp
-   ${CMAKE_SOURCE_DIRECTORY}RingBuffer.cpp
-   ${CMAKE_SOURCE_DIRECTORY}SampleFormat.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Screenshot.cpp
-   ${CMAKE_SOURCE_DIRECTORY}SelectedRegion.cpp
-   ${CMAKE_SOURCE_DIRECTORY}SelectionState.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Sequence.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Shuttle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ShuttleGui.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ShuttlePrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Snap.cpp
-   ${CMAKE_SOURCE_DIRECTORY}SoundActivatedRecord.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Spectrum.cpp
-   ${CMAKE_SOURCE_DIRECTORY}SplashDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}SseMathFuncs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Tags.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Theme.cpp
-   ${CMAKE_SOURCE_DIRECTORY}TimeDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}TimerRecordDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}TimeTrack.cpp
-   ${CMAKE_SOURCE_DIRECTORY}Track.cpp
-   ${CMAKE_SOURCE_DIRECTORY}TrackArtist.cpp
-   ${CMAKE_SOURCE_DIRECTORY}TrackPanel.cpp
-   ${CMAKE_SOURCE_DIRECTORY}TrackPanelAx.cpp
-   ${CMAKE_SOURCE_DIRECTORY}TrackPanelResizeHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}TrackPanelResizerCell.cpp
-   ${CMAKE_SOURCE_DIRECTORY}UIHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}UndoManager.cpp
-   ${CMAKE_SOURCE_DIRECTORY}UserException.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ViewInfo.cpp
-   ${CMAKE_SOURCE_DIRECTORY}VoiceKey.cpp
-   ${CMAKE_SOURCE_DIRECTORY}WaveClip.cpp
-   ${CMAKE_SOURCE_DIRECTORY}WaveTrack.cpp
-   ${CMAKE_SOURCE_DIRECTORY}WrappedType.cpp
-   #An anomoly - a source file plucked from a lib.
-   ${top_dir}/lib-src/lib-widget-extra/NonGuiThread.cpp
-)
-
-# We're not yet adding each subdirectory.
-# instead we do what we would do there here.
-#add_subdirectory( blockfile )
-set( BLOCKFILE_SOURCE
-   ${CMAKE_SOURCE_DIRECTORY}blockfile/LegacyAliasBlockFile.cpp
-   ${CMAKE_SOURCE_DIRECTORY}blockfile/LegacyBlockFile.cpp
-   ${CMAKE_SOURCE_DIRECTORY}blockfile/NotYetAvailableException.cpp
-   ${CMAKE_SOURCE_DIRECTORY}blockfile/ODDecodeBlockFile.cpp
-   ${CMAKE_SOURCE_DIRECTORY}blockfile/ODPCMAliasBlockFile.cpp
-   ${CMAKE_SOURCE_DIRECTORY}blockfile/PCMAliasBlockFile.cpp
-   ${CMAKE_SOURCE_DIRECTORY}blockfile/SilentBlockFile.cpp
-   ${CMAKE_SOURCE_DIRECTORY}blockfile/SimpleBlockFile.cpp
-)   
-source_group( blockfile FILES ${BLOCKFILE_SOURCE} )
-
-
-#add_subdirectory( commands )
-set( COMMANDS_SOURCE
-   ${CMAKE_SOURCE_DIRECTORY}commands/AppCommandEvent.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/AudacityCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/BatchEvalCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/Command.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/CommandBuilder.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/CommandContext.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/CommandDirectory.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/CommandHandler.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/CommandManager.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/CommandSignature.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/CommandTargets.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/CommandType.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/CompareAudioCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/Demo.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/DragCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/GetInfoCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/GetTrackInfoCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/HelpCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/ImportExportCommands.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/Keyboard.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/LoadCommands.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/MessageCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/OpenSaveCommands.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/PreferenceCommands.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/ResponseQueue.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/ScreenshotCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/ScriptCommandRelay.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/SelectCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/SetClipCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/SetEnvelopeCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/SetLabelCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/SetProjectCommand.cpp
-   ${CMAKE_SOURCE_DIRECTORY}commands/SetTrackInfoCommand.cpp
-)
-source_group( commands FILES ${COMMANDS_SOURCE} )
-
-#add_subdirectory( effects )
-set( EFFECTS_SOURCE
-   ${CMAKE_SOURCE_DIRECTORY}effects/Amplify.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/AutoDuck.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/BassTreble.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Biquad.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/ChangePitch.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/ChangeSpeed.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/ChangeTempo.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/ClickRemoval.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Compressor.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Contrast.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Distortion.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/DtmfGen.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Echo.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Effect.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/EffectManager.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/EffectRack.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Equalization.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Equalization48x.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Fade.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/FindClipping.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Generator.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Invert.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Leveller.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/LoadEffects.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Noise.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/NoiseReduction.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/NoiseRemoval.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Normalize.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Paulstretch.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Phaser.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Repair.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Repeat.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Reverb.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Reverse.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/SBSMSEffect.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/ScienFilter.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/ScoreAlignDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Silence.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/SimpleMono.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/SoundTouchEffect.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/StereoToMono.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/TimeScale.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/TimeWarper.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/ToneGen.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/TruncSilence.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/TwoPassSimpleMono.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/Wahwah.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/audiounits/AudioUnitEffect.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/ladspa/LadspaEffect.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/lv2/LoadLV2.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/lv2/LV2Effect.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/nyquist/LoadNyquist.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/nyquist/Nyquist.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/vamp/LoadVamp.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/vamp/VampEffect.cpp
-   #${CMAKE_SOURCE_DIRECTORY}effects/VST/VSTControlGTK.cpp #Not for Windows.
-   ${CMAKE_SOURCE_DIRECTORY}effects/VST/VSTControlMSW.cpp
-   ${CMAKE_SOURCE_DIRECTORY}effects/VST/VSTEffect.cpp
-)
-source_group( effects FILES ${EFFECTS_SOURCE} )
-
-#add_subdirectory( export )
-set( EXPORT_SOURCE
-   ${CMAKE_SOURCE_DIRECTORY}export/Export.cpp
-   ${CMAKE_SOURCE_DIRECTORY}export/ExportCL.cpp
-   ${CMAKE_SOURCE_DIRECTORY}export/ExportFFmpeg.cpp
-   ${CMAKE_SOURCE_DIRECTORY}export/ExportFFmpegDialogs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}export/ExportFLAC.cpp
-   ${CMAKE_SOURCE_DIRECTORY}export/ExportMP2.cpp
-   ${CMAKE_SOURCE_DIRECTORY}export/ExportMP3.cpp
-   ${CMAKE_SOURCE_DIRECTORY}export/ExportMultiple.cpp
-   ${CMAKE_SOURCE_DIRECTORY}export/ExportOGG.cpp
-   ${CMAKE_SOURCE_DIRECTORY}export/ExportPCM.cpp
-)
-source_group( export FILES ${EXPORT_SOURCE} )
-
-#add_subdirectory( import )
-set( IMPORT_SOURCE
-   ${CMAKE_SOURCE_DIRECTORY}import/FormatClassifier.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/Import.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/ImportFFmpeg.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/ImportFLAC.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/ImportGStreamer.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/ImportLOF.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/ImportMIDI.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/ImportMP3.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/ImportOGG.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/ImportPCM.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/ImportQT.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/ImportRaw.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/MultiFormatReader.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/RawAudioGuess.cpp
-   ${CMAKE_SOURCE_DIRECTORY}import/SpecPowerMeter.cpp
-)
-source_group( import FILES ${IMPORT_SOURCE} )
-
-#add_subdirectory( ondemand )
-set( ONDEMAND_SOURCE
-   ${CMAKE_SOURCE_DIRECTORY}ondemand/ODComputeSummaryTask.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ondemand/ODDecodeFFmpegTask.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ondemand/ODDecodeFlacTask.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ondemand/ODDecodeTask.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ondemand/ODManager.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ondemand/ODTask.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ondemand/ODTaskThread.cpp
-   ${CMAKE_SOURCE_DIRECTORY}ondemand/ODWaveTrackTaskQueue.cpp
-)
-source_group( ondemand FILES ${ONDEMAND_SOURCE} )
-
-#add_subdirectory( prefs )
-set( PREFS_SOURCE
-   ${CMAKE_SOURCE_DIRECTORY}prefs/BatchPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/DevicePrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/DirectoriesPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/EffectsPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/ExtImportPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/GUIPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/ImportExportPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/KeyConfigPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/LibraryPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/MidiIOPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/ModulePrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/MousePrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/PlaybackPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/PrefsDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/ProjectsPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/QualityPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/RecordingPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/SpectrogramSettings.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/SpectrumPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/ThemePrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/TracksBehaviorsPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/TracksPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/WarningsPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/WaveformPrefs.cpp
-   ${CMAKE_SOURCE_DIRECTORY}prefs/WaveformSettings.cpp
-)
-source_group( prefs FILES ${PREFS_SOURCE} )
-
-#add_subdirectory( toolbars )
-set( TOOLBARS_SOURCE
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/ControlToolBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/DeviceToolBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/EditToolBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/MeterToolBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/MixerToolBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/ScrubbingToolBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/SelectionBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/SpectralSelectionBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/ToolBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/ToolDock.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/ToolManager.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/ToolsToolBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}toolbars/TranscriptionToolBar.cpp
-)
-source_group( toolbars FILES ${TOOLBARS_SOURCE} )
-
-#add_subdirectory( tracks )
-set( TRACKS_SOURCE
-   ${CMAKE_SOURCE_DIRECTORY}tracks/labeltrack/ui/LabelDefaultClickHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/labeltrack/ui/LabelGlyphHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/labeltrack/ui/LabelTextHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/labeltrack/ui/LabelTrackControls.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/labeltrack/ui/LabelTrackUI.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/labeltrack/ui/LabelTrackVRulerControls.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/notetrack/ui/NoteTrackButtonHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/notetrack/ui/NoteTrackControls.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/notetrack/ui/NoteTrackSliderHandles.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/notetrack/ui/NoteTrackUI.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/notetrack/ui/NoteTrackVRulerControls.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/notetrack/ui/NoteTrackVZoomHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/notetrack/ui/StretchHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/ui/PlayableTrackButtonHandles.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/wavetrack/ui/CutlineHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/wavetrack/ui/SampleHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/wavetrack/ui/WaveTrackControls.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/wavetrack/ui/WaveTrackSliderHandles.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/wavetrack/ui/WaveTrackUI.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/wavetrack/ui/WaveTrackVRulerControls.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/playabletrack/wavetrack/ui/WaveTrackVZoomHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/timetrack/ui/TimeTrackControls.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/timetrack/ui/TimeTrackUI.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/timetrack/ui/TimeTrackVRulerControls.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/BackgroundCell.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/ButtonHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/CommonTrackPanelCell.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/EditCursorOverlay.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/EnvelopeHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/PlayIndicatorOverlay.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/Scrubbing.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/SelectHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/SliderHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/TimeShiftHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/TrackButtonHandles.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/TrackControls.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/TrackSelectHandle.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/TrackUI.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/TrackVRulerControls.cpp
-   ${CMAKE_SOURCE_DIRECTORY}tracks/ui/ZoomHandle.cpp
-)
-source_group( tracks FILES ${TRACKS_SOURCE} )
-
-#add_subdirectory( widgets )
-set( WIDGETS_SOURCE
-   ${CMAKE_SOURCE_DIRECTORY}widgets/AButton.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/ASlider.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/AttachableScrollBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/BackedPanel.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/ErrorDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/ExpandingToolBar.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/FileHistory.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/Grabber.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/Grid.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/HelpSystem.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/HtmlWindow.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/ImageRoll.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/KeyView.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/LinkingHtmlWindow.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/Meter.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/MultiDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/NumericTextCtrl.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/numformatter.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/Overlay.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/OverlayPanel.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/PopupMenuTable.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/ProgressDialog.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/Ruler.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/valnum.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/Warning.cpp
-   ${CMAKE_SOURCE_DIRECTORY}widgets/wxPanelWrapper.cpp
-)
-source_group( widgets FILES ${WIDGETS_SOURCE} )
-
-#add_subdirectory( xml )
-set( XML_SOURCE
-   ${CMAKE_SOURCE_DIRECTORY}xml/XMLFileReader.cpp
-   ${CMAKE_SOURCE_DIRECTORY}xml/XMLTagHandler.cpp
-   ${CMAKE_SOURCE_DIRECTORY}xml/XMLWriter.cpp
-)
-source_group( xml FILES ${XML_SOURCE} )
-
-set( SOURCE 
-   ${SOURCE}
-   ${BLOCKFILE_SOURCE}
-   ${COMMANDS_SOURCE}
-   ${EFFECTS_SOURCE}
-   ${EXPORT_SOURCE}
-   ${IMPORT_SOURCE}
-   ${ONDEMAND_SOURCE}
-   ${PREFS_SOURCE}
-   ${TOOLBARS_SOURCE}
-   ${TRACKS_SOURCE}
-   ${WIDGETS_SOURCE}
-   ${XML_SOURCE}
+# Add a target that will provide the git revision info
+# whenever it changes.  (Must be done at build time, not
+# configuration time.)
+if( GIT_FOUND )
+   add_custom_target(
+      version
+      COMMAND
+         ${CMAKE_COMMAND} -D GIT="${GIT_EXECUTABLE}"
+                          -D "_PRVDIR=${_PRVDIR}"
+                          -P "${AUDACITY_MODULE_PATH}/Version.cmake"
+      WORKING_DIRECTORY
+         ${topdir}
    )
 
-add_executable( Audacity ${SOURCE} )
+   add_dependencies( ${TARGET} version )
+endif()
 
-message( STATUS "link directory is: ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/Debug" )
-message( STATUS "wxWidgets libraries in: ${wxWidgets_LIBRARIES}" )
+# Handle Audio Units option
+if( CMAKE_SYSTEM_NAME MATCHES "Darwin" )
+   cmd_option(
+      ${_OPT}use_audio_units
+      "Use Audio Units plug-in support [on, off]"
+      ON
+   )
+   set( USE_AUDIO_UNITS ${${_OPT}use_audio_units} CACHE INTERNAL "" )
+endif()
 
-target_link_libraries(Audacity
-${wxWidgets_LIBRARIES}
-expat
-FileDialog
-FLACXX-static
-libsndfile
-libsoxr
-portaudio_static
-portmidi-static
+# Detect, which version of FileDialog to use for
+# We always assume that GTK is used on platforms other than Windows and macOS,
+# as there is no other implementation avalaible now
+if( CMAKE_SYSTEM_NAME MATCHES "Darwin" )
+   set( wxIS_MAC on )
+elseif( CMAKE_SYSTEM_NAME MATCHES "Windows" )
+   set ( wxIS_WIN on )
+else()
+   set ( wxIS_GTK on)
+endif()
+
+# Handle Ladspa option
+cmd_option(
+   ${_OPT}use_ladspa
+   "Use LADSPA plug-in support [on, off]"
+   ON
 )
-if(MSVC)
-    set_property(TARGET Audacity APPEND PROPERTY LINK_FLAGS "/SUBSYSTEM:WINDOWS /LIBPATH:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/Debug")
-    #set_property(TARGET Audacity APPEND PROPERTY LINK_FLAGS )
+set( USE_LADSPA ${${_OPT}use_ladspa} CACHE INTERNAL "" )
+
+# Handle VST option
+cmd_option(
+   ${_OPT}use_vst
+   "Use VST2 plug-in support [on, off]"
+   ON
+)
+set( USE_VST ${${_OPT}use_vst} CACHE INTERNAL "" )
+
+#
+#
+#
+list( APPEND SOURCES
+   PRIVATE
+      AColor.cpp
+      AColor.h
+      AColorResources.h
+      ActiveProjects.cpp
+      ActiveProjects.h
+      AboutDialog.cpp
+      AboutDialog.h
+      AdornedRulerPanel.cpp
+      AdornedRulerPanel.h
+      AllThemeResources.cpp
+      AllThemeResources.h
+      AttachedVirtualFunction.h
+      AudacityApp.cpp
+      AudacityApp.h
+      $<$<BOOL:${wxIS_MAC}>:AudacityApp.mm>
+      AudacityException.cpp
+      AudacityException.h
+      AudacityFileConfig.cpp
+      AudacityFileConfig.h
+      AudacityHeaders.cpp
+      AudacityHeaders.h
+      AudacityLogger.cpp
+      AudacityLogger.h
+      AudioIO.cpp
+      AudioIO.h
+      AudioIOBase.cpp
+      AudioIOBase.h
+      AudioIOListener.h
+      AutoRecoveryDialog.cpp
+      AutoRecoveryDialog.h
+      BatchCommandDialog.cpp
+      BatchCommandDialog.h
+      BatchCommands.cpp
+      BatchCommands.h
+      BatchProcessDialog.cpp
+      BatchProcessDialog.h
+      Benchmark.cpp
+      Benchmark.h
+      CellularPanel.cpp
+      CellularPanel.h
+      ClassicThemeAsCeeCode.h
+      ClientData.h
+      ClientDataHelpers.h
+      Clipboard.cpp
+      Clipboard.h
+      CommonCommandFlags.cpp
+      CommonCommandFlags.h
+      CrashReport.cpp
+      CrashReport.h
+      DarkThemeAsCeeCode.h
+      DBConnection.cpp
+      DBConnection.h
+      DeviceChange.cpp
+      DeviceChange.h
+      DeviceManager.cpp
+      DeviceManager.h
+      Diags.cpp
+      Diags.h
+      Dither.cpp
+      Dither.h
+      Envelope.cpp
+      Envelope.h
+      EnvelopeEditor.cpp
+      EnvelopeEditor.h
+      FFT.cpp
+      FFT.h
+      FFmpeg.cpp
+      FFmpeg.h
+      FileException.cpp
+      FileException.h
+      FileFormats.cpp
+      FileFormats.h
+      FileIO.cpp
+      FileIO.h
+      FileNames.cpp
+      FileNames.h
+      FreqWindow.cpp
+      FreqWindow.h
+      HelpText.cpp
+      HelpText.h
+      HiContrastThemeAsCeeCode.h
+      HistoryWindow.cpp
+      HistoryWindow.h
+      HitTestResult.h
+      ImageManipulation.cpp
+      ImageManipulation.h
+      InconsistencyException.cpp
+      InconsistencyException.h
+      InterpolateAudio.cpp
+      InterpolateAudio.h
+      KeyboardCapture.cpp
+      KeyboardCapture.h
+      LabelDialog.cpp
+      LabelDialog.h
+      LabelTrack.cpp
+      LabelTrack.h
+      LangChoice.cpp
+      LangChoice.h
+      Legacy.cpp
+      Legacy.h
+      LightThemeAsCeeCode.h
+      Lyrics.cpp
+      Lyrics.h
+      LyricsWindow.cpp
+      LyricsWindow.h
+      MacroMagic.h
+      Matrix.cpp
+      Matrix.h
+      Menus.cpp
+      Menus.h
+      Mix.cpp
+      Mix.h
+      MixerBoard.cpp
+      MixerBoard.h
+      ModuleManager.cpp
+      ModuleManager.h
+      ModuleSettings.cpp
+      ModuleSettings.h
+      NoteTrack.cpp
+      NoteTrack.h
+      NumberScale.h
+      PitchName.cpp
+      PitchName.h
+      PlatformCompatibility.cpp
+      PlatformCompatibility.h
+      PlaybackSchedule.cpp
+      PlaybackSchedule.h
+      PluginManager.cpp
+      PluginManager.h
+      PluginRegistrationDialog.cpp
+      PluginRegistrationDialog.h
+      Prefs.cpp
+      Prefs.h
+      Printing.cpp
+      Printing.h
+      Profiler.cpp
+      Profiler.h
+      Project.cpp
+      Project.h
+      ProjectAudioIO.cpp
+      ProjectAudioIO.h
+      ProjectAudioManager.cpp
+      ProjectAudioManager.h
+      ProjectFileIO.cpp
+      ProjectFileIO.h
+      ProjectFileIORegistry.cpp
+      ProjectFileIORegistry.h
+      ProjectFileManager.cpp
+      ProjectFileManager.h
+      ProjectHistory.cpp
+      ProjectHistory.h
+      ProjectManager.cpp
+      ProjectManager.h
+      ProjectSelectionManager.cpp
+      ProjectSelectionManager.h
+      ProjectSerializer.cpp
+      ProjectSerializer.h
+      ProjectSettings.cpp
+      ProjectSettings.h
+      ProjectStatus.cpp
+      ProjectStatus.h
+      ProjectWindow.cpp
+      ProjectWindow.h
+      ProjectWindowBase.cpp
+      ProjectWindowBase.h
+      RealFFTf.cpp
+      RealFFTf.h
+      RealFFTf48x.cpp
+      RealFFTf48x.h
+      RefreshCode.h
+      Registrar.h
+      Registry.cpp
+      Registry.h
+      Resample.cpp
+      Resample.h
+      RingBuffer.cpp
+      RingBuffer.h
+      SampleBlock.cpp
+      SampleBlock.h
+      SampleFormat.cpp
+      SampleFormat.h
+      Screenshot.cpp
+      Screenshot.h
+      SelectUtilities.cpp
+      SelectUtilities.h
+      SelectedRegion.cpp
+      SelectedRegion.h
+      SelectionState.cpp
+      SelectionState.h
+      Sequence.cpp
+      Sequence.h
+      Shuttle.cpp
+      Shuttle.h
+      ShuttleGetDefinition.cpp
+      ShuttleGetDefinition.h
+      ShuttleGui.cpp
+      ShuttleGui.h
+      ShuttlePrefs.cpp
+      ShuttlePrefs.h
+      Snap.cpp
+      Snap.h
+      SoundActivatedRecord.cpp
+      SoundActivatedRecord.h
+      Spectrum.cpp
+      Spectrum.h
+      SpectrumAnalyst.cpp
+      SpectrumAnalyst.h
+      SplashDialog.cpp
+      SplashDialog.h
+      SqliteSampleBlock.cpp
+      SseMathFuncs.cpp
+      SseMathFuncs.h
+      Tags.cpp
+      Tags.h
+      TempDirectory.cpp
+      TempDirectory.h
+      Theme.cpp
+      Theme.h
+      ThemeAsCeeCode.h
+      TimeDialog.cpp
+      TimeDialog.h
+      TimeTrack.cpp
+      TimeTrack.h
+      TimerRecordDialog.cpp
+      TimerRecordDialog.h
+      Track.cpp
+      Track.h
+      TrackArtist.cpp
+      TrackArtist.h
+      TrackInfo.cpp
+      TrackInfo.h
+      TrackPanel.cpp
+      TrackPanel.h
+      TrackPanelAx.cpp
+      TrackPanelAx.h
+      TrackPanelCell.cpp
+      TrackPanelCell.h
+      TrackPanelDrawable.cpp
+      TrackPanelDrawable.h
+      TrackPanelDrawingContext.h
+      TrackPanelListener.h
+      TrackPanelMouseEvent.h
+      TrackPanelResizeHandle.cpp
+      TrackPanelResizeHandle.h
+      TrackPanelResizerCell.cpp
+      TrackPanelResizerCell.h
+      TrackUtilities.cpp
+      TrackUtilities.h
+      UIHandle.cpp
+      UIHandle.h
+      UndoManager.cpp
+      UndoManager.h
+      UserException.cpp
+      UserException.h
+      ViewInfo.cpp
+      ViewInfo.h
+      VoiceKey.cpp
+      VoiceKey.h
+      WaveClip.cpp
+      WaveClip.h
+      WaveTrack.cpp
+      WaveTrack.h
+      WaveTrackLocation.h
+      WrappedType.cpp
+      WrappedType.h
+      ZoomInfo.cpp
+      ZoomInfo.h
+      float_cast.h
+      wxFileNameWrapper.h
+
+      # Commands
+
+      commands/AppCommandEvent.cpp
+      commands/AppCommandEvent.h
+      commands/AudacityCommand.cpp
+      commands/AudacityCommand.h
+      commands/BatchEvalCommand.cpp
+      commands/BatchEvalCommand.h
+      commands/Command.cpp
+      commands/Command.h
+      commands/CommandBuilder.cpp
+      commands/CommandBuilder.h
+      commands/CommandContext.cpp
+      commands/CommandContext.h
+      commands/CommandDirectory.cpp
+      commands/CommandDirectory.h
+      commands/CommandFlag.h
+      commands/CommandFunctors.h
+      commands/CommandHandler.cpp
+      commands/CommandHandler.h
+      commands/CommandManager.cpp
+      commands/CommandManager.h
+      commands/CommandManagerWindowClasses.h
+      commands/CommandMisc.h
+      commands/CommandSignature.cpp
+      commands/CommandSignature.h
+      commands/CommandTargets.cpp
+      commands/CommandTargets.h
+      commands/CommandType.cpp
+      commands/CommandType.h
+      commands/CompareAudioCommand.cpp
+      commands/CompareAudioCommand.h
+      commands/Demo.cpp
+      commands/Demo.h
+      commands/DragCommand.cpp
+      commands/DragCommand.h
+      commands/GetInfoCommand.cpp
+      commands/GetInfoCommand.h
+      commands/GetTrackInfoCommand.cpp
+      commands/GetTrackInfoCommand.h
+      commands/HelpCommand.cpp
+      commands/HelpCommand.h
+      commands/ImportExportCommands.cpp
+      commands/ImportExportCommands.h
+      commands/Keyboard.cpp
+      commands/Keyboard.h
+      commands/LoadCommands.cpp
+      commands/LoadCommands.h
+      commands/MessageCommand.cpp
+      commands/MessageCommand.h
+      commands/OpenSaveCommands.cpp
+      commands/OpenSaveCommands.h
+      commands/PreferenceCommands.cpp
+      commands/PreferenceCommands.h
+      commands/ResponseQueue.cpp
+      commands/ResponseQueue.h
+      commands/ScreenshotCommand.cpp
+      commands/ScreenshotCommand.h
+      commands/ScriptCommandRelay.cpp
+      commands/ScriptCommandRelay.h
+      commands/SelectCommand.cpp
+      commands/SelectCommand.h
+      commands/SetClipCommand.cpp
+      commands/SetClipCommand.h
+      commands/SetEnvelopeCommand.cpp
+      commands/SetEnvelopeCommand.h
+      commands/SetLabelCommand.cpp
+      commands/SetLabelCommand.h
+      commands/SetProjectCommand.cpp
+      commands/SetProjectCommand.h
+      commands/SetTrackInfoCommand.cpp
+      commands/SetTrackInfoCommand.h
+      commands/Validators.h
+
+      # Built-in Effects
+
+      effects/Amplify.cpp
+      effects/Amplify.h
+      effects/AutoDuck.cpp
+      effects/AutoDuck.h
+      effects/BassTreble.cpp
+      effects/BassTreble.h
+      effects/Biquad.cpp
+      effects/Biquad.h
+      effects/ChangePitch.cpp
+      effects/ChangePitch.h
+      effects/ChangeSpeed.cpp
+      effects/ChangeSpeed.h
+      effects/ChangeTempo.cpp
+      effects/ChangeTempo.h
+      effects/ClickRemoval.cpp
+      effects/ClickRemoval.h
+      effects/Compressor.cpp
+      effects/Compressor.h
+      effects/Contrast.cpp
+      effects/Contrast.h
+      effects/Distortion.cpp
+      effects/Distortion.h
+      effects/DtmfGen.cpp
+      effects/DtmfGen.h
+      effects/EBUR128.cpp
+      effects/EBUR128.h
+      effects/Echo.cpp
+      effects/Echo.h
+      effects/Effect.cpp
+      effects/Effect.h
+      effects/EffectManager.cpp
+      effects/EffectManager.h
+      effects/EffectUI.cpp
+      effects/EffectUI.h
+      effects/Equalization.cpp
+      effects/Equalization.h
+      effects/Equalization48x.cpp
+      effects/Equalization48x.h
+      effects/Fade.cpp
+      effects/Fade.h
+      effects/FindClipping.cpp
+      effects/FindClipping.h
+      effects/Generator.cpp
+      effects/Generator.h
+      effects/Invert.cpp
+      effects/Invert.h
+      effects/LoadEffects.cpp
+      effects/LoadEffects.h
+      effects/Loudness.cpp
+      effects/Loudness.h
+      effects/Noise.cpp
+      effects/Noise.h
+      effects/NoiseReduction.cpp
+      effects/NoiseReduction.h
+      effects/NoiseRemoval.cpp
+      effects/NoiseRemoval.h
+      effects/Normalize.cpp
+      effects/Normalize.h
+      effects/Paulstretch.cpp
+      effects/Paulstretch.h
+      effects/Phaser.cpp
+      effects/Phaser.h
+      effects/RealtimeEffectManager.cpp
+      effects/RealtimeEffectManager.h
+      effects/Repair.cpp
+      effects/Repair.h
+      effects/Repeat.cpp
+      effects/Repeat.h
+      effects/Reverb.cpp
+      effects/Reverb.h
+      effects/Reverb_libSoX.h
+      effects/Reverse.cpp
+      effects/Reverse.h
+      effects/SBSMSEffect.cpp
+      effects/SBSMSEffect.h
+      effects/ScienFilter.cpp
+      effects/ScienFilter.h
+      effects/ScoreAlignDialog.cpp
+      effects/ScoreAlignDialog.h
+      effects/Silence.cpp
+      effects/Silence.h
+      effects/SimpleMono.cpp
+      effects/SimpleMono.h
+      effects/SoundTouchEffect.cpp
+      effects/SoundTouchEffect.h
+      effects/StereoToMono.cpp
+      effects/StereoToMono.h
+      effects/TimeScale.cpp
+      effects/TimeScale.h
+      effects/TimeWarper.cpp
+      effects/TimeWarper.h
+      effects/ToneGen.cpp
+      effects/ToneGen.h
+      effects/TruncSilence.cpp
+      effects/TruncSilence.h
+      effects/TwoPassSimpleMono.cpp
+      effects/TwoPassSimpleMono.h
+      effects/Wahwah.cpp
+      effects/Wahwah.h
+
+      # VST Effects
+
+      $<$<BOOL:${USE_VST}>:
+         effects/VST/VSTControl.h
+         effects/VST/VSTEffect.cpp
+         effects/VST/VSTEffect.h
+         effects/VST/aeffectx.h
+      >
+
+      $<$<AND:$<BOOL:${USE_VST}>,$<BOOL:${wxIS_GTK}>>:
+         effects/VST/VSTControlGTK.cpp
+         effects/VST/VSTControlGTK.h
+      >
+
+      $<$<AND:$<BOOL:${USE_VST}>,$<BOOL:${wxIS_WIN}>>:
+         effects/VST/VSTControlMSW.cpp
+         effects/VST/VSTControlMSW.h
+      >
+
+      $<$<AND:$<BOOL:${USE_VST}>,$<BOOL:${wxIS_MAC}>>:
+         effects/VST/VSTControlOSX.h
+         effects/VST/VSTControlOSX.mm
+      >
+
+      # Audio Unit Effects
+
+      $<$<AND:$<BOOL:${USE_AUDIO_UNITS}>,$<BOOL:${wxIS_MAC}>>:
+         effects/audiounits/AUControl.h
+         effects/audiounits/AUControl.mm
+         effects/audiounits/AudioUnitEffect.cpp
+         effects/audiounits/AudioUnitEffect.h
+      >
+
+      # Ladspa Effects
+
+      $<$<BOOL:${USE_LADSPA}>:
+         effects/ladspa/LadspaEffect.cpp
+         effects/ladspa/LadspaEffect.h
+         effects/ladspa/ladspa.h
+      >
+
+      # LV2 Effects
+
+      $<$<BOOL:${USE_LV2}>:
+         effects/lv2/LV2Effect.cpp
+         effects/lv2/LV2Effect.h
+         effects/lv2/LoadLV2.cpp
+         effects/lv2/LoadLV2.h
+         effects/lv2/NativeWindow.h
+         effects/lv2/lv2_external_ui.h
+         effects/lv2/zix/common.h
+         effects/lv2/zix/ring.cpp
+         effects/lv2/zix/ring.h
+      >
+
+      # Nyquist Effects
+
+      $<$<BOOL:${USE_NYQUIST}>:
+         effects/nyquist/LoadNyquist.cpp
+         effects/nyquist/LoadNyquist.h
+         effects/nyquist/Nyquist.cpp
+         effects/nyquist/Nyquist.h
+      >
+
+      # VAMP Effects
+
+      $<$<BOOL:${USE_VAMP}>:
+         effects/vamp/LoadVamp.cpp
+         effects/vamp/LoadVamp.h
+         effects/vamp/VampEffect.cpp
+         effects/vamp/VampEffect.h
+      >
+
+      # Export
+
+      export/Export.cpp
+      export/Export.h
+
+      # Standard exporters
+      export/ExportCL.cpp
+      export/ExportMP3.cpp
+      export/ExportMP3.h
+      export/ExportMultiple.cpp
+      export/ExportMultiple.h
+      export/ExportPCM.cpp
+
+      # Optional exporters
+      $<$<BOOL:${USE_FFMPEG}>:
+         export/ExportFFmpeg.cpp
+         export/ExportFFmpegDialogs.cpp
+         export/ExportFFmpegDialogs.h
+      >
+
+      $<$<BOOL:${USE_LIBFLAC}>:
+         export/ExportFLAC.cpp
+      >
+
+      $<$<BOOL:${USE_LIBTWOLAME}>:
+         export/ExportMP2.cpp
+      >
+
+      $<$<AND:$<BOOL:${USE_LIBOGG}>,$<BOOL:${USE_LIBVORBIS}>>:
+         export/ExportOGG.cpp
+      >
+
+      # Import
+
+      import/FormatClassifier.cpp
+      import/FormatClassifier.h
+      import/Import.cpp
+      import/Import.h
+      import/ImportForwards.h
+      import/MultiFormatReader.cpp
+      import/MultiFormatReader.h
+      import/RawAudioGuess.cpp
+      import/RawAudioGuess.h
+      import/SpecPowerMeter.cpp
+      import/SpecPowerMeter.h
+
+      # Standard importers
+
+      import/ImportAUP.cpp
+      import/ImportLOF.cpp
+      import/ImportPCM.cpp
+      import/ImportPlugin.h
+      import/ImportPlugin.cpp
+      import/ImportRaw.cpp
+      import/ImportRaw.h
+
+      # Optional importers
+
+      $<$<BOOL:${USE_FFMPEG}>:
+         import/ImportFFmpeg.cpp
+      >
+
+      $<$<BOOL:${USE_LIBFLAC}>:
+         import/ImportFLAC.cpp
+      >
+
+      $<$<BOOL:${USE_GSTREAMER}>:
+         import/ImportGStreamer.cpp
+      >
+
+      $<$<BOOL:${USE_MIDI}>:
+         import/ImportMIDI.cpp
+         import/ImportMIDI.h
+      >
+
+      $<$<BOOL:${USE_LIBMAD}>:
+         import/ImportMP3.cpp
+      >
+
+      $<$<AND:$<BOOL:${USE_LIBOGG}>,$<BOOL:${USE_LIBVORBIS}>>:
+         import/ImportOGG.cpp
+      >
+
+      # Menus
+
+      menus/ClipMenus.cpp
+      menus/EditMenus.cpp
+      menus/ExtraMenus.cpp
+      menus/FileMenus.cpp
+      menus/HelpMenus.cpp
+      menus/LabelMenus.cpp
+      menus/NavigationMenus.cpp
+      menus/PluginMenus.cpp
+      menus/SelectMenus.cpp
+      menus/ToolbarMenus.cpp
+      menus/TrackMenus.cpp
+      menus/TransportMenus.cpp
+      menus/ViewMenus.cpp
+      menus/WindowMenus.cpp
+
+      # Preferences
+
+      prefs/BatchPrefs.cpp
+      prefs/BatchPrefs.h
+      prefs/DevicePrefs.cpp
+      prefs/DevicePrefs.h
+      prefs/DirectoriesPrefs.cpp
+      prefs/DirectoriesPrefs.h
+      prefs/EffectsPrefs.cpp
+      prefs/EffectsPrefs.h
+      prefs/ExtImportPrefs.cpp
+      prefs/ExtImportPrefs.h
+      prefs/GUIPrefs.cpp
+      prefs/GUIPrefs.h
+      prefs/GUISettings.h
+      prefs/ImportExportPrefs.cpp
+      prefs/ImportExportPrefs.h
+      prefs/KeyConfigPrefs.cpp
+      prefs/KeyConfigPrefs.h
+      prefs/LibraryPrefs.cpp
+      prefs/LibraryPrefs.h
+      prefs/MidiIOPrefs.cpp
+      prefs/MidiIOPrefs.h
+      prefs/ModulePrefs.cpp
+      prefs/ModulePrefs.h
+      prefs/MousePrefs.cpp
+      prefs/MousePrefs.h
+      prefs/PlaybackPrefs.cpp
+      prefs/PlaybackPrefs.h
+      prefs/PrefsDialog.cpp
+      prefs/PrefsDialog.h
+      prefs/PrefsPanel.cpp
+      prefs/PrefsPanel.h
+      prefs/QualityPrefs.cpp
+      prefs/QualityPrefs.h
+      prefs/QualitySettings.cpp
+      prefs/QualitySettings.h
+      prefs/RecordingPrefs.cpp
+      prefs/RecordingPrefs.h
+      prefs/SpectrogramSettings.cpp
+      prefs/SpectrogramSettings.h
+      prefs/SpectrumPrefs.cpp
+      prefs/SpectrumPrefs.h
+      prefs/ThemePrefs.cpp
+      prefs/ThemePrefs.h
+      prefs/TracksBehaviorsPrefs.cpp
+      prefs/TracksBehaviorsPrefs.h
+      prefs/TracksPrefs.cpp
+      prefs/TracksPrefs.h
+      prefs/WarningsPrefs.cpp
+      prefs/WarningsPrefs.h
+      prefs/WaveformPrefs.cpp
+      prefs/WaveformPrefs.h
+      prefs/WaveformSettings.cpp
+      prefs/WaveformSettings.h
+
+      # Toolbars
+
+      toolbars/ControlToolBar.cpp
+      toolbars/ControlToolBar.h
+      toolbars/DeviceToolBar.cpp
+      toolbars/DeviceToolBar.h
+      toolbars/EditToolBar.cpp
+      toolbars/EditToolBar.h
+      toolbars/MeterToolBar.cpp
+      toolbars/MeterToolBar.h
+      toolbars/MixerToolBar.cpp
+      toolbars/MixerToolBar.h
+      toolbars/ScrubbingToolBar.cpp
+      toolbars/ScrubbingToolBar.h
+      toolbars/SelectionBar.cpp
+      toolbars/SelectionBar.h
+      toolbars/SelectionBarListener.h
+      toolbars/SpectralSelectionBar.cpp
+      toolbars/SpectralSelectionBar.h
+      toolbars/SpectralSelectionBarListener.h
+      toolbars/TimeToolBar.cpp
+      toolbars/TimeToolBar.h
+      toolbars/ToolBar.cpp
+      toolbars/ToolBar.h
+      toolbars/ToolDock.cpp
+      toolbars/ToolDock.h
+      toolbars/ToolManager.cpp
+      toolbars/ToolManager.h
+      toolbars/ToolsToolBar.cpp
+      toolbars/ToolsToolBar.h
+      toolbars/TranscriptionToolBar.cpp
+      toolbars/TranscriptionToolBar.h
+
+      # Tracks
+
+      tracks/labeltrack/ui/LabelDefaultClickHandle.cpp
+      tracks/labeltrack/ui/LabelDefaultClickHandle.h
+      tracks/labeltrack/ui/LabelGlyphHandle.cpp
+      tracks/labeltrack/ui/LabelGlyphHandle.h
+      tracks/labeltrack/ui/LabelTextHandle.cpp
+      tracks/labeltrack/ui/LabelTextHandle.h
+      tracks/labeltrack/ui/LabelTrackControls.cpp
+      tracks/labeltrack/ui/LabelTrackControls.h
+      tracks/labeltrack/ui/LabelTrackShifter.cpp
+      tracks/labeltrack/ui/LabelTrackVRulerControls.cpp
+      tracks/labeltrack/ui/LabelTrackVRulerControls.h
+      tracks/labeltrack/ui/LabelTrackView.cpp
+      tracks/labeltrack/ui/LabelTrackView.h
+      tracks/playabletrack/notetrack/ui/NoteTrackButtonHandle.cpp
+      tracks/playabletrack/notetrack/ui/NoteTrackButtonHandle.h
+      tracks/playabletrack/notetrack/ui/NoteTrackControls.cpp
+      tracks/playabletrack/notetrack/ui/NoteTrackControls.h
+      tracks/playabletrack/notetrack/ui/NoteTrackShifter.cpp
+      tracks/playabletrack/notetrack/ui/NoteTrackSliderHandles.cpp
+      tracks/playabletrack/notetrack/ui/NoteTrackSliderHandles.h
+      tracks/playabletrack/notetrack/ui/NoteTrackVRulerControls.cpp
+      tracks/playabletrack/notetrack/ui/NoteTrackVRulerControls.h
+      tracks/playabletrack/notetrack/ui/NoteTrackVZoomHandle.cpp
+      tracks/playabletrack/notetrack/ui/NoteTrackVZoomHandle.h
+      tracks/playabletrack/notetrack/ui/NoteTrackView.cpp
+      tracks/playabletrack/notetrack/ui/NoteTrackView.h
+      tracks/playabletrack/notetrack/ui/StretchHandle.cpp
+      tracks/playabletrack/notetrack/ui/StretchHandle.h
+      tracks/playabletrack/ui/PlayableTrackButtonHandles.cpp
+      tracks/playabletrack/ui/PlayableTrackButtonHandles.h
+      tracks/playabletrack/ui/PlayableTrackControls.cpp
+      tracks/playabletrack/ui/PlayableTrackControls.h
+      tracks/playabletrack/wavetrack/ui/CutlineHandle.cpp
+      tracks/playabletrack/wavetrack/ui/CutlineHandle.h
+      tracks/playabletrack/wavetrack/ui/SampleHandle.cpp
+      tracks/playabletrack/wavetrack/ui/SampleHandle.h
+      tracks/playabletrack/wavetrack/ui/SpectrumVRulerControls.cpp
+      tracks/playabletrack/wavetrack/ui/SpectrumVRulerControls.h
+      tracks/playabletrack/wavetrack/ui/SpectrumVZoomHandle.cpp
+      tracks/playabletrack/wavetrack/ui/SpectrumVZoomHandle.h
+      tracks/playabletrack/wavetrack/ui/SpectrumView.cpp
+      tracks/playabletrack/wavetrack/ui/SpectrumView.h
+      tracks/playabletrack/wavetrack/ui/WaveTrackControls.cpp
+      tracks/playabletrack/wavetrack/ui/WaveTrackControls.h
+      tracks/playabletrack/wavetrack/ui/WaveTrackShifter.cpp
+      tracks/playabletrack/wavetrack/ui/WaveTrackSliderHandles.cpp
+      tracks/playabletrack/wavetrack/ui/WaveTrackSliderHandles.h
+      tracks/playabletrack/wavetrack/ui/WaveTrackVRulerControls.cpp
+      tracks/playabletrack/wavetrack/ui/WaveTrackVRulerControls.h
+      tracks/playabletrack/wavetrack/ui/WaveTrackVZoomHandle.cpp
+      tracks/playabletrack/wavetrack/ui/WaveTrackVZoomHandle.h
+      tracks/playabletrack/wavetrack/ui/WaveTrackView.cpp
+      tracks/playabletrack/wavetrack/ui/WaveTrackView.h
+      tracks/playabletrack/wavetrack/ui/WaveTrackViewConstants.cpp
+      tracks/playabletrack/wavetrack/ui/WaveTrackViewConstants.h
+      tracks/playabletrack/wavetrack/ui/WaveformVRulerControls.cpp
+      tracks/playabletrack/wavetrack/ui/WaveformVRulerControls.h
+      tracks/playabletrack/wavetrack/ui/WaveformVZoomHandle.cpp
+      tracks/playabletrack/wavetrack/ui/WaveformVZoomHandle.h
+      tracks/playabletrack/wavetrack/ui/WaveformView.cpp
+      tracks/playabletrack/wavetrack/ui/WaveformView.h
+      tracks/timetrack/ui/TimeTrackControls.cpp
+      tracks/timetrack/ui/TimeTrackControls.h
+      tracks/timetrack/ui/TimeTrackVRulerControls.cpp
+      tracks/timetrack/ui/TimeTrackVRulerControls.h
+      tracks/timetrack/ui/TimeTrackVZoomHandle.cpp
+      tracks/timetrack/ui/TimeTrackVZoomHandle.h
+      tracks/timetrack/ui/TimeTrackView.cpp
+      tracks/timetrack/ui/TimeTrackView.h
+
+      # Tracks UI
+
+      tracks/ui/BackgroundCell.cpp
+      tracks/ui/BackgroundCell.h
+      tracks/ui/ButtonHandle.cpp
+      tracks/ui/ButtonHandle.h
+      tracks/ui/CommonTrackControls.cpp
+      tracks/ui/CommonTrackControls.h
+      tracks/ui/CommonTrackPanelCell.cpp
+      tracks/ui/CommonTrackPanelCell.h
+      tracks/ui/CommonTrackView.cpp
+      tracks/ui/CommonTrackView.h
+      tracks/ui/EditCursorOverlay.cpp
+      tracks/ui/EditCursorOverlay.h
+      tracks/ui/EnvelopeHandle.cpp
+      tracks/ui/EnvelopeHandle.h
+      tracks/ui/PlayIndicatorOverlay.cpp
+      tracks/ui/PlayIndicatorOverlay.h
+      tracks/ui/ScrubUI.cpp
+      tracks/ui/ScrubUI.h
+      tracks/ui/Scrubbing.cpp
+      tracks/ui/Scrubbing.h
+      tracks/ui/SelectHandle.cpp
+      tracks/ui/SelectHandle.h
+      tracks/ui/SliderHandle.cpp
+      tracks/ui/SliderHandle.h
+      tracks/ui/TimeShiftHandle.cpp
+      tracks/ui/TimeShiftHandle.h
+      tracks/ui/TrackButtonHandles.cpp
+      tracks/ui/TrackButtonHandles.h
+      tracks/ui/TrackControls.cpp
+      tracks/ui/TrackControls.h
+      tracks/ui/TrackSelectHandle.cpp
+      tracks/ui/TrackSelectHandle.h
+      tracks/ui/TrackVRulerControls.cpp
+      tracks/ui/TrackVRulerControls.h
+      tracks/ui/TrackView.cpp
+      tracks/ui/TrackView.h
+      tracks/ui/ZoomHandle.cpp
+      tracks/ui/ZoomHandle.h
+
+      # Widgets
+
+      widgets/AButton.cpp
+      widgets/AButton.h
+      widgets/ASlider.cpp
+      widgets/ASlider.h
+      widgets/AttachableScrollBar.cpp
+      widgets/AttachableScrollBar.h
+      widgets/AudacityMessageBox.cpp
+      widgets/AudacityMessageBox.h
+      widgets/BackedPanel.cpp
+      widgets/BackedPanel.h
+      widgets/ErrorDialog.cpp
+      widgets/ErrorDialog.h
+      widgets/ExpandingToolBar.cpp
+      widgets/ExpandingToolBar.h
+      widgets/FileConfig.cpp
+      widgets/FileConfig.h
+      widgets/FileDialog/FileDialog.cpp
+      widgets/FileDialog/FileDialog.h
+      $<$<BOOL:${wxIS_WIN}>:
+         widgets/FileDialog/win/FileDialogPrivate.cpp
+         widgets/FileDialog/win/FileDialogPrivate.h
+      >
+      $<$<BOOL:${wxIS_MAC}>:
+         widgets/FileDialog/mac/FileDialogPrivate.mm
+         widgets/FileDialog/mac/FileDialogPrivate.h
+      >
+      $<$<BOOL:${wxIS_GTK}>:
+         widgets/FileDialog/gtk/FileDialogPrivate.cpp
+         widgets/FileDialog/gtk/FileDialogPrivate.h
+      >
+      widgets/FileHistory.cpp
+      widgets/FileHistory.h
+      widgets/Grabber.cpp
+      widgets/Grabber.h
+      widgets/Grid.cpp
+      widgets/Grid.h
+      widgets/HelpSystem.cpp
+      widgets/HelpSystem.h
+      widgets/HtmlWindow.cpp
+      widgets/HtmlWindow.h
+      widgets/ImageRoll.cpp
+      widgets/ImageRoll.h
+      widgets/KeyView.cpp
+      widgets/KeyView.h
+      widgets/Meter.cpp
+      widgets/Meter.h
+      widgets/MeterPanelBase.cpp
+      widgets/MeterPanelBase.h
+      widgets/MultiDialog.cpp
+      widgets/MultiDialog.h
+      widgets/NumericTextCtrl.cpp
+      widgets/NumericTextCtrl.h
+      widgets/Overlay.cpp
+      widgets/Overlay.h
+      widgets/OverlayPanel.cpp
+      widgets/OverlayPanel.h
+      widgets/PopupMenuTable.cpp
+      widgets/PopupMenuTable.h
+      widgets/ProgressDialog.cpp
+      widgets/ProgressDialog.h
+      widgets/ReadOnlyText.h
+      widgets/Ruler.cpp
+      widgets/Ruler.h
+      $<$<BOOL:${${_OPT}has_sentry_reporting}>:
+         widgets/ErrorReportDialog.cpp
+         widgets/ErrorReportDialog.h
+      >
+      widgets/Warning.cpp
+      widgets/Warning.h
+      widgets/WindowAccessible.cpp
+      widgets/WindowAccessible.h
+      widgets/numformatter.cpp
+      widgets/numformatter.h
+      widgets/valnum.cpp
+      widgets/valnum.h
+      widgets/wxPanelWrapper.cpp
+      widgets/wxPanelWrapper.h
+      widgets/wxTextCtrlWrapper.h
+
+      # XML handling
+      xml/XMLFileReader.cpp
+      xml/XMLFileReader.h
+      xml/XMLTagHandler.cpp
+      xml/XMLTagHandler.h
+      xml/XMLWriter.cpp
+      xml/XMLWriter.h
+      xml/audacityproject.dtd
+
+      # Update version
+      $<$<BOOL:${${_OPT}has_updates_check}>:
+          update/VersionId.h
+          update/VersionId.cpp
+          update/VersionPatch.h
+          update/UpdateDataParser.h
+          update/UpdateDataParser.cpp
+          update/UpdateManager.h
+          update/UpdateManager.cpp
+          update/UpdatePopupDialog.h
+          update/UpdatePopupDialog.cpp
+          prefs/ApplicationPrefs.h
+          prefs/ApplicationPrefs.cpp
+      >
+
+      Experimental.cmake
+)
+
+#
+#
+#
+list( APPEND HEADERS
+   ../include/audacity/EffectInterface.h
+   ../include/audacity/Types.h
+   ../include/audacity/ConfigInterface.h
+   ../include/audacity/ModuleInterface.h
+   ../include/audacity/PluginInterface.h
+   ../include/audacity/ComponentInterface.h
+   ../include/audacity/EffectAutomationParameters.h
+   ../include/audacity/ImporterInterface.h
+)
+
+#
+#
+#
+list( APPEND INCLUDES
+   PUBLIC
+      ${_PRVDIR}
+      ${topdir}/include
+      ${TARGET_ROOT}
+)
+
+#
+# Define resources
+#
+list( APPEND RESOURCES
+   ../presets/EQDefaultCurves.xml
+)
+
+#
+#
+#
+list( APPEND DEFINES
+   PRIVATE
+      BUILDING_AUDACITY
+      WXUSINGDLL
+      CMAKE
+      $<$<BOOL:${HAVE_LRINT}>:
+         HAVE_LRINT
+      >
+      $<$<BOOL:${HAVE_LRINTF}>:
+         HAVE_LRINTF
+      >
+      $<$<BOOL:${HAVE_MLOCK}>:
+         HAVE_MLOCK
+      >
+      $<$<PLATFORM_ID:Windows>:
+         _CRT_SECURE_NO_WARNINGS
+         __STDC_CONSTANT_MACROS
+         STRICT
+      >
+      $<$<BOOL:${USE_UPDATE_CHECK}>:
+          HAVE_UPDATES_CHECK
+      >
+)
+
+# If we have cmake 3.16 or higher, we can use precompiled headers, but
+# only use them if ccache is not available and the user hasn't disabled
+# it.
+if( CMAKE_VERSION VERSION_GREATER_EQUAL "3.16" AND NOT CCACHE_PROGRAM )
+   cmd_option(
+      ${_OPT}use_pch
+      "Use precompiled headers [yes, no]"
+      YES
+   )
 endif()
 
-#Use cotire to get precompiled headers, and a unity build.
-set_target_properties(Audacity 
-PROPERTIES COTIRE_CXX_PREFIX_HEADER_INIT 
-"AudacityHeaders.h")
-cotire(Audacity)
+audacity_append_common_compiler_options( OPTIONS "${${_OPT}use_pch}" )
 
-# (commented out) Debugging info for the curious about Cotire.
-#[[
+list( APPEND LDFLAGS
+   PRIVATE
+      $<$<CXX_COMPILER_ID:MSVC>:/MANIFEST:NO>
+      $<$<CXX_COMPILER_ID:GNU>:-Wl,--disable-new-dtags>
+)
 
-# cotire sets the following properties
-get_target_property(_unitySource Audacity COTIRE_CXX_UNITY_SOURCE)
-get_target_property(_prefixHeader Audacity COTIRE_CXX_PREFIX_HEADER)
-get_target_property(_precompiledHeader Audacity COTIRE_CXX_PRECOMPILED_HEADER)
-get_target_property(_unityTargetName Audacity COTIRE_UNITY_TARGET_NAME)
+#
+#
+#
+list( APPEND LIBRARIES
+   PUBLIC
+      ${CMAKE_REQUIRED_LIBRARIES}
+      ZLIB::ZLIB
+      wxwidgets::wxwidgets
+      expat::expat
+      libmp3lame::libmp3lame
+      libsndfile
+      libsoxr
+      portaudio-v19
+      sqlite
+      $<$<BOOL:${${_OPT}has_crashreports}>:crashreports>
+      $<$<BOOL:${USE_FFMPEG}>:ffmpeg>
+      $<$<BOOL:${USE_LIBID3TAG}>:libid3tag::libid3tag>
+      $<$<BOOL:${USE_LIBFLAC}>:libflac>
+      $<$<BOOL:${USE_LIBMAD}>:libmad::libmad>
+      $<$<BOOL:${USE_LIBOGG}>:libogg>
+      $<$<BOOL:${USE_LIBVORBIS}>:libvorbis>
+      $<$<BOOL:${USE_LIBTWOLAME}>:twolame>
+      $<$<BOOL:${USE_LV2}>:lv2>
+      $<$<BOOL:${USE_MIDI}>:portmidi>
+      $<$<BOOL:${USE_MIDI}>:portsmf>
+      $<$<BOOL:${USE_NYQUIST}>:libnyquist>
+      $<$<BOOL:${USE_PORTMIXER}>:portmixer>
+      $<$<BOOL:${USE_SBSMS}>:libsbsms>
+      $<$<BOOL:${USE_SOUNDTOUCH}>:soundtouch>
+      $<$<BOOL:${USE_VAMP}>:libvamp>
+      $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD,NetBSD,CYGWIN>:PkgConfig::GLIB>
+      $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD,NetBSD,CYGWIN>:PkgConfig::GTK>
+      $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD,NetBSD,CYGWIN>:z>
+      $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD,NetBSD,CYGWIN>:pthread>
+)
 
-if (_unitySource)
-	message(STATUS "Audacity unity source: ${_unitySource}")
-endif()
-if (_prefixHeader)
-	message(STATUS "Audacity prefix header: ${_prefixHeader}")
-endif()
-if (_precompiledHeader)
-	message(STATUS "Audacity precompiled header: ${_precompiledHeader}")
-endif()
-if (TARGET ${_unityTargetName})
-	message(STATUS "Audacity unity target: ${_unityTargetName}")
+set( BUILDING_AUDACITY YES )
+set( INSTALL_PREFIX "${_PREFIX}" )
+set( PKGLIBDIR "${_PKGLIBDIR}" )
+set( LIBDIR "${CMAKE_INSTALL_FULL_LIBDIR}" )
+set( HAVE_GTK ${GTK_FOUND} )
+
+# Do not define these for Windows or Mac until further testing
+# can be done against ExportMP3.cpp.  If either are defined, the
+# build will fail.
+if( NOT CMAKE_SYSTEM_NAME MATCHES "Windows|Darwin" )
+   if( "${${_OPT}use_lame}" STREQUAL "local" )
+      set( DISABLE_DYNAMIC_LOADING_LAME YES )
+   endif()
+
+   if( "${${_OPT}use_ffmpeg}" STREQUAL "linked" )
+      set( DISABLE_DYNAMIC_LOADING_FFMPEG YES )
+   endif()
 endif()
 
-]]#
+if( CMAKE_SYSTEM_NAME MATCHES "Windows" )
+   set_target_properties(
+      ${TARGET}
+      PROPERTIES
+         # Make sure we're a GUI application and not a console tool
+         WIN32_EXECUTABLE ON
+   )
+
+   # Define the Windows specific resources
+   list( APPEND WIN_RESOURCES
+      ../win/audacity.rc
+   )
+
+   # Copy over the wxWidgets DLLs
+
+   # Copy the required wxWidgets libs into the bundle
+   add_custom_command(
+      TARGET
+         ${TARGET}
+      COMMAND
+         ${CMAKE_COMMAND} -D SRC="${_EXEDIR}/Audacity.exe"
+                          -D DST="${_EXEDIR}"
+                          -D WXWIN="${_SHARED_PROXY_BASE_PATH}/$<CONFIG>/"
+                          -P ${AUDACITY_MODULE_PATH}/CopyLibs.cmake
+      POST_BUILD
+   )
+
+   # Copy the VC runtime libraries as well
+   add_custom_command(
+      TARGET
+         ${TARGET}
+      COMMAND
+         ${CMAKE_COMMAND} -E copy ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} ${_DEST}
+      POST_BUILD
+   )
+elseif( CMAKE_SYSTEM_NAME MATCHES "Darwin" )
+   # Bug 2400 workaround
+   #
+   # Replaces the SDK version in the built executable with 10.13 to
+   # prevent high CPU usage and slow drawing on Mojave or newer
+   check_for_platform_version()
+   if( PLATFORM_VERSION_SUPPORTED )
+      list( APPEND LDFLAGS
+         PRIVATE
+            -Wl,-platform_version,macos,${MIN_MACOS_VERSION},${TARGET_MACOS_VERSION}
+      )
+   else()
+      list( APPEND LDFLAGS
+         PRIVATE
+            -Wl,-sdk_version,10.13
+      )
+   endif()
+
+   # Define Mac specific resources
+   list( APPEND MAC_RESOURCES
+      ../mac/Resources/Audacity.icns
+      ../mac/Resources/AudacityAIFF.icns
+      ../mac/Resources/AudacityAU.icns
+      ../mac/Resources/AudacityMP3.icns
+      ../mac/Resources/AudacityOGG.icns
+      ../mac/Resources/AudacityProject.icns
+      ../mac/Resources/AudacityWAV.icns
+   )
+
+   set_target_properties(
+      ${TARGET}
+      PROPERTIES
+         # Build a bundle
+         MACOSX_BUNDLE ON
+         # Add the resources
+         RESOURCE "${MAC_RESOURCES};${RESOURCES}"
+   )
+   set_target_property_all( ${TARGET} RUNTIME_OUTPUT_DIRECTORY "${_DESTDIR}" )
+
+   # These sources must be compiled as Objective C++ and excluded
+   # from precompiled header usage
+   set_source_files_properties(
+      AudacityApp.mm
+      KeyboardCapture.cpp
+      effects/EffectUI.cpp
+      effects/VST/VSTControlOSX.mm
+      effects/audiounits/AUControl.mm
+      menus/WindowMenus.cpp
+      widgets/FileDialog/mac/FileDialogPrivate.mm
+      PROPERTIES
+         COMPILE_FLAGS "-x objective-c++"
+         SKIP_PRECOMPILE_HEADERS YES
+   )
+
+   # Add our required frameworks
+   list( APPEND LIBRARIES
+      PRIVATE
+         "-framework AudioUnit"
+         "-framework CoreAudio"
+         "-framework CoreAudioKit"
+   )
+
+   # Use the Aqua theme
+   set( USE_AQUA_THEME 1 )
+
+   # Copy the required wxWidgets libs into the bundle
+   add_custom_command(
+      TARGET
+         ${TARGET}
+      COMMAND
+         ${CMAKE_COMMAND} -D SRC="${_EXEDIR}/Audacity"
+                          -D DST="${_PKGLIB}"
+                          -D WXWIN="${_SHARED_PROXY_BASE_PATH}/$<CONFIG>"
+                          -P ${AUDACITY_MODULE_PATH}/CopyLibs.cmake
+      POST_BUILD
+   )
+
+   # Define the Wrapper target
+   set( WRAPPER_ROOT "${TARGET_ROOT}/../mac" )
+   set( WRAPPER_SOURCES "${WRAPPER_ROOT}/Wrapper.c" )
+
+   add_executable( Wrapper "${WRAPPER_SOURCES}" )
+   add_dependencies( "${TARGET}" Wrapper )
+
+   set_target_property_all( "Wrapper" RUNTIME_OUTPUT_DIRECTORY "${_EXEDIR}" )
+   organize_source( "${WRAPPER_ROOT}" "mac" "${WRAPPER_SOURCES}" )
+
+else()
+   set_target_property_all( ${TARGET} RUNTIME_OUTPUT_DIRECTORY "${_DEST}" )
+
+   # Build the list of mimetypes
+   #
+   # (Don't use generator expressions since it will leave null/empty
+   # entries in the list.)
+   set( MIMETYPES
+      application/x-audacity-project
+   )
+   if( USE_FFMPEG )
+      list( APPEND MIMETYPES
+         audio/aac
+         audio/ac3
+         audio/mp4
+         audio/x-ms-wma
+         video/mpeg
+      )
+   endif()
+   if( USE_LIBFLAC )
+      list( APPEND MIMETYPES
+         audio/flac
+         audio/x-flac
+      )
+   endif()
+   if( USE_LIBMAD )
+      list( APPEND MIMETYPES
+         audio/mpeg
+      )
+   endif()
+   if( USE_SNDFILE )
+      list( APPEND MIMETYPES
+         audio/basic
+         audio/x-aiff
+         audio/x-wav
+      )
+   endif()
+   if( USE_LIBOGG AND USE_LIBVORBIS )
+      list( APPEND MIMETYPES
+         application/ogg
+         audio/x-vorbis+ogg
+      )
+   endif()
+
+   # Create the desktop file
+   configure_file( audacity.desktop.in ${_INTDIR}/audacity.desktop )
+
+   # Copy the required wxWidgets libs into the bundle
+   add_custom_command(
+      TARGET
+         ${TARGET}
+      COMMAND
+         ${CMAKE_COMMAND} -D SRC="${_EXEDIR}/audacity"
+                          -D DST="${_DEST}/${_PKGLIB}"
+                          -D WXWIN="${_SHARED_PROXY_BASE_PATH}/$<CONFIG>"
+                          -P ${AUDACITY_MODULE_PATH}/CopyLibs.cmake
+      POST_BUILD
+   )
+endif()
+
+if(CRASH_REPORT_URL)
+    list(APPEND DEFINES PRIVATE -DCRASH_REPORT_URL="${CRASH_REPORT_URL}")
+endif()
+
+set_target_property_all( ${TARGET} RUNTIME_OUTPUT_NAME ${AUDACITY_NAME} )
+
+organize_source( "${TARGET_ROOT}/.." "include" "${HEADERS}" )
+organize_source( "${TARGET_ROOT}/../presets" "presets" "${RESOURCES}" )
+organize_source( "${TARGET_ROOT}" "src" "${SOURCES}" )
+organize_source( "${TARGET_ROOT}/../mac/Resources" "mac" "${MAC_RESOURCES}" )
+organize_source( "${TARGET_ROOT}/../win" "win" "${WIN_RESOURCES}" )
+
+#
+# Get those pesky CMake files out of the way (on Windows)
+#
+source_group(
+    TREE
+        "${_INTDIR}"
+    PREFIX
+        "CMake"
+    FILES
+        ${_INTDIR}/CMakeFiles/Audacity.dir/cmake_pch.cxx
+        ${_INTDIR}/CMakeFiles/Audacity.dir/cmake_pch.hxx
+)
+
+# Define AUDACITY_DLL_API
+import_symbol_define( import_symbol AUDACITY_DLL )
+export_symbol_define( export_symbol AUDACITY_DLL )
+list( APPEND DEFINES PRIVATE "${export_symbol}" INTERFACE "${import_symbol}" )
+
+target_sources( ${TARGET} PRIVATE ${HEADERS} ${SOURCES} ${RESOURCES} ${MAC_RESOURCES} ${WIN_RESOURCES} )
+target_compile_definitions( ${TARGET} PRIVATE ${DEFINES} )
+target_compile_options( ${TARGET} PRIVATE ${OPTIONS} )
+target_include_directories( ${TARGET} PRIVATE ${INCLUDES} )
+target_link_options( ${TARGET} PRIVATE ${LDFLAGS} )
+target_link_libraries( ${TARGET} ${LIBRARIES} )
+target_link_libraries( ${TARGET} PUBLIC ${AUDACITY_LIBRARIES} )
+
+if( CMAKE_VERSION VERSION_GREATER_EQUAL "3.16" AND NOT CCACHE_PROGRAM )
+   if( ${_OPT}use_pch )
+      message( STATUS "Using precompiled headers" )
+      target_precompile_headers( ${TARGET} PRIVATE
+         $<$<PLATFORM_ID:Windows>:${CMAKE_BINARY_DIR}/src/private/configwin.h>
+         $<$<PLATFORM_ID:Darwin>:${CMAKE_BINARY_DIR}/src/private/configmac.h>
+         $<$<NOT:$<PLATFORM_ID:Windows,Darwin>>:${CMAKE_BINARY_DIR}/src/private/configunix.h>
+         AudacityHeaders.h
+      )
+   else()
+      message( STATUS "Not using precompiled headers" )
+   endif()
+endif()
+
+if( "${CMAKE_GENERATOR}" MATCHES "Xcode|Visual Studio*" )
+   install(
+      DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/"
+      DESTINATION "."
+      USE_SOURCE_PERMISSIONS
+      PATTERN "*.pdb" EXCLUDE
+      PATTERN "*.ilk" EXCLUDE
+   )
+else()
+   if( CMAKE_SYSTEM_NAME MATCHES "Darwin" )
+      install( TARGETS ${TARGET}
+               DESTINATION "."
+               RESOURCE DESTINATION "${_APPDIR}/Resources" )
+   else()
+      install( TARGETS ${TARGET} RUNTIME )
+      install( DIRECTORY "${_DEST}/${_LIBDIR}/"
+               DESTINATION "${_LIBDIR}"
+               USE_SOURCE_PERMISSIONS
+               FILES_MATCHING PATTERN "*.so*" )
+      install( FILES "${_INTDIR}/audacity.desktop"
+               DESTINATION "${_DATADIR}/applications" )
+      install( FILES "${topdir}/LICENSE.txt" "${topdir}/README.txt"
+               DESTINATION "${_DATADIR}/doc/${AUDACITY_NAME}" )
+      install( FILES "${_SRCDIR}/audacity.xml"
+               DESTINATION "${_DATADIR}/mime/packages" )
+      install( FILES "${topdir}/presets/EQDefaultCurves.xml"
+               DESTINATION "${_PKGDATA}" )
+      install( PROGRAMS "${PROJECT_SOURCE_DIR}/linux/audacity.sh"
+               DESTINATION "."
+               RENAME "audacity" )
+   endif()
+endif()
+
+# collect dependency information for third party libraries
+list( APPEND GRAPH_EDGES "Audacity [shape=house]" )
+foreach( LIBRARY ${LIBRARIES} )
+   if (NOT LIBRARY MATCHES "PUBLIC|PRIVATE|INTERFACE")
+      canonicalize_node_name(LIBRARY "${LIBRARY}")
+      list( APPEND GRAPH_EDGES "\"${TARGET}\" -> \"${LIBRARY}\"" )
+   endif()
+endforeach()
+
+#propagate collected edgets to root CMakeLists.txt
+set( GRAPH_EDGES "${GRAPH_EDGES}" PARENT_SCOPE )

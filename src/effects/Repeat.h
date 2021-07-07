@@ -16,21 +16,21 @@
 class wxTextCtrl;
 class ShuttleGui;
 
-#define REPEAT_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Repeat") }
-
 class wxStaticText;
 
 class EffectRepeat final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectRepeat();
    virtual ~EffectRepeat();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

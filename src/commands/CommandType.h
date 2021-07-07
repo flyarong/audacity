@@ -16,9 +16,7 @@
 #ifndef __COMMANDTYPE__
 #define __COMMANDTYPE__
 
-#include "CommandMisc.h"
 #include "CommandSignature.h"
-#include "../MemoryX.h"
 #include "../commands/AudacityCommand.h"
 
 class OldStyleCommand;
@@ -41,11 +39,11 @@ class CommandOutputTargets;
 class CommandSignature;
 class wxString;
 
-class OldStyleCommandType : public AudacityCommand
+class AUDACITY_DLL_API OldStyleCommandType : public AudacityCommand
 {
 private:
    ComponentInterfaceSymbol mSymbol;
-   Maybe<CommandSignature> mSignature;
+   Optional<CommandSignature> mSignature;
 
 public:
    OldStyleCommandType();
@@ -65,7 +63,8 @@ public:
    virtual void BuildSignature(CommandSignature &signature) = 0;
 
    // Create a command instance with the specified output target
-   virtual OldStyleCommandPointer Create(std::unique_ptr<CommandOutputTargets> &&target) = 0;
+   virtual OldStyleCommandPointer Create(
+      AudacityProject *project, std::unique_ptr<CommandOutputTargets> &&target) = 0;
 };
 
 #endif /* End of include guard: __COMMANDTYPE__ */

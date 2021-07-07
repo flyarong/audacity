@@ -11,13 +11,12 @@
 
 **********************************************************************/
 
-#include "../../Audacity.h" // for USE_* macros
+
 
 #if defined(USE_VAMP)
 
 #include <vamp-hostsdk/PluginLoader.h>
 
-#include "../../SampleFormat.h"
 #include "../Effect.h"
 
 class wxStaticText;
@@ -47,7 +46,7 @@ public:
    ComponentInterfaceSymbol GetSymbol() override;
    VendorSymbol GetVendor() override;
    wxString GetVersion() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 

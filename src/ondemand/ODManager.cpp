@@ -18,14 +18,116 @@ ODTask requests and internals.
 #include "ODManager.h"
 
 #include "ODTask.h"
-#include "ODTaskThread.h"
 #include "ODWaveTrackTaskQueue.h"
 #include "../Project.h"
-#include <NonGuiThread.h>
 #include <wx/utils.h>
 #include <wx/wx.h>
 #include <wx/thread.h>
 #include <wx/event.h>
+
+#ifdef __WXMAC__
+
+// On Mac OS X, it's better not to use the wxThread class.
+// We use our own implementation based on pthreads instead.
+
+class ODTaskThread {
+ public:
+   typedef int ExitCode;
+   ODTaskThread(ODTask* task);
+   /*ExitCode*/ void Entry();
+   void Create() {}
+   void Delete() {
+      mDestroy = true;
+      pthread_join(mThread, NULL);
+   }
+   bool TestDestroy() { return mDestroy; }
+   void Sleep(int ms) {
+      struct timespec spec;
+      spec.tv_sec = 0;
+      spec.tv_nsec = ms * 1000 * 1000;
+      nanosleep(&spec, NULL);
+   }
+   static void *callback(void *p) {
+      ODTaskThread *th = (ODTaskThread *)p;
+#if defined(__WXMAC__)
+      /*return (void *)*/ th->Entry();
+      return NULL;
+#else
+      return (void *) th->Entry();
+#endif
+   }
+   void Run() {
+      pthread_create(&mThread, NULL, callback, this);
+   }
+
+   ///Specifies the priority the thread will run at.  Currently doesn't work.
+   ///@param priority value from 0 (min priority) to 100 (max priority)
+   void SetPriority(int priority)
+   {
+      mPriority=priority;
+   }
+
+ private:
+   int mPriority;
+   bool mDestroy;
+   pthread_t mThread;
+
+   ODTask* mTask;
+};
+
+#else
+
+class ODTaskThread final : public wxThread
+{
+public:
+   ///Constructs a ODTaskThread
+   ///@param task the task to be launched as an
+   ODTaskThread(ODTask* task);
+
+
+protected:
+   ///Executes a part of the task
+   void* Entry() override;
+   ODTask* mTask;
+
+};
+
+#endif
+
+ODTaskThread::ODTaskThread(ODTask* task)
+#ifndef __WXMAC__
+: wxThread()
+#endif
+{
+   mTask=task;
+#ifdef __WXMAC__
+   mDestroy = false;
+   mThread = NULL;
+#endif
+
+}
+
+#ifdef __WXMAC__
+
+void ODTaskThread::Entry()
+#else
+void *ODTaskThread::Entry()
+
+#endif
+{
+   //TODO: Figure out why this has no effect at all.
+   //wxThread::This()->SetPriority( 40);
+   //Do at least 5 percent of the task
+   mTask->DoSome(0.05f);
+
+   //release the thread count so that the ODManager knows how many active threads are alive.
+   ODManager::Instance()->DecrementCurrentThreads();
+
+
+#ifndef __WXMAC__
+   return NULL;
+#endif
+}
 
 static ODLock gODInitedMutex;
 static bool gManagerCreated=false;
@@ -39,10 +141,7 @@ std::unique_ptr<ODManager> ODManager::pMan{};
 typedef  ODManager* (*pfodman)();
 pfodman ODManager::Instance = &(ODManager::InstanceFirstTime);
 
-//libsndfile is not threadsafe - this deals with it
-static ODLock sLibSndFileMutex;
-
-DEFINE_EVENT_TYPE(EVT_ODTASK_UPDATE)
+wxDEFINE_EVENT(EVT_ODTASK_UPDATE, wxCommandEvent);
 
 //using this with wxStringArray::Sort will give you a list that
 //is alphabetical, without depending on case.  If you use the
@@ -87,7 +186,7 @@ ODManager::~ODManager()
    }
    mTerminatedMutex.Unlock();
 
-   //get rid of all the queues.  The queues get rid of the tasks, so we don't worry abut them.
+   //get rid of all the queues.  The queues get rid of the tasks, so we don't worry about them.
    //nothing else should be running on OD related threads at this point, so we don't lock.
    mQueues.clear();
 }
@@ -154,7 +253,7 @@ void ODManager::AddNewTask(std::unique_ptr<ODTask> &&mtask, bool lockMutex)
    {
       //search for a task containing the lead track.  wavetrack removal is threadsafe and bound to the mQueuesMutex
       //note that GetWaveTrack is not threadsafe, but we are assuming task is not running on a different thread yet.
-      if(mQueues[i]->ContainsWaveTrack(task->GetWaveTrack(0)))
+      if(mQueues[i]->ContainsWaveTrack(task->GetWaveTrack(0).get()))
          queue = mQueues[i].get();
    }
 
@@ -220,7 +319,7 @@ void ODManager::Init()
 
    //   wxLogDebug(wxT("Initializing ODManager...Creating manager thread"));
    // This is a detached thread, so it deletes itself when it finishes
-   // ... except on Mac where we we don't use wxThread for reasons unexplained
+   // ... except on Mac where we don't use wxThread for reasons unexplained
    ODManagerHelperThread* startThread = safenew ODManagerHelperThread;
 
 //   startThread->SetPriority(0);//default of 50.
@@ -281,7 +380,7 @@ void ODManager::Start()
          mTasksMutex.Lock();
          //detach a NEW thread.
          // This is a detached thread, so it deletes itself when it finishes
-         // ... except on Mac where we we don't use wxThread for reasons unexplained
+         // ... except on Mac where we don't use wxThread for reasons unexplained
          auto thread = safenew ODTaskThread(mTasks[0]);//task);
          //thread->SetPriority(10);//default is 50.
          thread->Create();
@@ -295,7 +394,7 @@ void ODManager::Start()
       }
 
       mCurrentThreadsMutex.Unlock();
-      //use a conditon variable to block here instead of a sleep.
+      //use a condition variable to block here instead of a sleep.
 
       // JKC: If there are no tasks ready to run, or we're paused then
       // we wait for there to be tasks in the queue.
@@ -318,10 +417,7 @@ void ODManager::Start()
       {
          mNeedsDraw=0;
          wxCommandEvent event( EVT_ODTASK_UPDATE );
-         ODLocker locker{ &AudacityProject::AllProjectDeleteMutex() };
-         AudacityProject* proj = GetActiveProject();
-         if(proj)
-            proj->GetEventHandler()->AddPendingEvent(event);
+         wxTheApp->AddPendingEvent(event);
       }
       mTerminateMutex.Lock();
    }
@@ -369,20 +465,9 @@ void ODManager::Quit()
    }
 }
 
-///removes a wavetrack and notifies its associated tasks to stop using its reference.
-void ODManager::RemoveWaveTrack(WaveTrack* track)
-{
-   mQueuesMutex.Lock();
-   for(unsigned int i=0;i<mQueues.size();i++)
-   {
-      if(mQueues[i]->ContainsWaveTrack(track))
-         mQueues[i]->RemoveWaveTrack(track);
-   }
-   mQueuesMutex.Unlock();
-}
-
 ///replace the wavetrack whose wavecache the gui watches for updates
-void ODManager::ReplaceWaveTrack(Track *oldTrack, Track *newTrack)
+void ODManager::ReplaceWaveTrack(Track *oldTrack,
+   const std::shared_ptr<Track> &newTrack)
 {
    mQueuesMutex.Lock();
    for(unsigned int i=0;i<mQueues.size();i++)
@@ -393,13 +478,14 @@ void ODManager::ReplaceWaveTrack(Track *oldTrack, Track *newTrack)
 }
 
 ///if it shares a queue/task, creates a NEW queue/task for the track, and removes it from any previously existing tasks.
-void ODManager::MakeWaveTrackIndependent(WaveTrack* track)
+void ODManager::MakeWaveTrackIndependent(
+   const std::shared_ptr< WaveTrack > &track)
 {
    ODWaveTrackTaskQueue* owner=NULL;
    mQueuesMutex.Lock();
    for(unsigned int i=0;i<mQueues.size();i++)
    {
-      if(mQueues[i]->ContainsWaveTrack(track))
+      if(mQueues[i]->ContainsWaveTrack(track.get()))
       {
          owner = mQueues[i].get();
          break;
@@ -416,7 +502,10 @@ void ODManager::MakeWaveTrackIndependent(WaveTrack* track)
 ///better design in the future.
 ///@return returns success.  Some ODTask conditions require that the tasks finish before merging.
 ///e.g. they have different effects being processed at the same time.
-bool ODManager::MakeWaveTrackDependent(WaveTrack* dependentTrack,WaveTrack* masterTrack)
+bool ODManager::MakeWaveTrackDependent(
+   const std::shared_ptr< WaveTrack > &dependentTrack,
+   WaveTrack* masterTrack
+)
 {
    //First, check to see if the task lists are mergeable.  If so, we can simply add this track to the other task and queue,
    //then DELETE this one.
@@ -432,7 +521,7 @@ bool ODManager::MakeWaveTrackDependent(WaveTrack* dependentTrack,WaveTrack* mast
       {
          masterQueue = mQueues[i].get();
       }
-      else if(mQueues[i]->ContainsWaveTrack(dependentTrack))
+      else if(mQueues[i]->ContainsWaveTrack(dependentTrack.get()))
       {
          dependentQueue = mQueues[i].get();
          dependentIndex = i;
@@ -449,7 +538,7 @@ bool ODManager::MakeWaveTrackDependent(WaveTrack* dependentTrack,WaveTrack* mast
       return false;
    }
    //then we add dependentTrack to the masterTrack's queue - this will allow future ODScheduling to affect them together.
-   //this sets the NeedODUpdateFlag since we don't want the head task to finish without haven't dealt with the depednent
+   //this sets the NeedODUpdateFlag since we don't want the head task to finish without haven't dealt with the dependent
    masterQueue->MergeWaveTrack(dependentTrack);
 
    //finally remove the dependent track
@@ -526,7 +615,7 @@ bool ODManager::HasLoadedODFlag()
 }
 
 ///fills in the status bar message for a given track
-void ODManager::FillTipForWaveTrack( const WaveTrack * t, wxString &tip )
+void ODManager::FillTipForWaveTrack( const WaveTrack * t, TranslatableString &tip )
 {
    mQueuesMutex.Lock();
    for(unsigned int i=0;i<mQueues.size();i++)

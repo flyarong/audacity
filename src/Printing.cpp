@@ -14,7 +14,7 @@
 *//*******************************************************************/
 
 
-#include "Audacity.h"
+
 #include "Printing.h"
 
 #include <wx/defs.h>
@@ -26,12 +26,13 @@
 #include "AColor.h"
 #include "TrackArtist.h"
 #include "ViewInfo.h"
-#include "WaveTrack.h"
+#include "Track.h"
 #include "widgets/Ruler.h"
-#include "widgets/ErrorDialog.h"
+#include "widgets/AudacityMessageBox.h"
 
 #include "TrackPanelDrawingContext.h"
-#include "Internat.h"
+
+#include "tracks/ui/TrackView.h"
 
 // Globals, so that we remember settings from session to session
 wxPrintData &gPrintData()
@@ -71,7 +72,8 @@ bool AudacityPrintout::OnPrintPage(int WXUNUSED(page))
    dc->GetSize(&width, &height);
 
    int rulerScreenHeight = 40;
-   int screenTotalHeight = mTracks->GetHeight() + rulerScreenHeight;
+   int screenTotalHeight =
+      TrackView::GetTotalHeight( *mTracks ) + rulerScreenHeight;
 
    double scale = height / (double)screenTotalHeight;
 
@@ -95,21 +97,39 @@ bool AudacityPrintout::OnPrintPage(int WXUNUSED(page))
    int y = rulerPageHeight;
 
    for (auto n : mTracks->Any()) {
+      auto &view = TrackView::Get( *n );
       wxRect r;
       r.x = 0;
-      r.y = y;
+      r.y = 0;
       r.width = width;
-      r.height = (int)(n->GetHeight() * scale);
+      auto trackHeight = (int)(view.GetHeight() * scale);
+      r.height = trackHeight;
 
-      TrackPanelDrawingContext context{
-         *dc, {}, {}, &artist
-      };
-      TrackArt::DrawTrack( context, n, r );
+      const auto subViews = view.GetSubViews( r );
+      if (subViews.empty())
+         continue;
+   
+      auto iter = subViews.begin(), end = subViews.end(), next = iter;
+      auto yy = iter->first;
+      for ( ; iter != end; iter = next ) {
+         ++next;
+         auto nextY = ( next == end )
+            ? trackHeight
+            : next->first;
+         r.y = y + yy;
+         r.SetHeight( nextY - yy );
+         yy = nextY;
+
+         TrackPanelDrawingContext context{
+            *dc, {}, {}, &artist
+         };
+         iter->second->Draw( context, r, TrackArtist::PassTracks );
+      }
 
       dc->SetPen(*wxBLACK_PEN);
-      AColor::Line(*dc, 0, r.y, width, r.y);
+      AColor::Line(*dc, 0, y, width, y);
 
-      y += r.height;
+      y += trackHeight;
    };
 
    return true;
@@ -154,8 +174,10 @@ void HandlePrint(
    AudacityPrintout printout(name, tracks, panel);
    if (!printer.Print(parent, &printout, true)) {
       if (wxPrinter::GetLastError() == wxPRINTER_ERROR) {
-         AudacityMessageBox(_("There was a problem printing."),
-                      _("Print"), wxOK);
+         AudacityMessageBox(
+            XO("There was a problem printing."),
+            XO("Print"),
+            wxOK);
       }
       else {
          // Do nothing, the user cancelled...

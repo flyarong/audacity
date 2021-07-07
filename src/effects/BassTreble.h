@@ -19,8 +19,6 @@ class wxCheckBox;
 class wxTextCtrl;
 class ShuttleGui;
 
-#define BASSTREBLE_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Bass and Treble") }
-
 class EffectBassTrebleState
 {
 public:
@@ -38,14 +36,16 @@ public:
 class EffectBassTreble final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectBassTreble();
    virtual ~EffectBassTreble();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 
@@ -84,7 +84,7 @@ private:
    void InstanceInit(EffectBassTrebleState & data, float sampleRate);
    size_t InstanceProcess(EffectBassTrebleState & data, float **inBlock, float **outBlock, size_t blockLen);
 
-   void Coefficents(double hz, double slope, double gain, double samplerate, int type,
+   void Coefficients(double hz, double slope, double gain, double samplerate, int type,
                     double& a0, double& a1, double& a2, double& b0, double& b1, double& b2);
    float DoFilter(EffectBassTrebleState & data, float in);
 

@@ -15,7 +15,7 @@ the pitch without changing the tempo.
 
 *//*******************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
+
 #if USE_SOUNDTOUCH
 
 #ifndef __AUDACITY_EFFECT_CHANGEPITCH__
@@ -34,19 +34,19 @@ class wxTextCtrl;
 class wxSpinCtrl;
 class ShuttleGui;
 
-#define CHANGEPITCH_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Change Pitch") }
-
 class EffectChangePitch final : public EffectSoundTouch
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectChangePitch();
    virtual ~EffectChangePitch();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

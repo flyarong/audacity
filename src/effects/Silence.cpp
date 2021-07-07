@@ -13,13 +13,21 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "Silence.h"
+#include "LoadEffects.h"
 
 #include <wx/intl.h>
 
 #include "../ShuttleGui.h"
 #include "../WaveTrack.h"
+#include "../widgets/NumericTextCtrl.h"
+
+const ComponentInterfaceSymbol EffectSilence::Symbol
+/* i18n-hint: noun */
+{ XC("Silence", "generator") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectSilence > reg; }
 
 EffectSilence::EffectSilence()
 {
@@ -34,17 +42,17 @@ EffectSilence::~EffectSilence()
 
 ComponentInterfaceSymbol EffectSilence::GetSymbol()
 {
-   return SILENCE_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectSilence::GetDescription()
+TranslatableString EffectSilence::GetDescription()
 {
-   return _("Creates audio of zero amplitude");
+   return XO("Creates audio of zero amplitude");
 }
 
-wxString EffectSilence::ManualPage()
+ManualPageID EffectSilence::ManualPage()
 {
-   return wxT("Silence");
+   return L"Silence";
 }
 
 
@@ -63,7 +71,7 @@ void EffectSilence::PopulateOrExchange(ShuttleGui & S)
    {
       S.StartHorizontalLay();
       {
-         S.AddPrompt(_("Duration:"));
+         S.AddPrompt(XXO("&Duration:"));
          mDurationT = safenew
             NumericTextCtrl(S.GetParent(), wxID_ANY,
                               NumericConverter::TIME,
@@ -72,8 +80,9 @@ void EffectSilence::PopulateOrExchange(ShuttleGui & S)
                                mProjectRate,
                                NumericTextCtrl::Options{}
                                   .AutoPos(true));
-         mDurationT->SetName(_("Duration"));
-         S.AddWindow(mDurationT, wxALIGN_CENTER | wxALL);
+         S.Name(XO("Duration"))
+            .Position(wxALIGN_CENTER | wxALL)
+            .AddWindow(mDurationT);
       }
       S.EndHorizontalLay();
    }

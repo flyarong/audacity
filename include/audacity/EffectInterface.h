@@ -42,10 +42,14 @@
 #ifndef __AUDACITY_EFFECTINTERFACE_H__
 #define __AUDACITY_EFFECTINTERFACE_H__
 
-#include "audacity/Types.h"
+#include <functional>
+
+#include "Identifier.h"
 #include "audacity/ComponentInterface.h"
 #include "audacity/ConfigInterface.h"
 #include "audacity/EffectAutomationParameters.h" // for command automation
+
+class ShuttleGui;
 
 typedef enum EffectType : int
 {
@@ -98,6 +102,7 @@ public:
 };
 
 class wxDialog;
+class wxWindow;
 class EffectUIHostInterface;
 class EffectUIClientInterface;
 
@@ -120,12 +125,6 @@ public:
    virtual NumericFormatSymbol GetDurationFormat() = 0;
    virtual void SetDuration(double seconds) = 0;
 
-   virtual bool Apply() = 0;
-   virtual void Preview() = 0;
-
-   //
-   virtual wxDialog *CreateUI(wxWindow *parent, EffectUIClientInterface *client) = 0;
-
    // Preset handling
    virtual RegistryPath GetUserPresetsGroup(const RegistryPath & name) = 0;
    virtual RegistryPath GetCurrentSettingsGroup() = 0;
@@ -144,6 +143,11 @@ AudacityCommand.
 class AUDACITY_DLL_API EffectClientInterface  /* not final */ : public EffectDefinitionInterface
 {
 public:
+   using EffectDialogFactory = std::function<
+      wxDialog* ( wxWindow &parent,
+         EffectHostInterface*, EffectUIClientInterface* )
+   >;
+
    virtual ~EffectClientInterface() {};
 
    virtual bool SetHost(EffectHostInterface *host) = 0;
@@ -155,7 +159,9 @@ public:
    virtual int GetMidiOutCount() = 0;
 
    virtual void SetSampleRate(double rate) = 0;
+   // Suggest a block size, but the return is the size that was really set:
    virtual size_t SetBlockSize(size_t maxBlockSize) = 0;
+   virtual size_t GetBlockSize() const = 0;
 
    virtual sampleCount GetLatency() = 0;
    virtual size_t GetTailSize() = 0;
@@ -175,7 +181,10 @@ public:
    virtual size_t RealtimeProcess(int group, float **inBuf, float **outBuf, size_t numSamples) = 0;
    virtual bool RealtimeProcessEnd() = 0;
 
-   virtual bool ShowInterface(wxWindow *parent, bool forceModal = false) = 0;
+   virtual bool ShowInterface(
+      wxWindow &parent, const EffectDialogFactory &factory,
+      bool forceModal = false
+   ) = 0;
    // Some effects will use define params to define what parameters they take.
    // If they do, they won't need to implement Get or SetAutomation parameters.
    // since the Effect class can do it.  Or at least that is how things happen
@@ -224,7 +233,7 @@ public:
 
    virtual void SetHostUI(EffectUIHostInterface *host) = 0;
    virtual bool IsGraphicalUI() = 0;
-   virtual bool PopulateUI(wxWindow *parent) = 0;
+   virtual bool PopulateUI(ShuttleGui &S) = 0;
    virtual bool ValidateUI() = 0;
    virtual bool HideUI() = 0;
    virtual bool CloseUI() = 0;

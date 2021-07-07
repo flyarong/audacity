@@ -28,8 +28,7 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
-#include "ImportOGG.h"
+
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
@@ -39,14 +38,13 @@
 #endif
 
 #include <wx/intl.h>
+#include "Import.h"
 #include "../Prefs.h"
-#include "../Internat.h"
 #include "../Tags.h"
-#include "../prefs/QualityPrefs.h"
 #include "../widgets/ProgressDialog.h"
 
 
-#define DESC _("Ogg Vorbis files")
+#define DESC XO("Ogg Vorbis files")
 
 static const auto exts = {
    wxT("ogg")
@@ -56,14 +54,10 @@ static const auto exts = {
 /* BPF There is no real reason to compile without LIBVORBIS, but if you do, you will needs this header */
 #include "ImportPlugin.h"
 
-void GetOGGImportPlugin(ImportPluginList &importPluginList,
-                        UnusableImportPluginList &unusableImportPluginList)
-{
-   unusableImportPluginList.push_back(
+static Importer::RegisteredUnusableImportPlugin registered{
       std::make_unique<UnusableImportPlugin>
          (DESC, FileExtensions( exts.begin(), exts.end() ) )
-   );
-}
+};
 
 #else /* USE_LIBVORBIS */
 
@@ -72,7 +66,7 @@ void GetOGGImportPlugin(ImportPluginList &importPluginList,
 #include <wx/utils.h>
 #include <wx/intl.h>
 /* ffile.h must be included AFTER at least one other wx header that includes
- * wx/setup.h, otherwise #ifdefs erronously collapse it to nothing. This is
+ * wx/setup.h, otherwise #ifdefs erroneously collapse it to nothing. This is
  * a bug in wxWidgets (ffile.h should itself include wx/setup.h), and it
  * was a bitch to track down. */
 #include <wx/ffile.h>
@@ -81,6 +75,8 @@ void GetOGGImportPlugin(ImportPluginList &importPluginList,
 
 #include "../WaveTrack.h"
 #include "ImportPlugin.h"
+
+using NewChannelGroup = std::vector< std::shared_ptr<WaveTrack> >;
 
 class OggImportPlugin final : public ImportPlugin
 {
@@ -93,8 +89,9 @@ public:
    ~OggImportPlugin() { }
 
    wxString GetPluginStringID() override { return wxT("liboggvorbis"); }
-   wxString GetPluginFormatDescription() override;
-   std::unique_ptr<ImportFileHandle> Open(const FilePath &Filename) override;
+   TranslatableString GetPluginFormatDescription() override;
+   std::unique_ptr<ImportFileHandle> Open(
+      const FilePath &Filename, AudacityProject*) override;
 };
 
 
@@ -109,12 +106,14 @@ public:
       mVorbisFile(std::move(vorbisFile))
       , mStreamUsage{ static_cast<size_t>(mVorbisFile->links) }
    {
-      mFormat = QualityPrefs::SampleFormatChoice();
-
       for (int i = 0; i < mVorbisFile->links; i++)
       {
-         wxString strinfo;
-         strinfo.Printf(wxT("Index[%02x] Version[%d], Channels[%d], Rate[%ld]"), (unsigned int) i,mVorbisFile->vi[i].version,mVorbisFile->vi[i].channels,mVorbisFile->vi[i].rate);
+         auto strinfo = XO("Index[%02x] Version[%d], Channels[%d], Rate[%ld]")
+            .Format(
+               (unsigned int) i,
+               mVorbisFile->vi[i].version,
+               mVorbisFile->vi[i].channels,
+               mVorbisFile->vi[i].rate);
          mStreamInfo.push_back(strinfo);
          mStreamUsage[i] = 0;
       }
@@ -122,9 +121,9 @@ public:
    }
    ~OggImportFileHandle();
 
-   wxString GetFileDescription() override;
+   TranslatableString GetFileDescription() override;
    ByteCount GetFileUncompressedBytes() override;
-   ProgressResult Import(TrackFactory *trackFactory, TrackHolders &outTracks,
+   ProgressResult Import(WaveTrackFactory *trackFactory, TrackHolders &outTracks,
               Tags *tags) override;
 
    wxInt32 GetStreamCount() override
@@ -135,7 +134,7 @@ public:
          return 0;
    }
 
-   const wxArrayString &GetStreamInfo() override
+   const TranslatableStrings &GetStreamInfo() override
    {
       return mStreamInfo;
    }
@@ -154,24 +153,18 @@ private:
    std::unique_ptr<OggVorbis_File> mVorbisFile;
 
    ArrayOf<int> mStreamUsage;
-   wxArrayString   mStreamInfo;
+   TranslatableStrings mStreamInfo;
    std::list<NewChannelGroup> mChannels;
-
-   sampleFormat   mFormat;
 };
 
-void GetOGGImportPlugin(ImportPluginList &importPluginList,
-                        UnusableImportPluginList & WXUNUSED(unusableImportPluginList))
-{
-   importPluginList.push_back( std::make_unique<OggImportPlugin>() );
-}
 
-wxString OggImportPlugin::GetPluginFormatDescription()
+TranslatableString OggImportPlugin::GetPluginFormatDescription()
 {
     return DESC;
 }
 
-std::unique_ptr<ImportFileHandle> OggImportPlugin::Open(const FilePath &filename)
+std::unique_ptr<ImportFileHandle> OggImportPlugin::Open(
+   const FilePath &filename, AudacityProject*)
 {
    // Suppress some compiler warnings about unused global variables in the library header
    wxUnusedVar(OV_CALLBACKS_DEFAULT);
@@ -190,23 +183,23 @@ std::unique_ptr<ImportFileHandle> OggImportPlugin::Open(const FilePath &filename
    int err = ov_open(file->fp(), vorbisFile.get(), NULL, 0);
 
    if (err < 0) {
-      wxString message;
+      TranslatableString message;
 
       switch (err) {
          case OV_EREAD:
-            message = _("Media read error");
+            message = XO("Media read error");
             break;
          case OV_ENOTVORBIS:
-            message = _("Not an Ogg Vorbis file");
+            message = XO("Not an Ogg Vorbis file");
             break;
          case OV_EVERSION:
-            message = _("Vorbis version mismatch");
+            message = XO("Vorbis version mismatch");
             break;
          case OV_EBADHEADER:
-            message = _("Invalid Vorbis bitstream header");
+            message = XO("Invalid Vorbis bitstream header");
             break;
          case OV_EFAULT:
-            message = _("Internal logic fault");
+            message = XO("Internal logic fault");
             break;
       }
 
@@ -217,7 +210,11 @@ std::unique_ptr<ImportFileHandle> OggImportPlugin::Open(const FilePath &filename
    return std::make_unique<OggImportFileHandle>(filename, std::move(file), std::move(vorbisFile));
 }
 
-wxString OggImportFileHandle::GetFileDescription()
+static Importer::RegisteredImportPlugin registered{ "OGG",
+   std::make_unique< OggImportPlugin >()
+};
+
+TranslatableString OggImportFileHandle::GetFileDescription()
 {
    return DESC;
 }
@@ -229,7 +226,7 @@ auto OggImportFileHandle::GetFileUncompressedBytes() -> ByteCount
 }
 
 ProgressResult OggImportFileHandle::Import(
-   TrackFactory *trackFactory, TrackHolders &outTracks,
+   WaveTrackFactory *trackFactory, TrackHolders &outTracks,
    Tags *tags)
 {
    outTracks.clear();
@@ -260,7 +257,8 @@ ProgressResult OggImportFileHandle::Import(
       link.resize(vi->channels);
 
       for (auto &channel : link)
-         channel = trackFactory->NewWaveTrack(mFormat, vi->rate);
+         // The format agrees with what is always passed to Append() below
+         channel = NewWaveTrack(*trackFactory, int16Sample, vi->rate);
    }
 
    /* The number of bytes to get from the codec in each run */

@@ -21,11 +21,8 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
-#include "XMLTagHandler.h"
 
-#include "../MemoryX.h"
-#include "../Internat.h"
+#include "XMLTagHandler.h"
 
 #ifdef _WIN32
    #include <windows.h>
@@ -36,25 +33,25 @@
 #include <wx/arrstr.h>
 #include <wx/filename.h>
 
-#include "../SampleFormat.h"
-#include "../Track.h"
+#include "FileNames.h"
 
 // Length check.  Is in part about not supplying malicious strings to file functions.
 bool XMLValueChecker::IsGoodString(const wxString & str)
 {
-   size_t len = str.length();
-   int nullIndex = str.Find('\0', false);
-   if ((len <= PLATFORM_MAX_PATH) && // Shouldn't be any reason for longer strings, except intentional file corruption.
-         (nullIndex == -1)) // No null characters except terminator.
+   // Originally based on MAX_PATH, which is way too limiting and just wrong since
+   // the length check is for a plain string and not a filename
+   if (IsGoodLongString(str) && str.length() <= 4096) // Shouldn't be any reason for longer strings, except intentional file corruption.
+   {
       return true;
-   else
-      return false; // good place for a breakpoint
+   }
+
+   return false;
 }
 
 // No length check, as e.g. labels could be very long.
 bool XMLValueChecker::IsGoodLongString(const wxString & str)
 {
-   return str.Find('\0', false) == -1; // No null characters except terminator.
+   return str.Find('\0', false) == wxNOT_FOUND; // No null characters except terminator.
 }
 
 
@@ -172,7 +169,7 @@ bool XMLValueChecker::IsGoodInt64(const wxString & strInt)
 
 bool XMLValueChecker::IsValidChannel(const int nValue)
 {
-   return (nValue >= Track::LeftChannel) && (nValue <= Track::MonoChannel);
+   return (nValue >= LeftChannel) && (nValue <= MonoChannel);
 }
 
 #ifdef USE_MIDI

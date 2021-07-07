@@ -9,9 +9,10 @@
 #ifndef __AUDACITY_SCORE_ALIGN_DIALOG__
 #define __AUDACITY_SCORE_ALIGN_DIALOG__
 
-#include "../Experimental.h"
-
 #ifdef EXPERIMENTAL_SCOREALIGN
+
+#include <wx/event.h>
+#include "../widgets/wxPanelWrapper.h"
 
 #if 1
 
@@ -52,7 +53,6 @@ extern int scorealign(
 
 class wxButton;
 class wxCheckBox;
-class wxString;
 class wxSlider;
 class wxStaticText;
 

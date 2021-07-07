@@ -21,7 +21,6 @@ class wxCheckBox;
 class wxTextCtrl;
 class ShuttleGui;
 
-#define DISTORTION_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Distortion") }
 #define STEPS 1024      // number of +ve or -ve steps in lookup tabe
 #define TABLESIZE 2049  // size of lookup table (steps * 2 + 1)
 
@@ -46,6 +45,8 @@ public:
 class EffectDistortion final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectDistortion();
    virtual ~EffectDistortion();
 
@@ -63,8 +64,8 @@ public:
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 
@@ -131,7 +132,7 @@ private:
    void OnRepeatsText(wxCommandEvent & evt);
    void OnRepeatsSlider(wxCommandEvent & evt);
    void UpdateUI();
-   void UpdateControl(control id, bool enable, wxString name);
+   void UpdateControl(control id, bool enable, TranslatableString name);
    void UpdateControlText(wxTextCtrl *textCtrl, wxString &string, bool enabled);
 
    void MakeTable();

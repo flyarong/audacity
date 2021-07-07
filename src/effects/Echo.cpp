@@ -19,8 +19,9 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "Echo.h"
+#include "LoadEffects.h"
 
 #include <float.h>
 
@@ -28,15 +29,19 @@
 
 #include "../ShuttleGui.h"
 #include "../Shuttle.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 #include "../widgets/valnum.h"
-#include "../SampleFormat.h"
 
 // Define keys, defaults, minimums, and maximums for the effect parameters
 //
 //     Name    Type     Key            Def   Min      Max      Scale
 Param( Delay,  float,   wxT("Delay"),   1.0f, 0.001f,  FLT_MAX, 1.0f );
 Param( Decay,  float,   wxT("Decay"),   0.5f, 0.0f,    FLT_MAX, 1.0f );
+
+const ComponentInterfaceSymbol EffectEcho::Symbol
+{ XO("Echo") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectEcho > reg; }
 
 EffectEcho::EffectEcho()
 {
@@ -54,17 +59,17 @@ EffectEcho::~EffectEcho()
 
 ComponentInterfaceSymbol EffectEcho::GetSymbol()
 {
-   return ECHO_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectEcho::GetDescription()
+TranslatableString EffectEcho::GetDescription()
 {
-   return _("Repeats the selected audio again and again");
+   return XO("Repeats the selected audio again and again");
 }
 
-wxString EffectEcho::ManualPage()
+ManualPageID EffectEcho::ManualPage()
 {
-   return wxT("Echo");
+   return L"Echo";
 }
 
 // EffectDefinitionInterface implementation
@@ -106,7 +111,7 @@ bool EffectEcho::ProcessInitialize(sampleCount WXUNUSED(totalLen), ChannelNames 
       history.reinit(histLen, true);
    }
    catch ( const std::bad_alloc& ) {
-      Effect::MessageBox(_("Requested value exceeds memory capacity."));
+      Effect::MessageBox( XO("Requested value exceeds memory capacity.") );
       return false;
    }
 
@@ -168,13 +173,16 @@ void EffectEcho::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      FloatingPointValidator<double> vldDelay(3, &delay, NumValidatorStyle::NO_TRAILING_ZEROES);
-      vldDelay.SetRange(MIN_Delay, MAX_Delay);
-      S.AddTextBox(_("Delay time (seconds):"), wxT(""), 10)->SetValidator(vldDelay);
+      S.Validator<FloatingPointValidator<double>>(
+            3, &delay, NumValidatorStyle::NO_TRAILING_ZEROES,
+            MIN_Delay, MAX_Delay
+         )
+         .AddTextBox(XXO("&Delay time (seconds):"), wxT(""), 10);
 
-      FloatingPointValidator<double> vldDecay(3, &decay, NumValidatorStyle::NO_TRAILING_ZEROES);
-      vldDecay.SetRange(MIN_Decay, MAX_Decay);
-      S.AddTextBox(_("Decay factor:"), wxT(""), 10)->SetValidator(vldDecay);
+      S.Validator<FloatingPointValidator<double>>(
+            3, &decay, NumValidatorStyle::NO_TRAILING_ZEROES,
+            MIN_Decay, MAX_Decay)
+         .AddTextBox(XXO("D&ecay factor:"), wxT(""), 10);
    }
    S.EndMultiColumn();
 }

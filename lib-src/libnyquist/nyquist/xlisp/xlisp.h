@@ -43,11 +43,21 @@ extern "C" {
 /* for the Win32 environment */
 #ifdef WIN32
 #define NNODES		2000
-#define AFMT		"%lx"
-#define OFFTYPE		long
-#define SAVERESTORE
+#define AFMT		"%p"
+// TRY 64bit-ints throughout XLisp even on 32-bit Windows
+// #ifdef _WIN64
+#define OFFTYPE     long long
+#define FIXTYPE     long long
+#define IFMT        "%lld"
+#define ICNV(n)     atoll(n)
+// #else
+// #define OFFTYPE		long
+// #define IFMT        "%ld"
+// #endif
+/* #define SAVERESTORE */
 #define XL_LITTLE_ENDIAN 
 #define _longjmp longjmp
+#define _setjmp setjmp
 #endif
 
 /* for the Turbo C compiler - MS-DOS, large model */
@@ -55,7 +65,7 @@ extern "C" {
 #define NNODES		2000
 #define AFMT		"%lx"
 #define OFFTYPE		long
-#define SAVERESTORE
+/* #define SAVERESTORE */
 #define XL_LITTLE_ENDIAN
 #endif
 
@@ -67,7 +77,7 @@ extern "C" {
 #define CVPTR(x)	ptrtoabs(x)
 #define NIL		(void *)0
 extern long ptrtoabs();
-#define SAVERESTORE
+/* #define SAVERESTORE */
 #define XL_LITTLE_ENDIAN
 #endif
 
@@ -151,7 +161,9 @@ extern long ptrtoabs();
 #endif
 
 /* Linux on Pentium */
-#if defined(__linux__) || defined(__GLIBC__)
+#if defined(__linux__) || defined(__GLIBC__) || defined(__CYGWIN__)
+#define AFMT            "%p"
+#include <inttypes.h>
 #include <endian.h>
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 #define XL_LITTLE_ENDIAN
@@ -160,13 +172,13 @@ extern long ptrtoabs();
 #endif
 #endif
 
-/* Apple CC */
+/* Apple CC (xcode, macOS, macintosh) */
 #ifdef __APPLE__
 #define NNODES 2000
-#define AFMT "%lx"
+#define AFMT "%p"
 #define OFFTYPE long
 #define NIL (void *)0
-#define SAVERESTORE
+/* #define SAVERESTORE */
 #include <sys/types.h>
 /* #if __BYTE_ORDER == __LITTLE_ENDIAN */
 #if defined(__LITTLE_ENDIAN__)
@@ -198,7 +210,7 @@ extern long ptrtoabs();
 #define LOCAL		static
 #endif
 #ifndef AFMT
-#define AFMT		"%x"
+#define AFMT		"%lx"
 #endif
 #ifndef FIXTYPE
 #define FIXTYPE		long
@@ -664,7 +676,7 @@ LVAL xgetstroutput(void);
 LVAL xgetlstoutput(void);
 LVAL xformat(void);
 LVAL xlistdir(void);
-
+LVAL xbigendianp(void);
 
 /* xlimage.c */
 
@@ -705,6 +717,7 @@ void trcputstr(const char *str);
 
 
 /* xlisp.c */
+long xlsrand(long seed);
 long xlrand(long range);
 double xlrealrand(void);
 void xlrdsave(LVAL expr);
@@ -823,6 +836,7 @@ LVAL xsqrt(void);
 LVAL xfix(void);
 LVAL xfloat(void);
 LVAL xrand(void);
+LVAL xsrand(void);
 LVAL xminusp(void);
 LVAL xzerop(void);
 LVAL xplusp(void);
@@ -834,7 +848,9 @@ LVAL xequ(void);
 LVAL xneq(void);
 LVAL xgeq(void);
 LVAL xgtr(void);
-
+LVAL xrealrand(void);
+LVAL xtan(void);
+LVAL xatan(void);
 
 /* xlobj.c */
 
@@ -989,20 +1005,14 @@ LVAL xpeek(void);
 LVAL xpoke(void);
 LVAL xaddrs(void);
 LVAL xgetruntime(void);
+LVAL xprofile(void);
+LVAL xquit(void);
 
-/* macstuff, unixstuff, winstuff */
+/* macstuff, unixstuff, winstuff, osstuff */
 
+LVAL xgetrealtime(void);
 extern const char os_pathchar;
 extern const char os_sepchar;
-
-/* security.c */
-extern char *secure_read_path;
-extern char *safe_write_path;
-extern int run_time_limit;
-extern int run_time;
-extern int memory_limit;
-#define SAFE_NYQUIST (safe_write_path != NULL)
-int ok_to_open(const char *filename, const char *mode);
 
 void osinit(const char *banner);
 void oserror(const char *msg);
@@ -1027,6 +1037,19 @@ void osdir_list_finish(void);
 LVAL xosc_enable(void);
 LVAL xget_temp_path(void);
 LVAL xfind_in_xlisp_path(void);
+LVAL xsetupconsole(void);
+LVAL xechoenabled(void);
+LVAL xget_user(void);
+
+/* security.c */
+
+extern char *secure_read_path;
+extern char *safe_write_path;
+extern int run_time_limit;
+extern int run_time;
+extern int memory_limit;
+#define SAFE_NYQUIST (safe_write_path != NULL)
+int ok_to_open(const char *filename, const char *mode);
 
 /* These are now implemented in path.c   -dmazzoni */
 const char *return_xlisp_path(void);
@@ -1038,9 +1061,11 @@ void set_xlisp_path(const char *p);
 void localinit(void);
 void localsymbols(void);
 void print_local_gc_info(void);
+void local_toplevel(void);
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif
+

@@ -14,7 +14,7 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../ui/ButtonHandle.h"
 class wxMouseState;
 
-class MuteButtonHandle final : public ButtonHandle
+class AUDACITY_DLL_API MuteButtonHandle final : public ButtonHandle
 {
    MuteButtonHandle(const MuteButtonHandle&) = delete;
 
@@ -31,7 +31,8 @@ protected:
       (const wxMouseEvent &event, AudacityProject *pProject, wxWindow *pParent)
       override;
 
-   wxString Tip(const wxMouseState &state) const override;
+   TranslatableString Tip(
+      const wxMouseState &state, AudacityProject &) const override;
 
    bool StopsOnKeystroke () override { return true; }
 
@@ -44,7 +45,7 @@ public:
 
 ////////////////////////////////////////////////////////////////////////////////
 
-class SoloButtonHandle final : public ButtonHandle
+class AUDACITY_DLL_API SoloButtonHandle final : public ButtonHandle
 {
    SoloButtonHandle(const SoloButtonHandle&) = delete;
 
@@ -61,7 +62,8 @@ protected:
       (const wxMouseEvent &event, AudacityProject *pProject, wxWindow *pParent)
       override;
 
-   wxString Tip(const wxMouseState &state) const override;
+   TranslatableString Tip(
+      const wxMouseState &state, AudacityProject &) const override;
 
    bool StopsOnKeystroke () override { return true; }
 

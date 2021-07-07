@@ -16,14 +16,16 @@
 #include <wx/dcclient.h>
 #include <wx/defs.h>
 #include <wx/dcmemory.h>
+#include <wx/frame.h>
 #include <wx/mimetype.h>
 
 #include "AudioIO.h"
-#include "Internat.h"
-#include "Project.h" // for GetActiveProject
+#include "Project.h"
+#include "ProjectWindowBase.h"
 #include "LabelTrack.h"
 #include "commands/CommandManager.h"
 #include "UndoManager.h"
+#include "ViewInfo.h"
 
 
 BEGIN_EVENT_TABLE(HighlightTextCtrl, wxTextCtrl)
@@ -56,14 +58,14 @@ void HighlightTextCtrl::OnMouseEvent(wxMouseEvent& event)
       if (nNewSyl != nCurSyl)
       {
          Syllable* pCurSyl = mLyricsPanel->GetSyllable(nNewSyl);
-         AudacityProject* pProj = GetActiveProject();
-         auto &selectedRegion = pProj->GetViewInfo().selectedRegion;
+         auto pProj = FindProjectFromWindow( this );
+         auto &selectedRegion = ViewInfo::Get( *pProj ).selectedRegion;
          selectedRegion.setT0( pCurSyl->t );
 
          //v Should probably select to end as in
-         // SelectActions::Handler::OnSelectCursorEnd,
+         // SelectUtilities::Handler::OnSelectCursorEnd,
          // but better to generalize that in AudacityProject methods.
-         pProj->mViewInfo.selectedRegion.setT1(pCurSyl->t);
+         selectedRegion.setT1( pCurSyl->t );
       }
    }
 
@@ -119,10 +121,10 @@ LyricsPanel::LyricsPanel(wxWindow* parent, wxWindowID id,
 
    parent->Bind(wxEVT_SHOW, &LyricsPanel::OnShow, this);
 
-   auto undoManager = project->GetUndoManager();
-   undoManager->Bind(EVT_UNDO_PUSHED, &LyricsPanel::UpdateLyrics, this);
-   undoManager->Bind(EVT_UNDO_MODIFIED, &LyricsPanel::UpdateLyrics, this);
-   undoManager->Bind(EVT_UNDO_RESET, &LyricsPanel::UpdateLyrics, this);
+   project->Bind(EVT_UNDO_PUSHED, &LyricsPanel::UpdateLyrics, this);
+   project->Bind(EVT_UNDO_MODIFIED, &LyricsPanel::UpdateLyrics, this);
+   project->Bind(EVT_UNDO_OR_REDO, &LyricsPanel::UpdateLyrics, this);
+   project->Bind(EVT_UNDO_RESET, &LyricsPanel::UpdateLyrics, this);
 
    wxTheApp->Bind(EVT_AUDIOIO_PLAYBACK, &LyricsPanel::OnStartStop, this);
    wxTheApp->Bind(EVT_AUDIOIO_CAPTURE, &LyricsPanel::OnStartStop, this);
@@ -220,7 +222,7 @@ void LyricsPanel::Finish(double finalT)
    mHighlightTextCtrl->ShowPosition(0);
 }
 
-// Binary-search for the syllable syllable whose char0 <= startChar <= char1.
+// Binary-search for the syllable whose char0 <= startChar <= char1.
 int LyricsPanel::FindSyllable(long startChar)
 {
    int i1, i2;
@@ -439,8 +441,8 @@ void LyricsPanel::Update(double t)
    {
       // TrackPanel::OnTimer passes gAudioIO->GetStreamTime(), which is -DBL_MAX if !IsStreamActive().
       // In that case, use the selection start time.
-      AudacityProject* pProj = GetActiveProject();
-      const auto &selectedRegion = pProj->GetViewInfo().selectedRegion;
+      auto pProj = FindProjectFromWindow( this );
+      const auto &selectedRegion = ViewInfo::Get( *pProj ).selectedRegion;
       mT = selectedRegion.t0();
    }
    else
@@ -479,6 +481,7 @@ void LyricsPanel::UpdateLyrics(wxEvent &e)
    e.Skip();
 
    // It's crucial to not do that repopulating during playback.
+   auto gAudioIO = AudioIOBase::Get();
    if (gAudioIO->IsStreamActive()) {
       mDelayedUpdate = true;
       return;
@@ -490,7 +493,8 @@ void LyricsPanel::UpdateLyrics(wxEvent &e)
       return;
 
    // Lyrics come from only the first label track.
-   auto pLabelTrack = *mProject->GetTracks()->Any< const LabelTrack >().begin();
+   auto pLabelTrack =
+      *TrackList::Get( *mProject ).Any< const LabelTrack >().begin();
    if (!pLabelTrack)
       return;
 
@@ -504,7 +508,7 @@ void LyricsPanel::UpdateLyrics(wxEvent &e)
 
    AddLabels(pLabelTrack);
    Finish(pLabelTrack->GetEndTime());
-   const auto &selectedRegion = mProject->GetViewInfo().selectedRegion;
+   const auto &selectedRegion = ViewInfo::Get( *mProject ).selectedRegion;
    Update(selectedRegion.t0());
 }
 
@@ -526,8 +530,9 @@ void LyricsPanel::OnShow(wxShowEvent &e)
 
 void LyricsPanel::OnKeyEvent(wxKeyEvent & event)
 {
-   AudacityProject *project = GetActiveProject();
-   project->GetCommandManager()->FilterKeyEvent(project, event, true);
+   auto project = FindProjectFromWindow( this );
+   auto &commandManager = CommandManager::Get( *project );
+   commandManager.FilterKeyEvent(project, event, true);
    event.Skip();
 }
 
@@ -549,7 +554,7 @@ void LyricsPanel::DoPaint(wxDC &dc)
 
       #ifdef __WXMAC__
          // Mac OS X automatically double-buffers the screen for you,
-         // so our bitmap is unneccessary
+         // so our bitmap is unnecessary
          HandlePaint(dc);
       #else
          wxBitmap bitmap(mWidth, mKaraokeHeight);

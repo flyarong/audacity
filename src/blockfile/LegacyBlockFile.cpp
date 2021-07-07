@@ -30,9 +30,8 @@
 #include <wx/utils.h>
 #include <wx/log.h>
 
-#include "../MemoryX.h"
 #include "../FileFormats.h"
-#include "../Internat.h"
+#include "../xml/XMLTagHandler.h"
 
 #include "sndfile.h"
 
@@ -74,11 +73,11 @@ void ComputeLegacySummaryInfo(const wxFileName &fileName,
 
    int read;
    {
-      Maybe<wxLogNull> silence{};
+      Optional<wxLogNull> silence{};
       const wxString fullPath{ fileName.GetFullPath() };
       wxFFile summaryFile(fullPath, wxT("rb"));
       if (Silent)
-         silence.create();
+         silence.emplace();
 
       // FIXME: TRAP_ERR no report to user of absent summary files.
       if (!summaryFile.IsOpened()) {
@@ -161,9 +160,9 @@ bool LegacyBlockFile::ReadSummary(ArrayOf<char> &data)
    wxFFile summaryFile(mFileName.GetFullPath(), wxT("rb"));
    size_t read;
    {
-      Maybe<wxLogNull> silence{};
+      Optional<wxLogNull> silence{};
       if (mSilentLog)
-         silence.create();
+         silence.emplace();
 
       if (!summaryFile.IsOpened()) {
 
@@ -219,7 +218,7 @@ void LegacyBlockFile::SaveXML(XMLWriter &xmlFile)
 
 // BuildFromXML methods should always return a BlockFile, not NULL,
 // even if the result is flawed (e.g., refers to nonexistent file),
-// as testing will be done in DirManager::ProjectFSCK().
+// as testing will be done in ProjectFSCK().
 /// static
 BlockFilePtr LegacyBlockFile::BuildFromXML(const FilePath &projDir, const wxChar **attrs,
                                          size_t len, sampleFormat format)

@@ -8,17 +8,17 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+
 #include "EnvelopeHandle.h"
 
-#include "../../Experimental.h"
-
-#include "../../MemoryX.h"
+#include "TrackView.h"
 
 #include "../../Envelope.h"
+#include "../../EnvelopeEditor.h"
 #include "../../HitTestResult.h"
 #include "../../prefs/WaveformSettings.h"
-#include "../../Project.h"
+#include "../../ProjectAudioIO.h"
+#include "../../ProjectHistory.h"
 #include "../../RefreshCode.h"
 #include "../../TimeTrack.h"
 #include "../../TrackArtist.h"
@@ -32,7 +32,7 @@ EnvelopeHandle::EnvelopeHandle( Envelope *pEnvelope )
 {
 }
 
-void EnvelopeHandle::Enter(bool)
+void EnvelopeHandle::Enter(bool, AudacityProject *)
 {
 #ifdef EXPERIMENTAL_TRACK_PANEL_HIGHLIGHTING
    mChangeHighlight = RefreshCode::RefreshCell;
@@ -55,7 +55,7 @@ namespace {
       (const AudacityProject &project, const TimeTrack &tt,
        double &dBRange, bool &dB, float &zoomMin, float &zoomMax)
    {
-      const auto &viewInfo = project.GetViewInfo();
+      const auto &viewInfo = ViewInfo::Get( project );
       dBRange = viewInfo.dBr;
       dB = tt.GetDisplayLog();
       zoomMin = tt.GetRangeLower(), zoomMax = tt.GetRangeUpper();
@@ -91,16 +91,12 @@ UIHandlePtr EnvelopeHandle::WaveTrackHitTest
 {
    /// method that tells us if the mouse event landed on an
    /// envelope boundary.
-   Envelope *const envelope = wt->GetEnvelopeAtX(state.GetX());
+   auto &viewInfo = ViewInfo::Get(*pProject);
+   auto time = viewInfo.PositionToTime(state.m_x, rect.GetX());
+   Envelope *const envelope = wt->GetEnvelopeAtTime(time);
 
    if (!envelope)
       return {};
-
-   const int displayType = wt->GetDisplay();
-   // Not an envelope hit, unless we're using a type of wavetrack display
-   // suitable for envelopes operations, ie one of the Wave displays.
-   if (displayType != WaveTrack::Waveform)
-      return {};  // No envelope, not a hit, so return.
 
    // Get envelope point, range 0.0 to 1.0
    const bool dB = !wt->GetWaveformSettings().isLinear();
@@ -120,7 +116,7 @@ UIHandlePtr EnvelopeHandle::HitEnvelope
  Envelope *envelope, float zoomMin, float zoomMax,
  bool dB, float dBRange, bool timeTrack)
 {
-   const ViewInfo &viewInfo = pProject->GetViewInfo();
+   const auto &viewInfo = ViewInfo::Get( *pProject );
 
    const double envValue =
       envelope->GetValue(viewInfo.PositionToTime(state.m_x, rect.x));
@@ -171,13 +167,14 @@ UIHandle::Result EnvelopeHandle::Click
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
    using namespace RefreshCode;
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if ( unsafe )
       return Cancelled;
 
    const wxMouseEvent &event = evt.event;
-   const ViewInfo &viewInfo = pProject->GetViewInfo();
-   const auto pTrack = static_cast<Track*>(evt.pCell.get());
+   const auto &viewInfo = ViewInfo::Get( *pProject );
+   const auto pView = std::static_pointer_cast<TrackView>(evt.pCell);
+   const auto pTrack = pView ? pView->FindTrack().get() : nullptr;
 
    mEnvelopeEditors.clear();
 
@@ -185,9 +182,6 @@ UIHandle::Result EnvelopeHandle::Click
    if (pTrack)
       result = pTrack->TypeSwitch< decltype(RefreshNone) >(
       [&](WaveTrack *wt) {
-         if (wt->GetDisplay() != WaveTrack::Waveform)
-            return Cancelled;
-
          if (!mEnvelope)
             return Cancelled;
 
@@ -200,7 +194,9 @@ UIHandle::Result EnvelopeHandle::Click
                mEnvelopeEditors.push_back(
                   std::make_unique< EnvelopeEditor >( *mEnvelope, true ) );
             else {
-               auto e2 = channel->GetEnvelopeAtX(event.GetX());
+               auto time =
+                  viewInfo.PositionToTime(event.GetX(), evt.rect.GetX());
+               auto e2 = channel->GetEnvelopeAtTime(time);
                if (e2)
                   mEnvelopeEditors.push_back(
                      std::make_unique< EnvelopeEditor >( *e2, true ) );
@@ -242,8 +238,8 @@ UIHandle::Result EnvelopeHandle::Drag
 {
    using namespace RefreshCode;
    const wxMouseEvent &event = evt.event;
-   const ViewInfo &viewInfo = pProject->GetViewInfo();
-   const bool unsafe = pProject->IsAudioActive();
+   const auto &viewInfo = ViewInfo::Get( *pProject );
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if (unsafe) {
       this->Cancel(pProject);
       return RefreshCell | Cancelled;
@@ -254,19 +250,17 @@ UIHandle::Result EnvelopeHandle::Drag
 }
 
 HitTestPreview EnvelopeHandle::Preview
-(const TrackPanelMouseState &, const AudacityProject *pProject)
+(const TrackPanelMouseState &, AudacityProject *pProject)
 {
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    static auto disabledCursor =
       ::MakeCursor(wxCURSOR_NO_ENTRY, DisabledCursorXpm, 16, 16);
    static auto envelopeCursor =
       ::MakeCursor(wxCURSOR_ARROW, EnvCursorXpm, 16, 16);
 
-   wxString message;
-   if (mTimeTrack)
-      message = _("Click and drag to warp playback time");
-   else
-      message = _("Click and drag to edit the amplitude envelope");
+   auto message = mTimeTrack
+      ? XO("Click and drag to warp playback time")
+      : XO("Click and drag to edit the amplitude envelope");
 
    return {
       message,
@@ -281,18 +275,18 @@ UIHandle::Result EnvelopeHandle::Release
  wxWindow *)
 {
    const wxMouseEvent &event = evt.event;
-   const ViewInfo &viewInfo = pProject->GetViewInfo();
-   const bool unsafe = pProject->IsAudioActive();
+   const auto &viewInfo = ViewInfo::Get( *pProject );
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if (unsafe)
       return this->Cancel(pProject);
 
    const bool needUpdate = ForwardEventToEnvelopes(event, viewInfo);
 
-   pProject->PushState(
+   ProjectHistory::Get( *pProject ).PushState(
       /* i18n-hint: (verb) Audacity has just adjusted the envelope .*/
-      _("Adjusted envelope."),
+      XO("Adjusted envelope."),
       /* i18n-hint: The envelope is a curve that controls the audio loudness.*/
-      _("Envelope")
+      XO("Envelope")
    );
 
    mEnvelopeEditors.clear();
@@ -303,7 +297,7 @@ UIHandle::Result EnvelopeHandle::Release
 
 UIHandle::Result EnvelopeHandle::Cancel(AudacityProject *pProject)
 {
-   pProject->RollbackState();
+   ProjectHistory::Get( *pProject ).RollbackState();
    mEnvelopeEditors.clear();
    return RefreshCode::RefreshCell;
 }

@@ -19,20 +19,20 @@
 #include "Command.h"
 #include "CommandType.h"
 
-#define GET_TRACK_INFO_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Get Track Info") }
-
 class GetTrackInfoCommand final : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    GetTrackInfoCommand();
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return GET_TRACK_INFO_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Gets track values as JSON.");};
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Gets track values as JSON.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Tools#get_track_info");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Tools#get_track_info";}
 
    bool Apply(const CommandContext &context ) override;
 public:

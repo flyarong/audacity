@@ -9,8 +9,10 @@
 #include "stdefs.h"
 
 /* used for *AUDIO-MARKERS* */
-extern long sound_frames;
+extern int64_t sound_frames;
 extern double sound_srate;
+
+extern long max_sample_blocks;
 
 #if OSC
 extern int nosc_enabled; /* enable polling for OSC messages */
@@ -23,7 +25,7 @@ extern int nosc_enabled; /* enable polling for OSC messages */
 #define PERMS            0644           /* -rw-r--r-- */
 
 /* default stop sample count (for clipping) */
-#define MAX_STOP 0x7FFFFFFF
+#define MAX_STOP 0x7FFFFFFFFFFFFFFF
 
 /* default stop time (for clipping) */
 #define MAX_STOP_TIME 10E20
@@ -226,7 +228,7 @@ extern int nosc_enabled; /* enable polling for OSC messages */
 #define INTERP_SHIFT 2
 
 LVAL snd_badsr(void);
-long check_terminate_cnt(long tc);
+int64_t check_terminate_cnt(int64_t tc);
 
 typedef double time_type;
 typedef double rate_type;
@@ -241,13 +243,13 @@ typedef double promoted_sample_type;
  */
 #define MAX_SND_CHANNELS 24
 
-#define max_table_len 1000001
+#define max_table_len 100000000
 /* Set to 4 for debugging block allocation stuff, 1012? for
    production
 */
 /* leave a few words short of 1024 in case we allocate powers of 2 */
-#define max_sample_block_len 1020
-/* #define max_sample_block_len 4 */
+#define max_sample_block_len 1016
+// #define max_sample_block_len 4
 
 /* longest allowed sample is basically 2^31 but a bit lower to 
    allow for rounding */
@@ -286,11 +288,11 @@ typedef struct snd_susp_struct {
     snd_mark_fn mark;
     snd_print_tree_fn print_tree; /* debugging */
     char *name;        /* string name for debugging */
-    long  toss_cnt;    /* return this many zeros, then compute */
-    long  current;     /* current sample number */
+    int64_t toss_cnt;  /* return this many zeros, then compute */
+    int64_t current;   /* current sample number */
     double sr;         /* sample rate */
     time_type t0;      /* starting time */
-    long log_stop_cnt; /* logical stop count */
+    int64_t log_stop_cnt; /* logical stop count */
     /* other susp dependent stuff will be here... */
 } snd_susp_node, *snd_susp_type;
 
@@ -323,28 +325,27 @@ typedef struct table_struct {
 #define UNKNOWN (-10-max_sample_block_len)
 
 typedef struct sound_struct {
-    sample_block_type   (*get_next)(struct sound_struct *snd, long *cnt);
-    time_type           time;   /* logical starting time */
-    time_type           t0;     /* quantized time of first sample */
-    long                stop;  /* stop (clipping) sample no. */
-    time_type           true_t0;    /* exact time of first sample */
-    rate_type           sr;     /* sample rate */
-    long                current;        /* current sample number,
-                                         if negative, then the first 
-                                         -current samples must be dropped
-                                         in order to find the first sample */
-    long                logical_stop_cnt; /* log stop sample no, -1=unknwn */
-    snd_list_type       list;   /* sample block list, starting at curr. samp */
-    sample_type         scale;  /* scale factor for the result */
-    long                prepend_cnt;    /* how many zeros to prepend */
+    sample_block_type (*get_next)(struct sound_struct *snd, int *cnt);
+    time_type         time;    /* logical starting time */
+    time_type         t0;      /* quantized time of first sample */
+    int64_t           stop;    /* stop (clipping) sample no. */
+    time_type         true_t0; /* exact time of first sample */
+    rate_type         sr;      /* sample rate */
+    int64_t           current; /* current sample number,
+                                  if negative, then the first 
+                                  -current samples must be dropped
+                                  in order to find the first sample */
+    int64_t           logical_stop_cnt; /* log stop sample no, -1=unknwn */
+    snd_list_type     list;    /* sample block list, starting at curr. samp */
+    sample_type       scale;   /* scale factor for the result */
+    int64_t           prepend_cnt; /* how many zeros to prepend */
     /* function to use as get_next after prepended zeros are generated: */
-    sample_block_type   (*after_prepend)
-                        (struct sound_struct * snd, long * cnt);
-    table_type table;   /* pointer to table-ized version of this sound */
-    long *extra;        /* used for extra state information, first word of extra
-			   state should be the length of the extra state 
-			   (see sound_unref())
-                         */
+    sample_block_type (*after_prepend)
+                      (struct sound_struct * snd, int *cnt);
+    table_type table; /* pointer to table-ized version of this sound */
+    int64_t *extra;   /* used for extra state information, extra[0]
+                              should be the length of the extra state 
+                              (see sound_unref()) */
 } sound_node, *sound_type;
 
 /* convert number of samples to memory size: */
@@ -357,6 +358,9 @@ extern sample_block_type internal_zero_block;
 extern snd_list_type zero_snd_list;
 
 extern sound_type printing_this_sound;  /* debugging global */
+
+int64_t snd_set_max_audio_mem(int64_t m);
+/* LISP: (SND-SET-MAX-AUDIO-MEM FIXNUM) */
 
 extern double sound_latency; /* controls output latency */
 double snd_set_latency(double latency); 
@@ -375,10 +379,10 @@ void snd_list_unref(snd_list_type list);
 LVAL cvsound(sound_type);
 extern LVAL a_sound;
 
-sample_block_type SND_get_next(sound_type snd, long * cnt);
-sample_block_type SND_get_first(sound_type snd, long * cnt);
-sample_block_type SND_get_zeros(sound_type snd, long * cnt);
-sample_block_type SND_flush(sound_type snd, long * cnt);
+sample_block_type SND_get_next(sound_type snd, int *cnt);
+sample_block_type SND_get_first(sound_type snd, int *cnt);
+sample_block_type SND_get_zeros(sound_type snd, int *cnt);
+sample_block_type SND_flush(sound_type snd, int *cnt);
 
 double hz_to_step(double);    /* LISP: (HZ-TO-STEP ANYNUM) */
 int interp_style(sound_type s, rate_type sr);
@@ -411,7 +415,7 @@ sound_type snd_xform(sound_type snd, rate_type sr, time_type time,
 sound_type sound_create(snd_susp_type susp, time_type t0, rate_type sr,
         promoted_sample_type scale);
 
-void min_cnt(long *cnt_ptr, sound_type sound, snd_susp_type susp, long cnt);
+void min_cnt(int64_t *cnt_ptr, sound_type sound, snd_susp_type susp, long cnt);
 void indent(int n);
 void sound_prepend_zeros(sound_type snd, time_type t0);
 
@@ -422,18 +426,20 @@ void sound_prepend_zeros(sound_type snd, time_type t0);
 extern long blocks_to_watch_len;
 extern sample_block_type blocks_to_watch[blocks_to_watch_max];
 
-void block_watch(long sample_block);
+void block_watch(int64_t sample_block);
     /* LISP: (BLOCK-WATCH FIXNUM) */
-long sound_nth_block(sound_type snd, long n);
-    /* LISP: (SOUND-NTH-BLOCK SOUND FIXNUM) */
+int64_t sound_nth_block(sound_type snd, long n);
+    /* LISP: (SOUND-NTH-BLOCK SOUND LONG) */
 #endif
+
+LVAL sound_array_copy(LVAL sa);
 
 sound_type sound_copy(sound_type snd); 
     /* LISP: (SND-COPY SOUND) */
 void sound_xlmark(void *a_sound);
 void sound_print(LVAL snd_expr, long n);
-    /* LISP: (SND-PRINT ANY FIXNUM) */
-void sound_play(LVAL snd_expr);
+    /* LISP: (SND-PRINT ANY LONG) */
+int64_t sound_play(LVAL snd_expr);
     /* LISP: (SND-PLAY ANY) */
 void stats(void);
     /* LISP: (STATS) */
@@ -541,32 +547,22 @@ double step_to_hz(double);
  */
 #define susp_check_term_log_block_samples(sound, sample_block_ptr, sample_ptr, sample_cnt, bit, all) \
     if (susp->sample_cnt == 0) { \
-        susp_get_block_samples(sound, sample_block_ptr, sample_ptr, sample_cnt); \
-/*OLD   if (susp->sound->logical_stop_cnt ==                  \
-            susp->sound->current - susp->sample_cnt) { \
-*/ \
+        susp_get_block_samples(sound, sample_block_ptr, \
+                               sample_ptr, sample_cnt); \
         if (susp->sound->logical_stop_cnt != UNKNOWN && \
             !(susp->logical_stop_bits & bit)) { \
             susp->logical_stop_bits |= bit; \
-/*OLD \
-            if (susp->logical_stop_bits == all) { \
-                susp->susp.log_stop_cnt = (long) \
-                 ((((susp->sound->current - susp->sample_cnt) / \
-                   susp->sound->sr + susp->sound->t0) - \
-                   susp->susp.t0) * susp->susp.sr + 0.5); \
-                assert(susp->susp.log_stop_cnt >= 0); } } \
-*/ \
-            susp->susp.log_stop_cnt = max(susp->susp.log_stop_cnt, \
+            susp->susp.log_stop_cnt = (int64_t) max(susp->susp.log_stop_cnt, \
                     (((susp->sound->logical_stop_cnt / \
                        susp->sound->sr + susp->sound->t0) - \
                       susp->susp.t0) * susp->susp.sr + 0.5)); } \
         if (susp->sample_ptr == zero_block->samples) { \
             susp->terminate_bits |= bit; \
             if (susp->terminate_bits == all) { \
-                susp->terminate_cnt = (long) \
-                 ((((susp->sound->current - susp->sample_cnt) / \
-                   susp->sound->sr + susp->sound->t0) - \
-                   susp->susp.t0) * susp->susp.sr + 0.5); \
+                susp->terminate_cnt = ROUNDBIG( \
+                  (((susp->sound->current - susp->sample_cnt) / \
+                    susp->sound->sr + susp->sound->t0) - \
+                   susp->susp.t0) * susp->susp.sr); \
     } } }
 
 
@@ -580,7 +576,7 @@ double step_to_hz(double);
  */
 #define logical_stop_cnt_cvt(sound) \
     (sound->logical_stop_cnt == UNKNOWN ? UNKNOWN : \
-     ROUND((sound->logical_stop_cnt / sound->sr) * susp->susp.sr))
+     ROUNDBIG((sound->logical_stop_cnt / sound->sr) * susp->susp.sr))
 
 
 /* logical_stop_test tests to see if sound has logically stopped; if so,

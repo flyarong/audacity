@@ -14,10 +14,9 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
-#include "BassTreble.h"
 
-#include "../Experimental.h"
+#include "BassTreble.h"
+#include "LoadEffects.h"
 
 #include <math.h>
 #include <algorithm>
@@ -58,6 +57,11 @@ enum kShelfType
    kTreble
 };
 
+const ComponentInterfaceSymbol EffectBassTreble::Symbol
+{ XO("Bass and Treble") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectBassTreble > reg; }
+
 BEGIN_EVENT_TABLE(EffectBassTreble, wxEvtHandler)
    EVT_SLIDER(ID_Bass,     EffectBassTreble::OnBassSlider)
    EVT_SLIDER(ID_Treble,   EffectBassTreble::OnTrebleSlider)
@@ -86,17 +90,17 @@ EffectBassTreble::~EffectBassTreble()
 
 ComponentInterfaceSymbol EffectBassTreble::GetSymbol()
 {
-   return BASSTREBLE_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectBassTreble::GetDescription()
+TranslatableString EffectBassTreble::GetDescription()
 {
-   return _("Simple tone control effect");
+   return XO("Simple tone control effect");
 }
 
-wxString EffectBassTreble::ManualPage()
+ManualPageID EffectBassTreble::ManualPage()
 {
-   return wxT("Bass_and_Treble");
+   return L"Bass_and_Treble";
 }
 
 // EffectDefinitionInterface implementation
@@ -220,59 +224,62 @@ void EffectBassTreble::PopulateOrExchange(ShuttleGui & S)
    S.SetBorder(5);
    S.AddSpace(0, 5);
 
-   S.StartStatic(_("Tone controls"));
+   S.StartStatic(XO("Tone controls"));
    {
       S.StartMultiColumn(3, wxEXPAND);
       {
          S.SetStretchyCol(2);
 
          // Bass control
-         FloatingPointValidator<double> vldBass(1, &mBass);
-         vldBass.SetRange(MIN_Bass, MAX_Bass);
-         mBassT = S.Id(ID_Bass).AddTextBox(_("Ba&ss (dB):"), wxT(""), 10);
-         mBassT->SetName(_("Bass (dB):"));
-         mBassT->SetValidator(vldBass);
+         mBassT = S.Id(ID_Bass)
+            .Name(XO("Bass (dB):"))
+            .Validator<FloatingPointValidator<double>>(
+               1, &mBass, NumValidatorStyle::DEFAULT, MIN_Bass, MAX_Bass)
+            .AddTextBox(XXO("Ba&ss (dB):"), wxT(""), 10);
 
-         S.SetStyle(wxSL_HORIZONTAL);
-         mBassS = S.Id(ID_Bass).AddSlider( {}, 0, MAX_Bass * SCL_Bass, MIN_Bass * SCL_Bass);
-         mBassS->SetName(_("Bass"));
+         mBassS = S.Id(ID_Bass)
+            .Name(XO("Bass"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {}, 0, MAX_Bass * SCL_Bass, MIN_Bass * SCL_Bass);
 
          // Treble control
-         FloatingPointValidator<double> vldTreble(1, &mTreble);
-         vldTreble.SetRange(MIN_Treble, MAX_Treble);
-         mTrebleT = S.Id(ID_Treble).AddTextBox(_("&Treble (dB):"), wxT(""), 10);
-         mTrebleT->SetValidator(vldTreble);
+         mTrebleT = S.Id(ID_Treble)
+            .Validator<FloatingPointValidator<double>>(
+               1, &mTreble, NumValidatorStyle::DEFAULT, MIN_Treble, MAX_Treble)
+            .AddTextBox(XXO("&Treble (dB):"), wxT(""), 10);
 
-         S.SetStyle(wxSL_HORIZONTAL);
-         mTrebleS = S.Id(ID_Treble).AddSlider( {}, 0, MAX_Treble * SCL_Treble, MIN_Treble * SCL_Treble);
-         mTrebleS->SetName(_("Treble"));
+         mTrebleS = S.Id(ID_Treble)
+            .Name(XO("Treble"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {}, 0, MAX_Treble * SCL_Treble, MIN_Treble * SCL_Treble);
       }
       S.EndMultiColumn();
    }
    S.EndStatic();
 
-   S.StartStatic(_("Output"));
+   S.StartStatic(XO("Output"));
    {
       S.StartMultiColumn(3, wxEXPAND);
       {
          S.SetStretchyCol(2);
 
          // Gain control
-         FloatingPointValidator<double> vldGain(1, &mGain);
-         vldGain.SetRange(MIN_Gain, MAX_Gain);
-         mGainT = S.Id(ID_Gain).AddTextBox(_("&Volume (dB):"), wxT(""), 10);
-         mGainT->SetValidator(vldGain);
+         mGainT = S.Id(ID_Gain)
+            .Validator<FloatingPointValidator<double>>(
+               1, &mGain, NumValidatorStyle::DEFAULT, MIN_Gain, MAX_Gain)
+            .AddTextBox(XXO("&Volume (dB):"), wxT(""), 10);
 
-         S.SetStyle(wxSL_HORIZONTAL);
-         mGainS = S.Id(ID_Gain).AddSlider( {}, 0, MAX_Gain * SCL_Gain, MIN_Gain * SCL_Gain);
-         mGainS->SetName(_("Level"));
+         mGainS = S.Id(ID_Gain)
+            .Name(XO("Level"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {}, 0, MAX_Gain * SCL_Gain, MIN_Gain * SCL_Gain);
       }
       S.EndMultiColumn();
 
       S.StartMultiColumn(2, wxCENTER);
       {
          // Link checkbox
-         mLinkCheckBox = S.Id(ID_Link).AddCheckBox(_("&Link Volume control to Tone controls"),
+         mLinkCheckBox = S.Id(ID_Link).AddCheckBox(XXO("&Link Volume control to Tone controls"),
                                           DEF_Link);
       }
       S.EndMultiColumn();
@@ -363,15 +370,15 @@ size_t EffectBassTreble::InstanceProcess(EffectBassTrebleState & data,
 
    data.gain = DB_TO_LINEAR(mGain);
 
-   // Compute coefficents of the low shelf biquand IIR filter
+   // Compute coefficients of the low shelf biquand IIR filter
    if (data.bass != oldBass)
-      Coefficents(data.hzBass, data.slope, mBass, data.samplerate, kBass,
+      Coefficients(data.hzBass, data.slope, mBass, data.samplerate, kBass,
                   data.a0Bass, data.a1Bass, data.a2Bass,
                   data.b0Bass, data.b1Bass, data.b2Bass);
 
-   // Compute coefficents of the high shelf biquand IIR filter
+   // Compute coefficients of the high shelf biquand IIR filter
    if (data.treble != oldTreble)
-      Coefficents(data.hzTreble, data.slope, mTreble, data.samplerate, kTreble,
+      Coefficients(data.hzTreble, data.slope, mTreble, data.samplerate, kTreble,
                   data.a0Treble, data.a1Treble, data.a2Treble,
                   data.b0Treble, data.b1Treble, data.b2Treble);
 
@@ -387,7 +394,7 @@ size_t EffectBassTreble::InstanceProcess(EffectBassTrebleState & data,
 // Effect implementation
 
 
-void EffectBassTreble::Coefficents(double hz, double slope, double gain, double samplerate, int type,
+void EffectBassTreble::Coefficients(double hz, double slope, double gain, double samplerate, int type,
                                    double& a0, double& a1, double& a2,
                                    double& b0, double& b1, double& b2)
 {

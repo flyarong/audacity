@@ -402,21 +402,23 @@ writing audio.
 *//****************************************************************//**
 
 \class AudioIOListener
-\brief Monitors record play start/stop and new blockfiles.  Has 
+\brief Monitors record play start/stop and new sample blocks.  Has
 callbacks for these events.
 
 *//****************************************************************//**
 
 \class AudioIOStartStreamOptions
 \brief struct holding stream options, including a pointer to the 
-TimeTrack and AudioIOListener and whether the playback is looped.
+time warp info and AudioIOListener and whether the playback is looped.
 
 *//*******************************************************************/
 
-#include "Audacity.h" // for USE_* macros
+
 #include "AudioIO.h"
 
-#include "Experimental.h"
+
+
+#include "AudioIOListener.h"
 
 #include "float_cast.h"
 #include "DeviceManager.h"
@@ -434,39 +436,48 @@ TimeTrack and AudioIOListener and whether the playback is looped.
 #include <alloca.h>
 #endif
 
+#include "portaudio.h"
+
 #if USE_PORTMIXER
 #include "portmixer.h"
 #endif
 
+#include <wx/app.h>
+#include <wx/frame.h>
 #include <wx/wxcrtvararg.h>
 #include <wx/log.h>
 #include <wx/textctrl.h>
 #include <wx/timer.h>
 #include <wx/intl.h>
 #include <wx/debug.h>
-#include <wx/sstream.h>
-#include <wx/txtstrm.h>
 
-#include "AudacityApp.h"
-#include "AudacityException.h"
+#if defined(__WXMAC__) || defined(__WXMSW__)
+#include <wx/power.h>
+#endif
+
 #include "Mix.h"
 #include "Resample.h"
 #include "RingBuffer.h"
 #include "prefs/GUISettings.h"
 #include "Prefs.h"
 #include "Project.h"
-#include "TimeTrack.h"
+#include "DBConnection.h"
+#include "ProjectFileIO.h"
 #include "WaveTrack.h"
-#include "AutoRecovery.h"
 
-#include "effects/EffectManager.h"
-#include "prefs/QualityPrefs.h"
-#include "toolbars/ControlToolBar.h"
-#include "widgets/Meter.h"
+#include "effects/RealtimeEffectManager.h"
+#include "prefs/QualitySettings.h"
+#include "prefs/RecordingPrefs.h"
+#include "widgets/MeterPanelBase.h"
+#include "widgets/AudacityMessageBox.h"
 #include "widgets/ErrorDialog.h"
-#include "widgets/Warning.h"
 
 #ifdef EXPERIMENTAL_MIDI_OUT
+
+#include "../lib-src/portmidi/pm_common/portmidi.h"
+#include "../lib-src/portmidi/porttime/porttime.h"
+#include "../lib-src/header-substitutes/allegro.h"
+
    #define MIDI_SLEEP 10 /* milliseconds */
    // how long do we think the thread that fills MIDI buffers,
    // if it is separate from the portaudio thread,
@@ -478,7 +489,7 @@ TimeTrack and AudioIOListener and whether the playback is looped.
    #endif
    #define ROUND(x) (int) ((x)+0.5)
    //#include <string.h>
-   #include "../lib-src/portmidi/pm_common/portmidi.h"
+//   #include "../lib-src/portmidi/pm_common/portmidi.h"
    #include "../lib-src/portaudio-v19/src/common/pa_util.h"
    #include "NoteTrack.h"
 #endif
@@ -491,8 +502,10 @@ TimeTrack and AudioIOListener and whether the playback is looped.
 using std::max;
 using std::min;
 
-std::unique_ptr<AudioIO> ugAudioIO;
-AudioIO *gAudioIO{};
+AudioIO *AudioIO::Get()
+{
+   return static_cast< AudioIO* >( AudioIOBase::Get() );
+}
 
 wxDEFINE_EVENT(EVT_AUDIOIO_PLAYBACK, wxCommandEvent);
 wxDEFINE_EVENT(EVT_AUDIOIO_CAPTURE, wxCommandEvent);
@@ -500,12 +513,6 @@ wxDEFINE_EVENT(EVT_AUDIOIO_MONITOR, wxCommandEvent);
 
 // static
 int AudioIoCallback::mNextStreamToken = 0;
-int AudioIoCallback::mCachedPlaybackIndex = -1;
-std::vector<long> AudioIoCallback::mCachedPlaybackRates;
-int AudioIoCallback::mCachedCaptureIndex = -1;
-std::vector<long> AudioIoCallback::mCachedCaptureRates;
-std::vector<long> AudioIoCallback::mCachedSampleRates;
-double AudioIoCallback::mCachedBestRateIn = 0.0;
 double AudioIoCallback::mCachedBestRateOut;
 bool AudioIoCallback::mCachedBestRatePlaying;
 bool AudioIoCallback::mCachedBestRateCapturing;
@@ -521,8 +528,6 @@ constexpr size_t TimeQueueGrainSize = 2000;
 
 #ifdef EXPERIMENTAL_SCRUBBING_SUPPORT
 
-#include "tracks/ui/Scrubbing.h"
-
 #ifdef __WXGTK__
    // Might #define this for a useful thing on Linux
    #undef REALTIME_ALSA_THREAD
@@ -536,7 +541,7 @@ constexpr size_t TimeQueueGrainSize = 2000;
 #endif
 
 
-struct AudioIoCallback::ScrubState
+struct AudioIoCallback::ScrubState : NonInterferingBase
 {
    ScrubState(double t0,
               double rate,
@@ -544,7 +549,7 @@ struct AudioIoCallback::ScrubState
       : mRate(rate)
       , mStartTime( t0 )
    {
-      const double t1 = options.bySpeed ? 1.0 : t0;
+      const double t1 = options.bySpeed ? options.initSpeed : t0;
       Update( t1, options );
    }
 
@@ -559,25 +564,33 @@ struct AudioIoCallback::ScrubState
    {
       // Called by the thread that calls AudioIO::FillBuffers
       startSample = endSample = duration = -1LL;
+      sampleCount s0Init;
 
       Message message( mMessage.Read() );
       if ( !mStarted ) {
-         // Make some initial silence
-         const sampleCount s0 { llrint( mRate *
+         s0Init = llrint( mRate *
             std::max( message.options.minTime,
-               std::min( message.options.maxTime, mStartTime ) ) ) };
-         mData.mS0 = mData.mS1 = s0;
-         mData.mGoal = -1;
-         mData.mDuration = duration = inDuration;
-         mData.mSilence = 0;
-         mStarted = true;
+               std::min( message.options.maxTime, mStartTime ) ) );
+
+         // Make some initial silence. This is not needed in the case of
+         // keyboard scrubbing or play-at-speed, because the initial speed
+         // is known when this function is called the first time.
+         if ( !(message.options.isKeyboardScrubbing ||
+            message.options.isPlayingAtSpeed) ) {
+            mData.mS0 = mData.mS1 = s0Init;
+            mData.mGoal = -1;
+            mData.mDuration = duration = inDuration;
+            mData.mSilence = 0;
+         }
       }
-      else {
+
+      if (mStarted || message.options.isKeyboardScrubbing ||
+         message.options.isPlayingAtSpeed) {
          Data newData;
          inDuration += mAccumulatedSeekDuration;
 
-         // Use the previous end as NEW start.
-         const auto s0 = mData.mS1;
+         // If already started, use the previous end as NEW start.
+         const auto s0 = mStarted ? mData.mS1 : s0Init;
          const sampleCount s1 ( message.options.bySpeed
             ? s0.as_double() +
                lrint(inDuration.as_double() * message.end) // end is a speed
@@ -593,6 +606,8 @@ struct AudioIoCallback::ScrubState
          }
          mData = newData;
       };
+
+      mStarted = true;
 
       Data &entry = mData;
       if (  mStopped.load( std::memory_order_relaxed ) ) {
@@ -817,45 +832,6 @@ static double SystemTime(bool usingAlsa)
 }
 #endif
 
-const int AudioIO::StandardRates[] = {
-   8000,
-   11025,
-   16000,
-   22050,
-   32000,
-   44100,
-   48000,
-   88200,
-   96000,
-   176400,
-   192000,
-   352800,
-   384000
-};
-const int AudioIO::NumStandardRates = sizeof(AudioIO::StandardRates) /
-                                      sizeof(AudioIO::StandardRates[0]);
-const int AudioIO::RatesToTry[] = {
-   8000,
-   9600,
-   11025,
-   12000,
-   15000,
-   16000,
-   22050,
-   24000,
-   32000,
-   44100,
-   48000,
-   88200,
-   96000,
-   176400,
-   192000,
-   352800,
-   384000
-};
-const int AudioIO::NumRatesToTry = sizeof(AudioIO::RatesToTry) /
-                                      sizeof(AudioIO::RatesToTry[0]);
-
 int audacityAudioCallback(const void *inputBuffer, void *outputBuffer,
                           unsigned long framesPerBuffer,
                           const PaStreamCallbackTimeInfo *timeInfo,
@@ -932,62 +908,47 @@ class MidiThread final : public AudioThread {
 //
 //////////////////////////////////////////////////////////////////////
 
-void InitAudioIO()
+void AudioIO::Init()
 {
    ugAudioIO.reset(safenew AudioIO());
-   gAudioIO = ugAudioIO.get();
-   gAudioIO->mThread->Run();
+   Get()->mThread->Run();
 #ifdef EXPERIMENTAL_MIDI_OUT
 #ifdef USE_MIDI_THREAD
-   gAudioIO->mMidiThread->Run();
+   Get()->mMidiThread->Run();
 #endif
 #endif
 
    // Make sure device prefs are initialized
    if (gPrefs->Read(wxT("AudioIO/RecordingDevice"), wxT("")).empty()) {
-      int i = AudioIO::getRecordDevIndex();
+      int i = getRecordDevIndex();
       const PaDeviceInfo *info = Pa_GetDeviceInfo(i);
       if (info) {
-         gPrefs->Write(wxT("/AudioIO/RecordingDevice"), DeviceName(info));
-         gPrefs->Write(wxT("/AudioIO/Host"), HostName(info));
+         AudioIORecordingDevice.Write(DeviceName(info));
+         AudioIOHost.Write(HostName(info));
       }
    }
 
    if (gPrefs->Read(wxT("AudioIO/PlaybackDevice"), wxT("")).empty()) {
-      int i = AudioIO::getPlayDevIndex();
+      int i = getPlayDevIndex();
       const PaDeviceInfo *info = Pa_GetDeviceInfo(i);
       if (info) {
-         gPrefs->Write(wxT("/AudioIO/PlaybackDevice"), DeviceName(info));
-         gPrefs->Write(wxT("/AudioIO/Host"), HostName(info));
+         AudioIOPlaybackDevice.Write(DeviceName(info));
+         AudioIOHost.Write(HostName(info));
       }
    }
 
    gPrefs->Flush();
 }
 
-void DeinitAudioIO()
+void AudioIO::Deinit()
 {
    ugAudioIO.reset();
 }
 
-wxString DeviceName(const PaDeviceInfo* info)
-{
-   wxString infoName = wxSafeConvertMB2WX(info->name);
-
-   return infoName;
-}
-
-wxString HostName(const PaDeviceInfo* info)
-{
-   wxString hostapiName = wxSafeConvertMB2WX(Pa_GetHostApiInfo(info->hostApi)->name);
-
-   return hostapiName;
-}
-
 bool AudioIO::ValidateDeviceNames(const wxString &play, const wxString &rec)
 {
-   const PaDeviceInfo *pInfo = Pa_GetDeviceInfo(AudioIO::getPlayDevIndex(play));
-   const PaDeviceInfo *rInfo = Pa_GetDeviceInfo(AudioIO::getRecordDevIndex(rec));
+   const PaDeviceInfo *pInfo = Pa_GetDeviceInfo(getPlayDevIndex(play));
+   const PaDeviceInfo *rInfo = Pa_GetDeviceInfo(getRecordDevIndex(rec));
 
    // Valid iff both defined and the same api.
    return pInfo != nullptr && rInfo != nullptr && pInfo->hostApi == rInfo->hostApi;
@@ -1035,25 +996,28 @@ AudioIO::AudioIO()
    mLastRecordingOffset = 0.0;
    mNumCaptureChannels = 0;
    mPaused = false;
+   mSilenceLevel = 0.0;
 
-   mListener = NULL;
    mUpdateMeters = false;
    mUpdatingMeters = false;
 
    mOwningProject = NULL;
-   mOutputMeter = NULL;
+   mOutputMeter.Release();
 
    PaError err = Pa_Initialize();
 
    if (err != paNoError) {
-      wxString errStr = _("Could not find any audio devices.\n");
-      errStr += _("You will not be able to play or record audio.\n\n");
+      auto errStr = XO("Could not find any audio devices.\n");
+      errStr += XO("You will not be able to play or record audio.\n\n");
       wxString paErrStr = LAT1CTOWX(Pa_GetErrorText(err));
       if (!paErrStr.empty())
-         errStr += _("Error: ")+paErrStr;
+         errStr += XO("Error: %s").Format( paErrStr );
       // XXX: we are in libaudacity, popping up dialogs not allowed!  A
       // long-term solution will probably involve exceptions
-      AudacityMessageBox(errStr, _("Error Initializing Audio"), wxICON_ERROR|wxOK);
+      AudacityMessageBox(
+         errStr,
+         XO("Error Initializing Audio"),
+         wxICON_ERROR|wxOK);
 
       // Since PortAudio is not initialized, all calls to PortAudio
       // functions will fail.  This will give reasonable behavior, since
@@ -1065,15 +1029,18 @@ AudioIO::AudioIO()
    PmError pmErr = Pm_Initialize();
 
    if (pmErr != pmNoError) {
-      wxString errStr =
-              _("There was an error initializing the midi i/o layer.\n");
-      errStr += _("You will not be able to play midi.\n\n");
+      auto errStr =
+              XO("There was an error initializing the midi i/o layer.\n");
+      errStr += XO("You will not be able to play midi.\n\n");
       wxString pmErrStr = LAT1CTOWX(Pm_GetErrorText(pmErr));
       if (!pmErrStr.empty())
-         errStr += _("Error: ") + pmErrStr;
+         errStr += XO("Error: %s").Format( pmErrStr );
       // XXX: we are in libaudacity, popping up dialogs not allowed!  A
       // long-term solution will probably involve exceptions
-      AudacityMessageBox(errStr, _("Error Initializing Midi"), wxICON_ERROR|wxOK);
+      AudacityMessageBox(
+         errStr,
+         XO("Error Initializing Midi"),
+         wxICON_ERROR|wxOK);
 
       // Same logic for PortMidi as described above for PortAudio
    }
@@ -1146,17 +1113,6 @@ AudioIO::~AudioIO()
 
    mThread->Delete();
    mThread.reset();
-
-   gAudioIO = nullptr;
-}
-
-void AudioIO::SetMixer(int inputSource)
-{
-#if defined(USE_PORTMIXER)
-   int oldRecordSource = Px_GetCurrentInputSource(mPortMixer);
-   if ( inputSource != oldRecordSource )
-         Px_SetCurrentInputSource(mPortMixer, inputSource);
-#endif
 }
 
 void AudioIO::SetMixer(int inputSource, float recordVolume,
@@ -1171,7 +1127,7 @@ void AudioIO::SetMixer(int inputSource, float recordVolume,
    float oldRecordVolume = Px_GetInputVolume(mixer);
    float oldPlaybackVolume = Px_GetPCMOutputVolume(mixer);
 
-   SetMixer(inputSource);
+   AudioIoCallback::SetMixer(inputSource);
    if( oldRecordVolume != recordVolume )
       Px_SetInputVolume(mixer, recordVolume);
    if( oldPlaybackVolume != playbackVolume )
@@ -1249,207 +1205,6 @@ wxArrayString AudioIO::GetInputSourceNames()
 #endif
 }
 
-void AudioIO::HandleDeviceChange()
-{
-   // This should not happen, but it would screw things up if it did.
-   // Vaughan, 2010-10-08: But it *did* happen, due to a bug, and nobody
-   // caught it because this method just returned. Added wxASSERT().
-   wxASSERT(!IsStreamActive());
-   if (IsStreamActive())
-      return;
-
-   // get the selected record and playback devices
-   const int playDeviceNum = getPlayDevIndex();
-   const int recDeviceNum = getRecordDevIndex();
-
-   // If no change needed, return
-   if (mCachedPlaybackIndex == playDeviceNum &&
-       mCachedCaptureIndex == recDeviceNum)
-       return;
-
-   // cache playback/capture rates
-   mCachedPlaybackRates = GetSupportedPlaybackRates(playDeviceNum);
-   mCachedCaptureRates = GetSupportedCaptureRates(recDeviceNum);
-   mCachedSampleRates = GetSupportedSampleRates(playDeviceNum, recDeviceNum);
-   mCachedPlaybackIndex = playDeviceNum;
-   mCachedCaptureIndex = recDeviceNum;
-   mCachedBestRateIn = 0.0;
-
-#if defined(USE_PORTMIXER)
-
-   // if we have a PortMixer object, close it down
-   if (mPortMixer) {
-      #if __WXMAC__
-      // on the Mac we must make sure that we restore the hardware playthrough
-      // state of the sound device to what it was before, because there isn't
-      // a UI for this (!)
-      if (Px_SupportsPlaythrough(mPortMixer) && mPreviousHWPlaythrough >= 0.0)
-         Px_SetPlaythrough(mPortMixer, mPreviousHWPlaythrough);
-         mPreviousHWPlaythrough = -1.0;
-      #endif
-      Px_CloseMixer(mPortMixer);
-      mPortMixer = NULL;
-   }
-
-   // that might have given us no rates whatsoever, so we have to guess an
-   // answer to do the next bit
-   int numrates = mCachedSampleRates.size();
-   int highestSampleRate;
-   if (numrates > 0)
-   {
-      highestSampleRate = mCachedSampleRates[numrates - 1];
-   }
-   else
-   {  // we don't actually have any rates that work for Rec and Play. Guess one
-      // to use for messing with the mixer, which doesn't actually do either
-      highestSampleRate = 44100;
-      // mCachedSampleRates is still empty, but it's not used again, so
-      // can ignore
-   }
-   mInputMixerWorks = false;
-   mEmulateMixerOutputVol = true;
-   mMixerOutputVol = 1.0;
-
-   int error;
-   // This tries to open the device with the samplerate worked out above, which
-   // will be the highest available for play and record on the device, or
-   // 44.1kHz if the info cannot be fetched.
-
-   PaStream *stream;
-
-   PaStreamParameters playbackParameters;
-
-   playbackParameters.device = playDeviceNum;
-   playbackParameters.sampleFormat = paFloat32;
-   playbackParameters.hostApiSpecificStreamInfo = NULL;
-   playbackParameters.channelCount = 1;
-   if (Pa_GetDeviceInfo(playDeviceNum))
-      playbackParameters.suggestedLatency =
-         Pa_GetDeviceInfo(playDeviceNum)->defaultLowOutputLatency;
-   else
-      playbackParameters.suggestedLatency = DEFAULT_LATENCY_CORRECTION/1000.0;
-
-   PaStreamParameters captureParameters;
-
-   captureParameters.device = recDeviceNum;
-   captureParameters.sampleFormat = paFloat32;;
-   captureParameters.hostApiSpecificStreamInfo = NULL;
-   captureParameters.channelCount = 1;
-   if (Pa_GetDeviceInfo(recDeviceNum))
-      captureParameters.suggestedLatency =
-         Pa_GetDeviceInfo(recDeviceNum)->defaultLowInputLatency;
-   else
-      captureParameters.suggestedLatency = DEFAULT_LATENCY_CORRECTION/1000.0;
-
-   // try opening for record and playback
-   error = Pa_OpenStream(&stream,
-                         &captureParameters, &playbackParameters,
-                         highestSampleRate, paFramesPerBufferUnspecified,
-                         paClipOff | paDitherOff,
-                         audacityAudioCallback, NULL);
-
-   if (!error) {
-      // Try portmixer for this stream
-      mPortMixer = Px_OpenMixer(stream, 0);
-      if (!mPortMixer) {
-         Pa_CloseStream(stream);
-         error = true;
-      }
-   }
-
-   // if that failed, try just for record
-   if( error ) {
-      error = Pa_OpenStream(&stream,
-                            &captureParameters, NULL,
-                            highestSampleRate, paFramesPerBufferUnspecified,
-                            paClipOff | paDitherOff,
-                            audacityAudioCallback, NULL);
-
-      if (!error) {
-         mPortMixer = Px_OpenMixer(stream, 0);
-         if (!mPortMixer) {
-            Pa_CloseStream(stream);
-            error = true;
-         }
-      }
-   }
-
-   // finally, try just for playback
-   if ( error ) {
-      error = Pa_OpenStream(&stream,
-                            NULL, &playbackParameters,
-                            highestSampleRate, paFramesPerBufferUnspecified,
-                            paClipOff | paDitherOff,
-                            audacityAudioCallback, NULL);
-
-      if (!error) {
-         mPortMixer = Px_OpenMixer(stream, 0);
-         if (!mPortMixer) {
-            Pa_CloseStream(stream);
-            error = true;
-         }
-      }
-   }
-
-   // FIXME: TRAP_ERR errors in HandleDeviceChange not reported.
-   // if it's still not working, give up
-   if( error )
-      return;
-
-   // Set input source
-#if USE_PORTMIXER
-   int sourceIndex;
-   if (gPrefs->Read(wxT("/AudioIO/RecordingSourceIndex"), &sourceIndex)) {
-      if (sourceIndex >= 0) {
-         //the current index of our source may be different because the stream
-         //is a combination of two devices, so update it.
-         sourceIndex = getRecordSourceIndex(mPortMixer);
-         if (sourceIndex >= 0)
-            SetMixer(sourceIndex);
-      }
-   }
-#endif
-
-   // Determine mixer capabilities - if it doesn't support control of output
-   // signal level, we emulate it (by multiplying this value by all outgoing
-   // samples)
-
-   mMixerOutputVol = Px_GetPCMOutputVolume(mPortMixer);
-   mEmulateMixerOutputVol = false;
-   Px_SetPCMOutputVolume(mPortMixer, 0.0);
-   if (Px_GetPCMOutputVolume(mPortMixer) > 0.1)
-      mEmulateMixerOutputVol = true;
-   Px_SetPCMOutputVolume(mPortMixer, 0.2f);
-   if (Px_GetPCMOutputVolume(mPortMixer) < 0.1 ||
-       Px_GetPCMOutputVolume(mPortMixer) > 0.3)
-      mEmulateMixerOutputVol = true;
-   Px_SetPCMOutputVolume(mPortMixer, mMixerOutputVol);
-
-   float inputVol = Px_GetInputVolume(mPortMixer);
-   mInputMixerWorks = true;   // assume it works unless proved wrong
-   Px_SetInputVolume(mPortMixer, 0.0);
-   if (Px_GetInputVolume(mPortMixer) > 0.1)
-      mInputMixerWorks = false;  // can't set to zero
-   Px_SetInputVolume(mPortMixer, 0.2f);
-   if (Px_GetInputVolume(mPortMixer) < 0.1 ||
-       Px_GetInputVolume(mPortMixer) > 0.3)
-      mInputMixerWorks = false;  // can't set level accurately
-   Px_SetInputVolume(mPortMixer, inputVol);
-
-   Pa_CloseStream(stream);
-
-
-   #if 0
-   wxPrintf("PortMixer: Playback: %s Recording: %s\n",
-          mEmulateMixerOutputVol? "emulated": "native",
-          mInputMixerWorks? "hardware": "no control");
-   #endif
-
-   mMixerOutputVol = 1.0;
-
-#endif   // USE_PORTMIXER
-}
-
 static PaSampleFormat AudacityToPortAudioSampleFormat(sampleFormat format)
 {
    switch(format) {
@@ -1463,11 +1218,12 @@ static PaSampleFormat AudacityToPortAudioSampleFormat(sampleFormat format)
    }
 }
 
-bool AudioIO::StartPortAudioStream(double sampleRate,
+bool AudioIO::StartPortAudioStream(const AudioIOStartStreamOptions &options,
                                    unsigned int numPlaybackChannels,
                                    unsigned int numCaptureChannels,
                                    sampleFormat captureFormat)
 {
+   auto sampleRate = options.rate;
 #ifdef EXPERIMENTAL_MIDI_OUT
    mNumFrames = 0;
    mNumPauseFrames = 0;
@@ -1483,7 +1239,7 @@ bool AudioIO::StartPortAudioStream(double sampleRate,
    mCallbackCount = 0;
    mAudioFramesPerBuffer = 0;
 #endif
-   mOwningProject = GetActiveProject();
+   mOwningProject = options.pProject;
 
    // PRL:  Protection from crash reported by David Bailes, involving starting
    // and stopping with frequent changes of active window, hard to reproduce
@@ -1491,7 +1247,7 @@ bool AudioIO::StartPortAudioStream(double sampleRate,
       return false;
 
    mInputMeter.Release();
-   mOutputMeter = NULL;
+   mOutputMeter.Release();
 
    mLastPaError = paNoError;
    // pick a rate to do the audio I/O at, from those available. The project
@@ -1521,8 +1277,7 @@ bool AudioIO::StartPortAudioStream(double sampleRate,
    PaStreamParameters playbackParameters{};
    PaStreamParameters captureParameters{};
 
-   double latencyDuration = DEFAULT_LATENCY_DURATION;
-   gPrefs->Read(wxT("/AudioIO/LatencyDuration"), &latencyDuration);
+   auto latencyDuration = AudioIOLatencyDuration.Read();
 
    if( numPlaybackChannels > 0)
    {
@@ -1557,7 +1312,10 @@ bool AudioIO::StartPortAudioStream(double sampleRate,
          playbackParameters.suggestedLatency = isWASAPI ? 0.0 : latencyDuration/1000.0;
       }
 
-      mOutputMeter = mOwningProject->GetPlaybackMeter();
+      if ( options.playbackMeter )
+         mOutputMeter = options.playbackMeter;
+      else
+         mOutputMeter.Release();
    }
 
    if( numCaptureChannels > 0)
@@ -1587,7 +1345,7 @@ bool AudioIO::StartPortAudioStream(double sampleRate,
       else
          captureParameters.suggestedLatency = latencyDuration/1000.0;
 
-      SetCaptureMeter( mOwningProject, mOwningProject->GetCaptureMeter() );
+      SetCaptureMeter( mOwningProject, options.captureMeter );
    }
 
    SetMeters();
@@ -1666,6 +1424,13 @@ bool AudioIO::StartPortAudioStream(double sampleRate,
    }
 #endif
 
+#if (defined(__WXMAC__) || defined(__WXMSW__)) && wxCHECK_VERSION(3,1,0)
+   // Don't want the system to sleep while audio I/O is active
+   if (mPortStreamV19 != NULL && mLastPaError == paNoError) {
+      wxPowerResource::Acquire(wxPOWER_RESOURCE_SCREEN, _("Audacity Audio"));
+   }
+#endif
+
    return (mLastPaError == paNoError);
 }
 
@@ -1674,15 +1439,14 @@ wxString AudioIO::LastPaErrorString()
    return wxString::Format(wxT("%d %s."), (int) mLastPaError, Pa_GetErrorText(mLastPaError));
 }
 
-void AudioIO::StartMonitoring(double sampleRate)
+void AudioIO::StartMonitoring( const AudioIOStartStreamOptions &options )
 {
    if ( mPortStreamV19 || mStreamToken )
       return;
 
    bool success;
-   long captureChannels;
-   auto captureFormat = QualityPrefs::SampleFormatChoice();
-   gPrefs->Read(wxT("/AudioIO/RecordChannels"), &captureChannels, 2L);
+   auto captureFormat = QualitySettings::SampleFormatChoice();
+   auto captureChannels = AudioIORecordChannels.Read();
    gPrefs->Read(wxT("/AudioIO/SWPlaythrough"), &mSoftwarePlaythrough, false);
    int playbackChannels = 0;
 
@@ -1692,13 +1456,15 @@ void AudioIO::StartMonitoring(double sampleRate)
    // FIXME: TRAP_ERR StartPortAudioStream (a PaError may be present)
    // but StartPortAudioStream function only returns true or false.
    mUsingAlsa = false;
-   success = StartPortAudioStream(sampleRate, (unsigned int)playbackChannels,
+   success = StartPortAudioStream(options, (unsigned int)playbackChannels,
                                   (unsigned int)captureChannels,
                                   captureFormat);
 
    if (!success) {
-      wxString msg = wxString::Format(_("Error opening recording device.\nError code: %s"), gAudioIO->LastPaErrorString());
-      ShowErrorDialog(mOwningProject, _("Error"), msg, wxT("Error_opening_sound_device"));
+      auto msg = XO("Error opening recording device.\nError code: %s")
+         .Format( Get()->LastPaErrorString() );
+      ShowExceptionDialog( FindProjectFrame( mOwningProject ),
+         XO("Error"), msg, wxT("Error_opening_sound_device"));
       return;
    }
 
@@ -1714,9 +1480,10 @@ void AudioIO::StartMonitoring(double sampleRate)
    mLastPaError = Pa_StartStream( mPortStreamV19 );
 
    // Update UI display only now, after all possibilities for error are past.
-   if ((mLastPaError == paNoError) && mListener) {
+   auto pListener = GetListener();
+   if ((mLastPaError == paNoError) && pListener) {
       // advertise the chosen I/O sample rate to the UI
-      mListener->OnAudioIORate((int)mRate);
+      pListener->OnAudioIORate((int)mRate);
    }
 }
 
@@ -1732,8 +1499,6 @@ int AudioIO::StartStream(const TransportTracks &tracks,
 
    if( IsBusy() )
       return 0;
-
-   const auto &sampleRate = options.rate;
 
    // We just want to set mStreamToken to -1 - this way avoids
    // an extremely rare but possible race condition, if two functions
@@ -1759,7 +1524,7 @@ int AudioIO::StartStream(const TransportTracks &tracks,
 #ifdef __WXGTK__
    // Detect whether ALSA is the chosen host, and do the various involved MIDI
    // timing compensations only then.
-   mUsingAlsa = (gPrefs->Read(wxT("/AudioIO/Host"), wxT("")) == "ALSA");
+   mUsingAlsa = (AudioIOHost.Read() == L"ALSA");
 #endif
 
    gPrefs->Read(wxT("/AudioIO/SWPlaythrough"), &mSoftwarePlaythrough, false);
@@ -1782,22 +1547,20 @@ int AudioIO::StartStream(const TransportTracks &tracks,
       // gPrefs->Write(wxT("/AudioIO/SilenceLevel"), silenceLevelDB);
       // gPrefs->Flush();
    }
-   mSilenceLevel = (silenceLevelDB + dBRange)/(double)dBRange;  // meter goes -dBRange dB -> 0dB
+   mSilenceLevel = DB_TO_LINEAR(silenceLevelDB);  // meter goes -dBRange dB -> 0dB
 
    // Clamp pre-roll so we don't play before time 0
    const auto preRoll = std::max(0.0, std::min(t0, options.preRoll));
    mRecordingSchedule = {};
    mRecordingSchedule.mPreRoll = preRoll;
    mRecordingSchedule.mLatencyCorrection =
-      (gPrefs->ReadDouble(wxT("/AudioIO/LatencyCorrection"),
-                   DEFAULT_LATENCY_CORRECTION))
-         / 1000.0;
+      AudioIOLatencyCorrection.Read() / 1000.0;
    mRecordingSchedule.mDuration = t1 - t0;
    if (options.pCrossfadeData)
       mRecordingSchedule.mCrossfadeData.swap( *options.pCrossfadeData );
 
    mListener = options.listener;
-   mRate    = sampleRate;
+   mRate    = options.rate;
 
    mSeek    = 0;
    mLastRecordingOffset = 0;
@@ -1841,7 +1604,9 @@ int AudioIO::StartStream(const TransportTracks &tracks,
    unsigned int captureChannels = 0;
    sampleFormat captureFormat = floatSample;
 
-   if (tracks.playbackTracks.size() > 0 
+   auto pListener = GetListener();
+
+   if (tracks.playbackTracks.size() > 0
 #ifdef EXPERIMENTAL_MIDI_OUT
       || tracks.midiTracks.size() > 0
 #endif
@@ -1866,13 +1631,13 @@ int AudioIO::StartStream(const TransportTracks &tracks,
       captureFormat = mCaptureTracks[0]->GetSampleFormat();
 
       // Tell project that we are about to start recording
-      if (mListener)
-         mListener->OnAudioIOStartRecording();
+      if (pListener)
+         pListener->OnAudioIOStartRecording();
    }
 
    bool successAudio;
 
-   successAudio = StartPortAudioStream(sampleRate, playbackChannels,
+   successAudio = StartPortAudioStream(options, playbackChannels,
                                        captureChannels, captureFormat);
 #ifdef EXPERIMENTAL_MIDI_OUT
 
@@ -1890,19 +1655,19 @@ int AudioIO::StartStream(const TransportTracks &tracks,
 #endif
 
    if (!successAudio) {
-      if (mListener && captureChannels > 0)
-         mListener->OnAudioIOStopRecording();
+      if (pListener && captureChannels > 0)
+         pListener->OnAudioIOStopRecording();
       mStreamToken = 0;
 
       return 0;
    }
 
-   if ( ! AllocateBuffers( options, tracks, t0, t1, sampleRate, scrubbing ) )
+   if ( ! AllocateBuffers( options, tracks, t0, t1, options.rate, scrubbing ) )
       return 0;
 
    if (mNumPlaybackChannels > 0)
    {
-      EffectManager & em = EffectManager::Get();
+      auto & em = RealtimeEffectManager::Get();
       // Setup for realtime playback at the rate of the realtime
       // stream, not the rate of the track.
       em.RealtimeInitialize(mRate);
@@ -1973,17 +1738,11 @@ int AudioIO::StartStream(const TransportTracks &tracks,
    mAudioThreadShouldCallFillBuffersOnce = true;
 
    while( mAudioThreadShouldCallFillBuffersOnce ) {
-#ifndef USE_SCRUB_THREAD
-      // Yuck, we either have to poll "by hand" when scrub polling doesn't
-      // work with a thread, or else yield to timer messages, but that would
-      // execute too much else
-      if (mScrubState) {
-         mOwningProject->GetScrubber().ContinueScrubbingPoll();
-         wxMilliSleep( Scrubber::ScrubPollInterval_ms * 0.9 );
+      auto interval = 50ull;
+      if (options.playbackStreamPrimer) {
+         interval = options.playbackStreamPrimer();
       }
-      else
-#endif
-        wxMilliSleep( 50 );
+      wxMilliSleep( interval );
    }
 
    if(mNumPlaybackChannels > 0 || mNumCaptureChannels > 0) {
@@ -2028,18 +1787,20 @@ int AudioIO::StartStream(const TransportTracks &tracks,
       {
          mStreamToken = 0;
          mAudioThreadFillBuffersLoopRunning = false;
-         if (mListener && mNumCaptureChannels > 0)
-            mListener->OnAudioIOStopRecording();
+         if (pListener && mNumCaptureChannels > 0)
+            pListener->OnAudioIOStopRecording();
          StartStreamCleanup();
-         AudacityMessageBox(LAT1CTOWX(Pa_GetErrorText(err)));
+         // PRL: PortAudio error messages are sadly not internationalized
+         AudacityMessageBox(
+            Verbatim( LAT1CTOWX(Pa_GetErrorText(err)) ) );
          return 0;
       }
    }
 
    // Update UI display only now, after all possibilities for error are past.
-   if (mListener) {
+   if (pListener) {
       // advertise the chosen I/O sample rate to the UI
-      mListener->OnAudioIORate((int)mRate);
+      pListener->OnAudioIORate((int)mRate);
    }
 
    if (mNumPlaybackChannels > 0)
@@ -2057,9 +1818,6 @@ int AudioIO::StartStream(const TransportTracks &tracks,
       e.SetInt(true);
       wxTheApp->ProcessEvent(e);
    }
-
-   // Enable warning popups for unfound aliased blockfiles.
-   wxGetApp().SetMissingAliasedFileWarningShouldShow(true);
 
    commit = true;
    return mStreamToken;
@@ -2138,7 +1896,7 @@ bool AudioIO::AllocateBuffers(
                       ScrubbingOptions::MaxAllowedScrubSpeed())
                   :
 #endif
-                    Mixer::WarpOptions(mPlaybackSchedule.mTimeTrack);
+                    Mixer::WarpOptions(mPlaybackSchedule.mEnvelope);
 
             mPlaybackQueueMinimum = mPlaybackSamplesToCopy;
             if (scrubbing)
@@ -2159,7 +1917,7 @@ bool AudioIO::AllocateBuffers(
 
                mPlaybackBuffers[i] =
                   std::make_unique<RingBuffer>(floatSample, playbackBufferSize);
-               const auto timeQueueSize =
+               const auto timeQueueSize = 1 +
                   (playbackBufferSize + TimeQueueGrainSize - 1)
                      / TimeQueueGrainSize;
                mTimeQueue.mData.reinit( timeQueueSize );
@@ -2190,8 +1948,11 @@ bool AudioIO::AllocateBuffers(
                   1,
                   std::max( mPlaybackSamplesToCopy, mPlaybackQueueMinimum ),
                   false,
-                  mRate, floatSample, false);
-               mPlaybackMixers[i]->ApplyTrackGains(false);
+                  mRate, floatSample,
+                  false, // low quality dithering and resampling
+                  nullptr,
+                  false // don't apply track gains
+               );
             }
          }
 
@@ -2206,7 +1967,7 @@ bool AudioIO::AllocateBuffers(
             // 100 samples, just give up.
             if(captureBufferSize < 100)
             {
-               AudacityMessageBox(_("Out of memory!"));
+               AudacityMessageBox( XO("Out of memory!") );
                return false;
             }
 
@@ -2241,7 +2002,7 @@ bool AudioIO::AllocateBuffers(
             (size_t)lrint(mRate * mPlaybackRingBufferSecs);
          if(playbackBufferSize < 100 || mPlaybackSamplesToCopy < 100)
          {
-            AudacityMessageBox(_("Out of memory!"));
+            AudacityMessageBox( XO("Out of memory!") );
             return false;
          }
       }
@@ -2255,7 +2016,7 @@ void AudioIO::StartStreamCleanup(bool bOnlyBuffers)
 {
    if (mNumPlaybackChannels > 0)
    {
-      EffectManager::Get().RealtimeFinalize();
+      RealtimeEffectManager::Get().RealtimeFinalize();
    }
 
    mPlaybackBuffers.reset();
@@ -2281,21 +2042,21 @@ void AudioIO::StartStreamCleanup(bool bOnlyBuffers)
 
 PmTimestamp MidiTime(void *WXUNUSED(info))
 {
-   return gAudioIO->MidiTime();
+   return AudioIO::Get()->MidiTime();
 }
 
 // Set up state to iterate NoteTrack events in sequence.
 // Sends MIDI control changes up to the starting point mT0
 // if send is true. Output is delayed by offset to facilitate
 // looping (each iteration is delayed more).
-void AudioIO::PrepareMidiIterator(bool send, double offset)
+void AudioIoCallback::PrepareMidiIterator(bool send, double offset)
 {
    int i;
    int nTracks = mMidiPlaybackTracks.size();
    // instead of initializing with an Alg_seq, we use begin_seq()
    // below to add ALL Alg_seq's.
    mIterator = std::make_unique<Alg_iterator>(nullptr, false);
-   // Iterator not yet intialized, must add each track...
+   // Iterator not yet initialized, must add each track...
    for (i = 0; i < nTracks; i++) {
       const auto t = mMidiPlaybackTracks[i].get();
       Alg_seq_ptr seq = &t->GetSeq();
@@ -2319,7 +2080,7 @@ void AudioIO::PrepareMidiIterator(bool send, double offset)
    mSendMidiState = false;
 }
 
-bool AudioIO::StartPortMidiStream()
+bool AudioIoCallback::StartPortMidiStream()
 {
    int i;
    int nTracks = mMidiPlaybackTracks.size();
@@ -2349,6 +2110,9 @@ bool AudioIO::StartPortMidiStream()
          }
       }
    } // (else playback device has Pm_GetDefaultOuputDeviceID())
+
+   if (playbackDevice < 0)
+      return false;
 
    /* open output device */
    mLastPmError = Pm_OpenOutput(&mMidiStream,
@@ -2382,32 +2146,6 @@ bool AudioIO::IsAvailable(AudacityProject *project) const
    return mOwningProject == NULL || mOwningProject == project;
 }
 
-void AudioIO::SetCaptureMeter(AudacityProject *project, MeterPanel *meter)
-{
-   if (( mOwningProject ) && ( mOwningProject != project))
-      return;
-
-   if (meter)
-   {
-      mInputMeter = meter;
-      mInputMeter->Reset(mRate, true);
-   }
-   else
-      mInputMeter.Release();
-}
-
-void AudioIO::SetPlaybackMeter(AudacityProject *project, MeterPanel *meter)
-{
-   if (( mOwningProject ) && ( mOwningProject != project))
-      return;
-
-   mOutputMeter = meter;
-   if (mOutputMeter)
-   {
-      mOutputMeter->Reset(mRate, true);
-   }
-}
-
 void AudioIO::SetMeters()
 {
    if (mInputMeter)
@@ -2439,14 +2177,18 @@ void AudioIO::StopStream()
      )
       return;
 
+#if (defined(__WXMAC__) || defined(__WXMSW__)) && wxCHECK_VERSION(3,1,0)
+   // Re-enable system sleep
+   wxPowerResource::Release(wxPOWER_RESOURCE_SCREEN);
+#endif
+ 
    if( mAudioThreadFillBuffersLoopRunning)
    {
       // PortAudio callback can use the information that we are stopping to fade
       // out the audio.  Give PortAudio callback a chance to do so.
       mAudioThreadFillBuffersLoopRunning = false;
-      long latency;
-      gPrefs->Read(  wxT("/AudioIO/LatencyDuration"), &latency, DEFAULT_LATENCY_DURATION );
-      // If we can gracefully fade out in 200ms, with the faded-out play buffers making it through 
+      auto latency = static_cast<long>(AudioIOLatencyDuration.Read());
+      // If we can gracefully fade out in 200ms, with the faded-out play buffers making it through
       // the sound card, then do so.  If we can't, don't wait around.  Just stop quickly and accept 
       // there will be a click.
       if( mbMicroFades  && (latency < 150 ))
@@ -2458,7 +2200,7 @@ void AudioIO::StopStream()
    // No longer need effects processing
    if (mNumPlaybackChannels > 0)
    {
-      EffectManager::Get().RealtimeFinalize();
+      RealtimeEffectManager::Get().RealtimeFinalize();
    }
 
    //
@@ -2518,22 +2260,6 @@ void AudioIO::StopStream()
       mPortStreamV19 = NULL;
    }
 
-   if (mNumPlaybackChannels > 0)
-   {
-      wxCommandEvent e(EVT_AUDIOIO_PLAYBACK);
-      e.SetEventObject(mOwningProject);
-      e.SetInt(false);
-      wxTheApp->ProcessEvent(e);
-   }
-
-   if (mNumCaptureChannels > 0)
-   {
-      wxCommandEvent e(mStreamToken == 0 ? EVT_AUDIOIO_MONITOR : EVT_AUDIOIO_CAPTURE);
-      e.SetEventObject(mOwningProject);
-      e.SetInt(false);
-      wxTheApp->ProcessEvent(e);
-   }
-
 #ifdef EXPERIMENTAL_MIDI_OUT
    /* Stop Midi playback */
    if ( mMidiStream ) {
@@ -2580,6 +2306,8 @@ void AudioIO::StopStream()
    }
 #endif
 
+   auto pListener = GetListener();
+   
    // If there's no token, we were just monitoring, so we can
    // skip this next part...
    if (mStreamToken > 0) {
@@ -2593,7 +2321,7 @@ void AudioIO::StopStream()
       while( mAudioThreadShouldCallFillBuffersOnce )
       {
          // LLL:  Experienced recursive yield here...once.
-         wxGetApp().Yield(true); // Pass true for onlyIfNeeded to avoid recursive call error.
+         wxTheApp->Yield(true); // Pass true for onlyIfNeeded to avoid recursive call error.
          wxMilliSleep( 50 );
       }
 
@@ -2639,26 +2367,39 @@ void AudioIO::StopStream()
             GuardedCall( [&] {
                WaveTrack* track = mCaptureTracks[i].get();
 
-               // use NOFAIL-GUARANTEE that track is flushed,
-               // PARTIAL-GUARANTEE that some initial length of the recording
+               // use No-fail-guarantee that track is flushed,
+               // Partial-guarantee that some initial length of the recording
                // is saved.
                // See comments in FillBuffers().
                track->Flush();
             } );
          }
 
-         for (auto &interval : mLostCaptureIntervals) {
-            auto &start = interval.first;
-            auto duration = interval.second;
-            for (auto &track : mCaptureTracks) {
-               GuardedCall([&] {
-                  track->SyncLockAdjust(start, start + duration);
-               });
+         
+         if (!mLostCaptureIntervals.empty())
+         {
+            // This scope may combine many splittings of wave tracks
+            // into one transaction, lessening the number of checkpoints
+            Optional<TransactionScope> pScope;
+            if (mOwningProject) {
+               auto &pIO = ProjectFileIO::Get(*mOwningProject);
+               pScope.emplace(pIO.GetConnection(), "Dropouts");
             }
+            for (auto &interval : mLostCaptureIntervals) {
+               auto &start = interval.first;
+               auto duration = interval.second;
+               for (auto &track : mCaptureTracks) {
+                  GuardedCall([&] {
+                     track->SyncLockAdjust(start, start + duration);
+                  });
+               }
+            }
+            if (pScope)
+               pScope->Commit();
          }
 
-         ControlToolBar *bar = mOwningProject->GetControlToolBar();
-         bar->CommitRecording();
+         if (pListener)
+            pListener->OnCommitRecording();
       }
    }
 
@@ -2669,23 +2410,40 @@ void AudioIO::StopStream()
       mOutputMeter->Reset(mRate, false);
 
    mInputMeter.Release();
-   mOutputMeter = NULL;
-   mOwningProject = NULL;
+   mOutputMeter.Release();
+   mOwningProject = nullptr;
 
-   if (mListener && mNumCaptureChannels > 0)
-      mListener->OnAudioIOStopRecording();
+   if (pListener && mNumCaptureChannels > 0)
+      pListener->OnAudioIOStopRecording();
 
    //
    // Only set token to 0 after we're totally finished with everything
    //
+   bool wasMonitoring = mStreamToken == 0;
    mStreamToken = 0;
+
+   if (mNumPlaybackChannels > 0)
+   {
+      wxCommandEvent e(EVT_AUDIOIO_PLAYBACK);
+      e.SetEventObject(mOwningProject);
+      e.SetInt(false);
+      wxTheApp->ProcessEvent(e);
+   }
+   
+   if (mNumCaptureChannels > 0)
+   {
+      wxCommandEvent e(wasMonitoring ? EVT_AUDIOIO_MONITOR : EVT_AUDIOIO_CAPTURE);
+      e.SetEventObject(mOwningProject);
+      e.SetInt(false);
+      wxTheApp->ProcessEvent(e);
+   }
 
    mNumCaptureChannels = 0;
    mNumPlaybackChannels = 0;
 
    mPlaybackTracks.clear();
    mCaptureTracks.clear();
-#ifdef USE_MIDI
+#if defined(EXPERIMENTAL_MIDI_OUT) && defined(USE_MIDI)
    mMidiPlaybackTracks.clear();
 #endif
 
@@ -2693,9 +2451,9 @@ void AudioIO::StopStream()
    mScrubState.reset();
 #endif
 
-   if (mListener) {
+   if (pListener) {
       // Tell UI to hide sample rate
-      mListener->OnAudioIORate(0);
+      pListener->OnAudioIORate(0);
    }
 
    // Don't cause a busy wait in the audio thread after stopping scrubbing
@@ -2708,20 +2466,15 @@ void AudioIO::SetPaused(bool state)
    {
       if (state)
       {
-         EffectManager::Get().RealtimeSuspend();
+         RealtimeEffectManager::Get().RealtimeSuspend();
       }
       else
       {
-         EffectManager::Get().RealtimeResume();
+         RealtimeEffectManager::Get().RealtimeResume();
       }
    }
 
    mPaused = state;
-}
-
-bool AudioIoCallback::IsPaused() const
-{
-   return mPaused;
 }
 
 #ifdef EXPERIMENTAL_SCRUBBING_SUPPORT
@@ -2750,370 +2503,6 @@ double AudioIO::GetLastScrubTime() const
 #endif
 
 #endif
-
-bool AudioIO::IsBusy() const
-{
-   if (mStreamToken != 0)
-      return true;
-
-   return false;
-}
-
-bool AudioIO::IsStreamActive() const
-{
-   bool isActive = false;
-   // JKC: Not reporting any Pa error, but that looks OK.
-   if( mPortStreamV19 )
-      isActive = (Pa_IsStreamActive( mPortStreamV19 ) > 0);
-
-#ifdef EXPERIMENTAL_MIDI_OUT
-   if( mMidiStreamActive && !mMidiOutputComplete )
-      isActive = true;
-#endif
-   return isActive;
-}
-
-bool AudioIO::IsStreamActive(int token) const
-{
-   return (this->IsStreamActive() && this->IsAudioTokenActive(token));
-}
-
-bool AudioIO::IsAudioTokenActive(int token) const
-{
-   return ( token > 0 && token == mStreamToken );
-}
-
-bool AudioIO::IsMonitoring() const
-{
-   return ( mPortStreamV19 && mStreamToken==0 );
-}
-
-void AudioIO::PlaybackSchedule::Init(
-   const double t0, const double t1,
-   const AudioIOStartStreamOptions &options,
-   const RecordingSchedule *pRecordingSchedule )
-{
-   if ( pRecordingSchedule )
-      // It does not make sense to apply the time warp during overdub recording,
-      // which defeats the purpose of making the recording synchronized with
-      // the existing audio.  (Unless we figured out the inverse warp of the
-      // captured samples in real time.)
-      // So just quietly ignore the time track.
-      mTimeTrack = nullptr;
-   else
-      mTimeTrack = options.timeTrack;
-
-   mT0      = t0;
-   if (pRecordingSchedule)
-      mT0 -= pRecordingSchedule->mPreRoll;
-
-   mT1      = t1;
-   if (pRecordingSchedule)
-      // adjust mT1 so that we don't give paComplete too soon to fill up the
-      // desired length of recording
-      mT1 -= pRecordingSchedule->mLatencyCorrection;
-
-   // Main thread's initialization of mTime
-   SetTrackTime( mT0 );
-
-   mPlayMode = options.playLooped
-      ? PlaybackSchedule::PLAY_LOOPED
-      : PlaybackSchedule::PLAY_STRAIGHT;
-   mCutPreviewGapStart = options.cutPreviewGapStart;
-   mCutPreviewGapLen = options.cutPreviewGapLen;
-
-#ifdef EXPERIMENTAL_SCRUBBING_SUPPORT
-   bool scrubbing = (options.pScrubbingOptions != nullptr);
-
-   // Scrubbing is not compatible with looping or recording or a time track!
-   if (scrubbing)
-   {
-      const auto &scrubOptions = *options.pScrubbingOptions;
-      if (pRecordingSchedule ||
-          Looping() ||
-          mTimeTrack != NULL ||
-          scrubOptions.maxSpeed < ScrubbingOptions::MinAllowedScrubSpeed()) {
-         wxASSERT(false);
-         scrubbing = false;
-      }
-      else
-         mPlayMode = (scrubOptions.isPlayingAtSpeed)
-            ? PlaybackSchedule::PLAY_AT_SPEED
-            : PlaybackSchedule::PLAY_SCRUB;
-   }
-#endif
-
-   mWarpedTime = 0.0;
-#ifdef EXPERIMENTAL_SCRUBBING_SUPPORT
-   if (Scrubbing())
-      mWarpedLength = 0.0f;
-   else
-#endif
-      mWarpedLength = RealDuration(mT1);
-}
-
-double AudioIO::PlaybackSchedule::LimitTrackTime() const
-{
-   // Track time readout for the main thread
-   // Allows for forward or backward play
-   return ClampTrackTime( GetTrackTime() );
-}
-
-double AudioIO::PlaybackSchedule::ClampTrackTime( double trackTime ) const
-{
-   if (ReversedTime())
-      return std::max(mT1, std::min(mT0, trackTime));
-   else
-      return std::max(mT0, std::min(mT1, trackTime));
-}
-
-double AudioIO::PlaybackSchedule::NormalizeTrackTime() const
-{
-   // Track time readout for the main thread
-
-   // dmazzoni: This function is needed for two reasons:
-   // One is for looped-play mode - this function makes sure that the
-   // position indicator keeps wrapping around.  The other reason is
-   // more subtle - it's because PortAudio can query the hardware for
-   // the current stream time, and this query is not always accurate.
-   // Sometimes it's a little behind or ahead, and so this function
-   // makes sure that at least we clip it to the selection.
-   //
-   // msmeyer: There is also the possibility that we are using "cut preview"
-   //          mode. In this case, we should jump over a defined "gap" in the
-   //          audio.
-
-   double absoluteTime;
-
-#ifdef EXPERIMENTAL_SCRUBBING_SUPPORT
-   // Limit the time between t0 and t1 if not scrubbing.
-   // Should the limiting be necessary in any play mode if there are no bugs?
-   if (Interactive())
-      absoluteTime = GetTrackTime();
-   else
-#endif
-      absoluteTime = LimitTrackTime();
-
-   if (mCutPreviewGapLen > 0)
-   {
-      // msmeyer: We're in cut preview mode, so if we are on the right
-      // side of the gap, we jump over it.
-      if (absoluteTime > mCutPreviewGapStart)
-         absoluteTime += mCutPreviewGapLen;
-   }
-
-   return absoluteTime;
-}
-
-double AudioIO::GetStreamTime()
-{
-   // Track time readout for the main thread
-
-   if( !IsStreamActive() )
-      return BAD_STREAM_TIME;
-
-   return mPlaybackSchedule.NormalizeTrackTime();
-}
-
-
-std::vector<long> AudioIO::GetSupportedPlaybackRates(int devIndex, double rate)
-{
-   if (devIndex == -1)
-   {  // weren't given a device index, get the prefs / default one
-      devIndex = getPlayDevIndex();
-   }
-
-   // Check if we can use the cached rates
-   if (mCachedPlaybackIndex != -1 && devIndex == mCachedPlaybackIndex
-         && (rate == 0.0 || make_iterator_range(mCachedPlaybackRates).contains(rate)))
-   {
-      return mCachedPlaybackRates;
-   }
-
-   std::vector<long> supported;
-   int irate = (int)rate;
-   const PaDeviceInfo* devInfo = NULL;
-   int i;
-
-   devInfo = Pa_GetDeviceInfo(devIndex);
-
-   if (!devInfo)
-   {
-      wxLogDebug(wxT("GetSupportedPlaybackRates() Could not get device info!"));
-      return supported;
-   }
-
-   // LLL: Remove when a proper method of determining actual supported
-   //      DirectSound rate is devised.
-   const PaHostApiInfo* hostInfo = Pa_GetHostApiInfo(devInfo->hostApi);
-   bool isDirectSound = (hostInfo && hostInfo->type == paDirectSound);
-
-   PaStreamParameters pars;
-
-   pars.device = devIndex;
-   pars.channelCount = 1;
-   pars.sampleFormat = paFloat32;
-   pars.suggestedLatency = devInfo->defaultHighOutputLatency;
-   pars.hostApiSpecificStreamInfo = NULL;
-
-   // JKC: PortAudio Errors handled OK here.  No need to report them
-   for (i = 0; i < NumRatesToTry; i++)
-   {
-      // LLL: Remove when a proper method of determining actual supported
-      //      DirectSound rate is devised.
-      if (!(isDirectSound && RatesToTry[i] > 200000)){
-         if (Pa_IsFormatSupported(NULL, &pars, RatesToTry[i]) == 0)
-            supported.push_back(RatesToTry[i]);
-         Pa_Sleep( 10 );// There are ALSA drivers that don't like being probed
-         // too quickly.
-      }
-   }
-
-   if (irate != 0 && !make_iterator_range(supported).contains(irate))
-   {
-      // LLL: Remove when a proper method of determining actual supported
-      //      DirectSound rate is devised.
-      if (!(isDirectSound && RatesToTry[i] > 200000))
-         if (Pa_IsFormatSupported(NULL, &pars, irate) == 0)
-            supported.push_back(irate);
-   }
-
-   return supported;
-}
-
-std::vector<long> AudioIO::GetSupportedCaptureRates(int devIndex, double rate)
-{
-   if (devIndex == -1)
-   {  // not given a device, look up in prefs / default
-      devIndex = getRecordDevIndex();
-   }
-
-   // Check if we can use the cached rates
-   if (mCachedCaptureIndex != -1 && devIndex == mCachedCaptureIndex
-         && (rate == 0.0 || make_iterator_range(mCachedCaptureRates).contains(rate)))
-   {
-      return mCachedCaptureRates;
-   }
-
-   std::vector<long> supported;
-   int irate = (int)rate;
-   const PaDeviceInfo* devInfo = NULL;
-   int i;
-
-   devInfo = Pa_GetDeviceInfo(devIndex);
-
-   if (!devInfo)
-   {
-      wxLogDebug(wxT("GetSupportedCaptureRates() Could not get device info!"));
-      return supported;
-   }
-
-   double latencyDuration = DEFAULT_LATENCY_DURATION;
-   long recordChannels = 1;
-   gPrefs->Read(wxT("/AudioIO/LatencyDuration"), &latencyDuration);
-   gPrefs->Read(wxT("/AudioIO/RecordChannels"), &recordChannels);
-
-   // LLL: Remove when a proper method of determining actual supported
-   //      DirectSound rate is devised.
-   const PaHostApiInfo* hostInfo = Pa_GetHostApiInfo(devInfo->hostApi);
-   bool isDirectSound = (hostInfo && hostInfo->type == paDirectSound);
-
-   PaStreamParameters pars;
-
-   pars.device = devIndex;
-   pars.channelCount = recordChannels;
-   pars.sampleFormat = paFloat32;
-   pars.suggestedLatency = latencyDuration / 1000.0;
-   pars.hostApiSpecificStreamInfo = NULL;
-
-   for (i = 0; i < NumRatesToTry; i++)
-   {
-      // LLL: Remove when a proper method of determining actual supported
-      //      DirectSound rate is devised.
-      if (!(isDirectSound && RatesToTry[i] > 200000))
-      {
-         if (Pa_IsFormatSupported(&pars, NULL, RatesToTry[i]) == 0)
-            supported.push_back(RatesToTry[i]);
-         Pa_Sleep( 10 );// There are ALSA drivers that don't like being probed
-         // too quickly.
-      }
-   }
-
-   if (irate != 0 && !make_iterator_range(supported).contains(irate))
-   {
-      // LLL: Remove when a proper method of determining actual supported
-      //      DirectSound rate is devised.
-      if (!(isDirectSound && RatesToTry[i] > 200000))
-         if (Pa_IsFormatSupported(&pars, NULL, irate) == 0)
-            supported.push_back(irate);
-   }
-
-   return supported;
-}
-
-std::vector<long> AudioIO::GetSupportedSampleRates(int playDevice, int recDevice, double rate)
-{
-   // Not given device indices, look up prefs
-   if (playDevice == -1) {
-      playDevice = getPlayDevIndex();
-   }
-   if (recDevice == -1) {
-      recDevice = getRecordDevIndex();
-   }
-
-   // Check if we can use the cached rates
-   if (mCachedPlaybackIndex != -1 && mCachedCaptureIndex != -1 &&
-         playDevice == mCachedPlaybackIndex &&
-         recDevice == mCachedCaptureIndex &&
-         (rate == 0.0 || make_iterator_range(mCachedSampleRates).contains(rate)))
-   {
-      return mCachedSampleRates;
-   }
-
-   auto playback = GetSupportedPlaybackRates(playDevice, rate);
-   auto capture = GetSupportedCaptureRates(recDevice, rate);
-   int i;
-
-   // Return only sample rates which are in both arrays
-   std::vector<long> result;
-
-   for (i = 0; i < (int)playback.size(); i++)
-      if (make_iterator_range(capture).contains(playback[i]))
-         result.push_back(playback[i]);
-
-   // If this yields no results, use the default sample rates nevertheless
-/*   if (result.empty())
-   {
-      for (i = 0; i < NumStandardRates; i++)
-         result.push_back(StandardRates[i]);
-   }*/
-
-   return result;
-}
-
-/** \todo: should this take into account PortAudio's value for
- * PaDeviceInfo::defaultSampleRate? In principal this should let us work out
- * which rates are "real" and which resampled in the drivers, and so prefer
- * the real rates. */
-int AudioIO::GetOptimalSupportedSampleRate()
-{
-   auto rates = GetSupportedSampleRates();
-
-   if (make_iterator_range(rates).contains(44100))
-      return 44100;
-
-   if (make_iterator_range(rates).contains(48000))
-      return 48000;
-
-   // if there are no supported rates, the next bit crashes. So check first,
-   // and give them a "sensible" value if there are no valid values. They
-   // will still get an error later, but with any luck may have changed
-   // something by then. It's no worse than having an invalid default rate
-   // stored in the preferences, which we don't check for
-   if (rates.empty()) return 44100;
-
-   return rates.back();
-}
 
 double AudioIO::GetBestRate(bool capturing, bool playing, double sampleRate)
 {
@@ -3193,6 +2582,16 @@ finished:
    return retval;
 }
 
+double AudioIO::GetStreamTime()
+{
+   // Track time readout for the main thread
+
+   if( !IsStreamActive() )
+      return BAD_STREAM_TIME;
+
+   return mPlaybackSchedule.NormalizeTrackTime();
+}
+
 
 //////////////////////////////////////////////////////////////////////
 //
@@ -3202,11 +2601,13 @@ finished:
 
 AudioThread::ExitCode AudioThread::Entry()
 {
-   while( !TestDestroy() )
+   AudioIO *gAudioIO;
+   while( !TestDestroy() &&
+      nullptr != ( gAudioIO = AudioIO::Get() ) )
    {
       using Clock = std::chrono::steady_clock;
       auto loopPassStart = Clock::now();
-      const auto interval = Scrubber::ScrubPollInterval_ms;
+      const auto interval = ScrubPollInterval_ms;
 
       // Set LoopActive outside the tests to avoid race condition
       gAudioIO->mAudioThreadFillBuffersLoopActive = true;
@@ -3235,7 +2636,9 @@ AudioThread::ExitCode AudioThread::Entry()
 #ifdef EXPERIMENTAL_MIDI_OUT
 MidiThread::ExitCode MidiThread::Entry()
 {
-   while( !TestDestroy() )
+   AudioIO *gAudioIO;
+   while( !TestDestroy() &&
+      nullptr != ( gAudioIO = AudioIO::Get() ) )
    {
       // Set LoopActive outside the tests to avoid race condition
       gAudioIO->mMidiThreadFillBuffersLoopActive = true;
@@ -3283,484 +2686,6 @@ size_t AudioIO::GetCommonlyAvailCapture()
          mCaptureBuffers[i]->AvailForGet());
    return commonlyAvail;
 }
-
-#if USE_PORTMIXER
-int AudioIO::getRecordSourceIndex(PxMixer *portMixer)
-{
-   int i;
-   wxString sourceName = gPrefs->Read(wxT("/AudioIO/RecordingSource"), wxT(""));
-   int numSources = Px_GetNumInputSources(portMixer);
-   for (i = 0; i < numSources; i++) {
-      if (sourceName == wxString(wxSafeConvertMB2WX(Px_GetInputSourceName(portMixer, i))))
-         return i;
-   }
-   return -1;
-}
-#endif
-
-int AudioIO::getPlayDevIndex(const wxString &devNameArg)
-{
-   wxString devName(devNameArg);
-   // if we don't get given a device, look up the preferences
-   if (devName.empty())
-   {
-      devName = gPrefs->Read(wxT("/AudioIO/PlaybackDevice"), wxT(""));
-   }
-
-   wxString hostName = gPrefs->Read(wxT("/AudioIO/Host"), wxT(""));
-   PaHostApiIndex hostCnt = Pa_GetHostApiCount();
-   PaHostApiIndex hostNum;
-   for (hostNum = 0; hostNum < hostCnt; hostNum++)
-   {
-      const PaHostApiInfo *hinfo = Pa_GetHostApiInfo(hostNum);
-      if (hinfo && wxString(wxSafeConvertMB2WX(hinfo->name)) == hostName)
-      {
-         for (PaDeviceIndex hostDevice = 0; hostDevice < hinfo->deviceCount; hostDevice++)
-         {
-            PaDeviceIndex deviceNum = Pa_HostApiDeviceIndexToDeviceIndex(hostNum, hostDevice);
-
-            const PaDeviceInfo *dinfo = Pa_GetDeviceInfo(deviceNum);
-            if (dinfo && DeviceName(dinfo) == devName && dinfo->maxOutputChannels > 0 )
-            {
-               // this device name matches the stored one, and works.
-               // So we say this is the answer and return it
-               return deviceNum;
-            }
-         }
-
-         // The device wasn't found so use the default for this host.
-         // LL:  At this point, preferences and active no longer match.
-         return hinfo->defaultOutputDevice;
-      }
-   }
-
-   // The host wasn't found, so use the default output device.
-   // FIXME: TRAP_ERR PaErrorCode not handled well (this code is similar to input code
-   // and the input side has more comments.)
-
-   PaDeviceIndex deviceNum = Pa_GetDefaultOutputDevice();
-
-   // Sometimes PortAudio returns -1 if it cannot find a suitable default
-   // device, so we just use the first one available
-   //
-   // LL:  At this point, preferences and active no longer match
-   //
-   //      And I can't imagine how far we'll get specifying an "invalid" index later
-   //      on...are we certain "0" even exists?
-   if (deviceNum < 0) {
-      wxASSERT(false);
-      deviceNum = 0;
-   }
-
-   return deviceNum;
-}
-
-int AudioIO::getRecordDevIndex(const wxString &devNameArg)
-{
-   wxString devName(devNameArg);
-   // if we don't get given a device, look up the preferences
-   if (devName.empty())
-   {
-      devName = gPrefs->Read(wxT("/AudioIO/RecordingDevice"), wxT(""));
-   }
-
-   wxString hostName = gPrefs->Read(wxT("/AudioIO/Host"), wxT(""));
-   PaHostApiIndex hostCnt = Pa_GetHostApiCount();
-   PaHostApiIndex hostNum;
-   for (hostNum = 0; hostNum < hostCnt; hostNum++)
-   {
-      const PaHostApiInfo *hinfo = Pa_GetHostApiInfo(hostNum);
-      if (hinfo && wxString(wxSafeConvertMB2WX(hinfo->name)) == hostName)
-      {
-         for (PaDeviceIndex hostDevice = 0; hostDevice < hinfo->deviceCount; hostDevice++)
-         {
-            PaDeviceIndex deviceNum = Pa_HostApiDeviceIndexToDeviceIndex(hostNum, hostDevice);
-
-            const PaDeviceInfo *dinfo = Pa_GetDeviceInfo(deviceNum);
-            if (dinfo && DeviceName(dinfo) == devName && dinfo->maxInputChannels > 0 )
-            {
-               // this device name matches the stored one, and works.
-               // So we say this is the answer and return it
-               return deviceNum;
-            }
-         }
-
-         // The device wasn't found so use the default for this host.
-         // LL:  At this point, preferences and active no longer match.
-         return hinfo->defaultInputDevice;
-      }
-   }
-
-   // The host wasn't found, so use the default input device.
-   // FIXME: TRAP_ERR PaErrorCode not handled well in getRecordDevIndex()
-   PaDeviceIndex deviceNum = Pa_GetDefaultInputDevice();
-
-   // Sometimes PortAudio returns -1 if it cannot find a suitable default
-   // device, so we just use the first one available
-   // PortAudio has an error reporting function.  We should log/report the error?
-   //
-   // LL:  At this point, preferences and active no longer match
-   //
-   //      And I can't imagine how far we'll get specifying an "invalid" index later
-   //      on...are we certain "0" even exists?
-   if (deviceNum < 0) {
-      // JKC: This ASSERT will happen if you run with no config file
-      // This happens once.  Config file will exist on the next run.
-      // TODO: Look into this a bit more.  Could be relevant to blank Device Toolbar.
-      wxASSERT(false);
-      deviceNum = 0;
-   }
-
-   return deviceNum;
-}
-
-wxString AudioIO::GetDeviceInfo()
-{
-   wxStringOutputStream o;
-   wxTextOutputStream s(o, wxEOL_UNIX);
-
-   if (IsStreamActive()) {
-      return _("Stream is active ... unable to gather information.\n");
-   }
-
-
-   // FIXME: TRAP_ERR PaErrorCode not handled.  3 instances in GetDeviceInfo().
-   int recDeviceNum = Pa_GetDefaultInputDevice();
-   int playDeviceNum = Pa_GetDefaultOutputDevice();
-   int cnt = Pa_GetDeviceCount();
-
-   // PRL:  why only into the log?
-   wxLogDebug(wxT("Portaudio reports %d audio devices"),cnt);
-   
-   s << wxT("==============================\n");
-   s << wxString::Format(_("Default recording device number: %d\n"), recDeviceNum);
-   s << wxString::Format(_("Default playback device number: %d\n"), playDeviceNum);
-
-   wxString recDevice = gPrefs->Read(wxT("/AudioIO/RecordingDevice"), wxT(""));
-   wxString playDevice = gPrefs->Read(wxT("/AudioIO/PlaybackDevice"), wxT(""));
-   int j;
-
-   // This gets info on all available audio devices (input and output)
-   if (cnt <= 0) {
-      s << _("No devices found\n");
-      return o.GetString();
-   }
-
-   const PaDeviceInfo* info;
-
-   for (j = 0; j < cnt; j++) {
-      s << wxT("==============================\n");
-
-      info = Pa_GetDeviceInfo(j);
-      if (!info) {
-         s << wxString::Format(_("Device info unavailable for: %d\n"), j);
-         continue;
-      }
-
-      wxString name = DeviceName(info);
-      s << wxString::Format(_("Device ID: %d\n"), j);
-      s << wxString::Format(_("Device name: %s\n"), name);
-      s << wxString::Format(_("Host name: %s\n"), HostName(info));
-      s << wxString::Format(_("Recording channels: %d\n"), info->maxInputChannels);
-      s << wxString::Format(_("Playback channels: %d\n"), info->maxOutputChannels);
-      s << wxString::Format(_("Low Recording Latency: %g\n"), info->defaultLowInputLatency);
-      s << wxString::Format(_("Low Playback Latency: %g\n"), info->defaultLowOutputLatency);
-      s << wxString::Format(_("High Recording Latency: %g\n"), info->defaultHighInputLatency);
-      s << wxString::Format(_("High Playback Latency: %g\n"), info->defaultHighOutputLatency);
-
-      auto rates = GetSupportedPlaybackRates(j, 0.0);
-
-      /* i18n-hint: Supported, meaning made available by the system */
-      s << _("Supported Rates:\n");
-      for (int k = 0; k < (int) rates.size(); k++) {
-         s << wxT("    ") << (int)rates[k] << wxT("\n");
-      }
-
-      if (name == playDevice && info->maxOutputChannels > 0)
-         playDeviceNum = j;
-
-      if (name == recDevice && info->maxInputChannels > 0)
-         recDeviceNum = j;
-
-      // Sometimes PortAudio returns -1 if it cannot find a suitable default
-      // device, so we just use the first one available
-      if (recDeviceNum < 0 && info->maxInputChannels > 0){
-         recDeviceNum = j;
-      }
-      if (playDeviceNum < 0 && info->maxOutputChannels > 0){
-         playDeviceNum = j;
-      }
-   }
-
-   bool haveRecDevice = (recDeviceNum >= 0);
-   bool havePlayDevice = (playDeviceNum >= 0);
-
-   s << wxT("==============================\n");
-   if (haveRecDevice)
-      s << wxString::Format(_("Selected recording device: %d - %s\n"), recDeviceNum, recDevice);
-   else
-      s << wxString::Format(_("No recording device found for '%s'.\n"), recDevice);
-
-   if (havePlayDevice)
-      s << wxString::Format(_("Selected playback device: %d - %s\n"), playDeviceNum, playDevice);
-   else
-      s << wxString::Format(_("No playback device found for '%s'.\n"), playDevice);
-
-   std::vector<long> supportedSampleRates;
-
-   if (havePlayDevice && haveRecDevice) {
-      supportedSampleRates = GetSupportedSampleRates(playDeviceNum, recDeviceNum);
-
-      s << _("Supported Rates:\n");
-      for (int k = 0; k < (int) supportedSampleRates.size(); k++) {
-         s << wxT("    ") << (int)supportedSampleRates[k] << wxT("\n");
-      }
-   }
-   else {
-      s << _("Cannot check mutual sample rates without both devices.\n");
-      return o.GetString();
-   }
-
-#if defined(USE_PORTMIXER)
-   if (supportedSampleRates.size() > 0)
-      {
-      int highestSampleRate = supportedSampleRates.back();
-      bool EmulateMixerInputVol = true;
-      bool EmulateMixerOutputVol = true;
-      float MixerInputVol = 1.0;
-      float MixerOutputVol = 1.0;
-
-      int error;
-
-      PaStream *stream;
-
-      PaStreamParameters playbackParameters;
-
-      playbackParameters.device = playDeviceNum;
-      playbackParameters.sampleFormat = paFloat32;
-      playbackParameters.hostApiSpecificStreamInfo = NULL;
-      playbackParameters.channelCount = 1;
-      if (Pa_GetDeviceInfo(playDeviceNum)){
-         playbackParameters.suggestedLatency =
-            Pa_GetDeviceInfo(playDeviceNum)->defaultLowOutputLatency;
-      }
-      else{
-         playbackParameters.suggestedLatency = DEFAULT_LATENCY_CORRECTION/1000.0;
-      }
-
-      PaStreamParameters captureParameters;
-
-      captureParameters.device = recDeviceNum;
-      captureParameters.sampleFormat = paFloat32;;
-      captureParameters.hostApiSpecificStreamInfo = NULL;
-      captureParameters.channelCount = 1;
-      if (Pa_GetDeviceInfo(recDeviceNum)){
-         captureParameters.suggestedLatency =
-            Pa_GetDeviceInfo(recDeviceNum)->defaultLowInputLatency;
-      }else{
-         captureParameters.suggestedLatency = DEFAULT_LATENCY_CORRECTION/1000.0;
-      }
-
-      error = Pa_OpenStream(&stream,
-                         &captureParameters, &playbackParameters,
-                         highestSampleRate, paFramesPerBufferUnspecified,
-                         paClipOff | paDitherOff,
-                         audacityAudioCallback, NULL);
-
-      if (error) {
-         error = Pa_OpenStream(&stream,
-                            &captureParameters, NULL,
-                            highestSampleRate, paFramesPerBufferUnspecified,
-                            paClipOff | paDitherOff,
-                            audacityAudioCallback, NULL);
-      }
-
-      if (error) {
-         s << wxString::Format(_("Received %d while opening devices\n"), error);
-         return o.GetString();
-      }
-
-      PxMixer *PortMixer = Px_OpenMixer(stream, 0);
-
-      if (!PortMixer) {
-         s << _("Unable to open Portmixer\n");
-         Pa_CloseStream(stream);
-         return o.GetString();
-      }
-
-      s << wxT("==============================\n");
-      s << _("Available mixers:\n");
-
-      // FIXME: ? PortMixer errors on query not reported in GetDeviceInfo
-      cnt = Px_GetNumMixers(stream);
-      for (int i = 0; i < cnt; i++) {
-         wxString name = wxSafeConvertMB2WX(Px_GetMixerName(stream, i));
-         s << wxString::Format(_("%d - %s\n"), i, name);
-      }
-
-      s << wxT("==============================\n");
-      s << _("Available recording sources:\n");
-      cnt = Px_GetNumInputSources(PortMixer);
-      for (int i = 0; i < cnt; i++) {
-         wxString name = wxSafeConvertMB2WX(Px_GetInputSourceName(PortMixer, i));
-         s << wxString::Format(_("%d - %s\n"), i, name);
-      }
-
-      s << wxT("==============================\n");
-      s << _("Available playback volumes:\n");
-      cnt = Px_GetNumOutputVolumes(PortMixer);
-      for (int i = 0; i < cnt; i++) {
-         wxString name = wxSafeConvertMB2WX(Px_GetOutputVolumeName(PortMixer, i));
-         s << wxString::Format(_("%d - %s\n"), i, name);
-      }
-
-      // Determine mixer capabilities - it it doesn't support either
-      // input or output, we emulate them (by multiplying this value
-      // by all incoming/outgoing samples)
-
-      MixerOutputVol = Px_GetPCMOutputVolume(PortMixer);
-      EmulateMixerOutputVol = false;
-      Px_SetPCMOutputVolume(PortMixer, 0.0);
-      if (Px_GetPCMOutputVolume(PortMixer) > 0.1)
-         EmulateMixerOutputVol = true;
-      Px_SetPCMOutputVolume(PortMixer, 0.2f);
-      if (Px_GetPCMOutputVolume(PortMixer) < 0.1 ||
-          Px_GetPCMOutputVolume(PortMixer) > 0.3)
-         EmulateMixerOutputVol = true;
-      Px_SetPCMOutputVolume(PortMixer, MixerOutputVol);
-
-      MixerInputVol = Px_GetInputVolume(PortMixer);
-      EmulateMixerInputVol = false;
-      Px_SetInputVolume(PortMixer, 0.0);
-      if (Px_GetInputVolume(PortMixer) > 0.1)
-         EmulateMixerInputVol = true;
-      Px_SetInputVolume(PortMixer, 0.2f);
-      if (Px_GetInputVolume(PortMixer) < 0.1 ||
-          Px_GetInputVolume(PortMixer) > 0.3)
-         EmulateMixerInputVol = true;
-      Px_SetInputVolume(PortMixer, MixerInputVol);
-
-      Pa_CloseStream(stream);
-
-      s << wxT("==============================\n");
-      s << ( EmulateMixerInputVol
-         ? _("Recording volume is emulated\n")
-         : _("Recording volume is native\n") );
-      s << ( EmulateMixerOutputVol
-         ? _("Playback volume is emulated\n")
-         : _("Playback volume is native\n") );
-
-      Px_CloseMixer(PortMixer);
-
-      }  //end of massive if statement if a valid sample rate has been found
-#endif
-   return o.GetString();
-}
-
-#ifdef EXPERIMENTAL_MIDI_OUT
-// FIXME: When EXPERIMENTAL_MIDI_IN is added (eventually) this should also be enabled -- Poke
-wxString AudioIO::GetMidiDeviceInfo()
-{
-   wxStringOutputStream o;
-   wxTextOutputStream s(o, wxEOL_UNIX);
-
-   if (IsStreamActive()) {
-      return _("Stream is active ... unable to gather information.\n");
-   }
-
-
-   // XXX: May need to trap errors as with the normal device info
-   int recDeviceNum = Pm_GetDefaultInputDeviceID();
-   int playDeviceNum = Pm_GetDefaultOutputDeviceID();
-   int cnt = Pm_CountDevices();
-
-   // PRL:  why only into the log?
-   wxLogDebug(wxT("PortMidi reports %d MIDI devices"), cnt);
-
-   s << wxT("==============================\n");
-   s << wxString::Format(_("Default recording device number: %d\n"), recDeviceNum);
-   s << wxString::Format(_("Default playback device number: %d\n"), playDeviceNum);
-
-   wxString recDevice = gPrefs->Read(wxT("/MidiIO/RecordingDevice"), wxT(""));
-   wxString playDevice = gPrefs->Read(wxT("/MidiIO/PlaybackDevice"), wxT(""));
-
-   // This gets info on all available audio devices (input and output)
-   if (cnt <= 0) {
-      s << _("No devices found\n");
-      return o.GetString();
-   }
-
-   for (int i = 0; i < cnt; i++) {
-      s << wxT("==============================\n");
-
-      const PmDeviceInfo* info = Pm_GetDeviceInfo(i);
-      if (!info) {
-         s << wxString::Format(_("Device info unavailable for: %d\n"), i);
-         continue;
-      }
-
-      wxString name = wxSafeConvertMB2WX(info->name);
-      wxString hostName = wxSafeConvertMB2WX(info->interf);
-
-      s << wxString::Format(_("Device ID: %d\n"), i);
-      s << wxString::Format(_("Device name: %s\n"), name);
-      s << wxString::Format(_("Host name: %s\n"), hostName);
-      /* i18n-hint: Supported, meaning made available by the system */
-      s << wxString::Format(_("Supports output: %d\n"), info->output);
-      s << wxString::Format(_("Supports input: %d\n"), info->input);
-      s << wxString::Format(_("Opened: %d\n"), info->opened);
-
-      if (name == playDevice && info->output)
-         playDeviceNum = i;
-
-      if (name == recDevice && info->input)
-         recDeviceNum = i;
-
-      // XXX: This is only done because the same was applied with PortAudio
-      // If PortMidi returns -1 for the default device, use the first one
-      if (recDeviceNum < 0 && info->input){
-         recDeviceNum = i;
-      }
-      if (playDeviceNum < 0 && info->output){
-         playDeviceNum = i;
-      }
-   }
-
-   bool haveRecDevice = (recDeviceNum >= 0);
-   bool havePlayDevice = (playDeviceNum >= 0);
-
-   s << wxT("==============================\n");
-   if (haveRecDevice)
-      s << wxString::Format(_("Selected MIDI recording device: %d - %s\n"), recDeviceNum, recDevice);
-   else
-      s << wxString::Format(_("No MIDI recording device found for '%s'.\n"), recDevice);
-
-   if (havePlayDevice)
-      s << wxString::Format(_("Selected MIDI playback device: %d - %s\n"), playDeviceNum, playDevice);
-   else
-      s << wxString::Format(_("No MIDI playback device found for '%s'.\n"), playDevice);
-
-   // Mention our conditional compilation flags for Alpha only
-#ifdef IS_ALPHA
-
-   // Not internationalizing these alpha-only messages
-   s << wxT("==============================\n");
-#ifdef EXPERIMENTAL_MIDI_OUT
-   s << wxT("EXPERIMENTAL_MIDI_OUT is enabled\n");
-#else
-   s << wxT("EXPERIMENTAL_MIDI_OUT is NOT enabled\n");
-#endif
-#ifdef EXPERIMENTAL_MIDI_IN
-   s << wxT("EXPERIMENTAL_MIDI_IN is enabled\n");
-#else
-   s << wxT("EXPERIMENTAL_MIDI_IN is NOT enabled\n");
-#endif
-
-#endif
-
-   return o.GetString();
-}
-#endif
 
 // This method is the data gateway between the audio thread (which
 // communicates with the disk) and the PortAudio callback thread
@@ -3908,6 +2833,7 @@ void AudioIO::FillBuffers()
 #ifdef EXPERIMENTAL_SCRUBBING_SUPPORT
             case PlaybackSchedule::PLAY_SCRUB:
             case PlaybackSchedule::PLAY_AT_SPEED:
+            case PlaybackSchedule::PLAY_KEYBOARD_SCRUB:
             {
                mScrubDuration -= frames;
                wxASSERT(mScrubDuration >= 0);
@@ -3938,9 +2864,15 @@ void AudioIO::FillBuffers()
                            double(diff) / mScrubDuration.as_double();
                      if (!mSilentScrub)
                      {
-                        for (i = 0; i < mPlaybackTracks.size(); i++)
-                           mPlaybackMixers[i]->SetTimesAndSpeed(
-                              startTime, endTime, fabs( mScrubSpeed ));
+                        for (i = 0; i < mPlaybackTracks.size(); i++) {
+                           if (mPlaybackSchedule.mPlayMode == PlaybackSchedule::PLAY_AT_SPEED)
+                              mPlaybackMixers[i]->SetSpeedForPlayAtSpeed(mScrubSpeed);
+                           else if (mPlaybackSchedule.mPlayMode == PlaybackSchedule::PLAY_KEYBOARD_SCRUB)
+                              mPlaybackMixers[i]->SetSpeedForKeyboardScrubbing(mScrubSpeed, startTime);
+                           else
+                              mPlaybackMixers[i]->SetTimesAndSpeed(
+                                 startTime, endTime, fabs( mScrubSpeed ));
+                        }
                      }
                      mTimeQueue.mLastTime = startTime;
                   }
@@ -3986,16 +2918,25 @@ void AudioIO::FillBuffers()
          if (mAudioThreadShouldCallFillBuffersOnce ||
              deltat >= mMinCaptureSecsToCopy)
          {
+            // This scope may combine many appendings of wave tracks,
+            // and also an autosave, into one transaction,
+            // lessening the number of checkpoints
+            Optional<TransactionScope> pScope;
+            if (mOwningProject) {
+               auto &pIO = ProjectFileIO::Get(*mOwningProject);
+               pScope.emplace(pIO.GetConnection(), "Recording");
+            }
+
+            bool newBlocks = false;
+
             // Append captured samples to the end of the WaveTracks.
             // The WaveTracks have their own buffering for efficiency.
-            AutoSaveFile blockFileLog;
             auto numChannels = mCaptureTracks.size();
 
             for( i = 0; i < numChannels; i++ )
             {
                sampleFormat trackFormat = mCaptureTracks[i]->GetSampleFormat();
 
-               AutoSaveFile appendLog;
                size_t discarded = 0;
 
                if (!mRecordingSchedule.mLatencyCorrected) {
@@ -4007,8 +2948,7 @@ void AudioIO::FillBuffers()
                      size_t size = floor( correction * mRate * mFactor);
                      SampleBuffer temp(size, trackFormat);
                      ClearSamples(temp.ptr(), trackFormat, 0, size);
-                     mCaptureTracks[i]->Append(temp.ptr(), trackFormat,
-                                               size, 1, &appendLog);
+                     mCaptureTracks[i]->Append(temp.ptr(), trackFormat, size, 1);
                   }
                   else {
                      // Leftward shift
@@ -4110,27 +3050,20 @@ void AudioIO::FillBuffers()
 
                // Now append
                // see comment in second handler about guarantee
-               mCaptureTracks[i]->Append(temp.ptr(), format,
-                  size, 1,
-                  &appendLog);
-
-               if (!appendLog.IsEmpty())
-               {
-                  blockFileLog.StartTag(wxT("recordingrecovery"));
-                  blockFileLog.WriteAttr(wxT("id"), mCaptureTracks[i]->GetAutoSaveIdent());
-                  blockFileLog.WriteAttr(wxT("channel"), (int)i);
-                  blockFileLog.WriteAttr(wxT("numchannels"), numChannels);
-                  blockFileLog.WriteSubTree(appendLog);
-                  blockFileLog.EndTag(wxT("recordingrecovery"));
-               }
+               newBlocks = mCaptureTracks[i]->Append(temp.ptr(), format, size, 1)
+                  || newBlocks;
             } // end loop over capture channels
 
-            // Now update the recording shedule position
+            // Now update the recording schedule position
             mRecordingSchedule.mPosition += avail / mRate;
             mRecordingSchedule.mLatencyCorrected = latencyCorrected;
 
-            if (mListener && !blockFileLog.IsEmpty())
-               mListener->OnAudioIONewBlockFiles(blockFileLog);
+            auto pListener = GetListener();
+            if (pListener && newBlocks)
+               pListener->OnAudioIONewBlocks(&mCaptureTracks);
+
+            if (pScope)
+               pScope->Commit();
          }
          // end of record buffering
       },
@@ -4150,7 +3083,8 @@ void AudioIO::FillBuffers()
    );
 }
 
-void AudioIO::SetListener(AudioIOListener* listener)
+void AudioIoCallback::SetListener(
+   const std::shared_ptr< AudioIOListener > &listener)
 {
    if (IsBusy())
       return;
@@ -4163,10 +3097,10 @@ void AudioIO::SetListener(AudioIOListener* listener)
 static Alg_update gAllNotesOff; // special event for loop ending
 // the fields of this event are never used, only the address is important
 
-double AudioIO::UncorrectedMidiEventTime()
+double AudioIoCallback::UncorrectedMidiEventTime()
 {
    double time;
-   if (mPlaybackSchedule.mTimeTrack)
+   if (mPlaybackSchedule.mEnvelope)
       time =
          mPlaybackSchedule.RealDuration(mNextEventTime - MidiLoopOffset())
          + mPlaybackSchedule.mT0 + (mMidiLoopPasses *
@@ -4177,7 +3111,7 @@ double AudioIO::UncorrectedMidiEventTime()
    return time + PauseTime();
 }
 
-void AudioIO::OutputEvent()
+void AudioIoCallback::OutputEvent()
 {
    int channel = (mNextEvent->chan) & 0xF; // must be in [0..15]
    int command = -1;
@@ -4224,7 +3158,7 @@ void AudioIO::OutputEvent()
    // we'll just wait for the note-off events to happen.
    // Also note that note-offs are only sent when we call
    // mIterator->request_note_off(), so notes that are not played
-   // will note generate random note-offs. There is the interesting
+   // will not generate random note-offs. There is the interesting
    // case that if the playback is paused, all-notes-off WILL be sent
    // and if playback resumes, the pending note-off events WILL also
    // be sent (but if that is a problem, there would also be a problem
@@ -4324,7 +3258,7 @@ void AudioIO::OutputEvent()
    }
 }
 
-void AudioIO::GetNextEvent()
+void AudioIoCallback::GetNextEvent()
 {
    mNextEventTrack = NULL; // clear it just to be safe
    // now get the next event and the track from which it came
@@ -4353,14 +3287,14 @@ void AudioIO::GetNextEvent()
 }
 
 
-bool AudioIO::SetHasSolo(bool hasSolo)
+bool AudioIoCallback::SetHasSolo(bool hasSolo)
 {
    mHasSolo = hasSolo;
    return mHasSolo;
 }
 
 
-void AudioIO::FillMidiBuffers()
+void AudioIoCallback::FillMidiBuffers()
 {
    // Keep track of time paused. If not paused, fill buffers.
    if (IsPaused()) {
@@ -4411,35 +3345,9 @@ void AudioIO::FillMidiBuffers()
       OutputEvent();
       GetNextEvent();
    }
-
-   // test for end
-   double realTime = MidiTime() * 0.001 -
-                      PauseTime();
-   realTime -= 1; // MidiTime() runs ahead 1s
-
-   // XXX Is this still true now?  It seems to break looping --Poke
-   //
-   // The TrackPanel::OnTimer() method updates the time position
-   // indicator every 200ms, so it tends to not advance the
-   // indicator to the end of the selection (mT1) but instead stop
-   // up to 200ms before the end. At this point, output is shut
-   // down and the indicator is removed, but for a brief time, the
-   // indicator is clearly stopped before reaching mT1. To avoid
-   // this, we do not set mMidiOutputComplete until we are actually
-   // 0.22s beyond mT1 (even though we stop playing at mT1). This
-   // gives OnTimer() time to wake up and draw the final time
-   // position at mT1 before shutting down the stream.
-   const double loopDelay = 0.220;
-
-   auto timeAtSpeed = mPlaybackSchedule.TrackDuration(realTime);
-
-   mMidiOutputComplete =
-      (mPlaybackSchedule.PlayingStraight() && // PRL:  what if scrubbing?
-       timeAtSpeed >= mPlaybackSchedule.mT1 + loopDelay);
-   // !mNextEvent);
 }
 
-double AudioIO::PauseTime()
+double AudioIoCallback::PauseTime()
 {
    return mNumPauseFrames / mRate;
 }
@@ -4449,7 +3357,7 @@ double AudioIO::PauseTime()
 // output (DAC) time + 1s. In other words, what audacity track time
 // corresponds to the audio (including pause insertions) at the output?
 //
-PmTimestamp AudioIO::MidiTime()
+PmTimestamp AudioIoCallback::MidiTime()
 {
    // note: the extra 0.0005 is for rounding. Round down by casting to
    // unsigned long, then convert to PmTimeStamp (currently signed)
@@ -4473,7 +3381,7 @@ PmTimestamp AudioIO::MidiTime()
 }
 
 
-void AudioIO::AllNotesOff(bool looping)
+void AudioIoCallback::AllNotesOff(bool looping)
 {
 #ifdef __WXGTK__
    bool doDelay = !looping;
@@ -4530,6 +3438,9 @@ void AudioIO::AllNotesOff(bool looping)
 
 // Automated Input Level Adjustment - Automatically tries to find an acceptable input volume
 #ifdef EXPERIMENTAL_AUTOMATED_INPUT_LEVEL_ADJUSTMENT
+
+#include "ProjectStatus.h"
+
 void AudioIO::AILAInitialize() {
    gPrefs->Read(wxT("/AudioIO/AutomatedInputLevelAdjustment"), &mAILAActive,         false);
    gPrefs->Read(wxT("/AudioIO/TargetPeak"),            &mAILAGoalPoint,      AILA_DEF_TARGET_PEAK);
@@ -4603,16 +3514,18 @@ void AudioIO::AILAProcess(double maxPeak) {
                //we can't improve it more now
                if (mAILATotalAnalysis != 0) {
                   mAILAActive = false;
-                  proj->TP_DisplayStatusMessage(_("Automated Recording Level Adjustment stopped. It was not possible to optimize it more. Still too high."));
+                  ProjectStatus::Get( *proj ).Set(
+                     XO(
+"Automated Recording Level Adjustment stopped. It was not possible to optimize it more. Still too high.") );
                }
                wxPrintf("\talready min vol:%f\n", iv);
             }
             else {
                float vol = (float) max(LOWER_BOUND, iv+(mAILAGoalPoint-mAILAMax)*mAILAChangeFactor);
                Px_SetInputVolume(mPortMixer, vol);
-               wxString msg;
-               msg.Printf(_("Automated Recording Level Adjustment decreased the volume to %f."), vol);
-               proj->TP_DisplayStatusMessage(msg);
+               auto msg = XO(
+"Automated Recording Level Adjustment decreased the volume to %f.").Format( vol );
+               ProjectStatus::Get( *proj ).Set(msg);
                changetype = 1;
                wxPrintf("\tnew vol:%f\n", vol);
                float check = Px_GetInputVolume(mPortMixer);
@@ -4626,7 +3539,9 @@ void AudioIO::AILAProcess(double maxPeak) {
                //we can't improve it more
                if (mAILATotalAnalysis != 0) {
                   mAILAActive = false;
-                  proj->TP_DisplayStatusMessage(_("Automated Recording Level Adjustment stopped. It was not possible to optimize it more. Still too low."));
+                  ProjectStatus::Get( *proj ).Set(
+                     XO(
+"Automated Recording Level Adjustment stopped. It was not possible to optimize it more. Still too low.") );
                }
                wxPrintf("\talready max vol:%f\n", iv);
             }
@@ -4637,9 +3552,10 @@ void AudioIO::AILAProcess(double maxPeak) {
                   wxPrintf("\tTruncated vol:%f\n", vol);
                }
                Px_SetInputVolume(mPortMixer, vol);
-               wxString msg;
-               msg.Printf(_("Automated Recording Level Adjustment increased the volume to %.2f."), vol);
-               proj->TP_DisplayStatusMessage(msg);
+               auto msg = XO(
+"Automated Recording Level Adjustment increased the volume to %.2f.")
+                  .Format( vol );
+               ProjectStatus::Get( *proj ).Set(msg);
                changetype = 2;
                wxPrintf("\tnew vol:%f\n", vol);
                float check = Px_GetInputVolume(mPortMixer);
@@ -4672,13 +3588,18 @@ void AudioIO::AILAProcess(double maxPeak) {
       if (mAILAActive && mAILATotalAnalysis != 0 && mAILAAnalysisCounter >= mAILATotalAnalysis) {
          mAILAActive = false;
          if (mAILAMax > mAILAGoalPoint + mAILAGoalDelta)
-            proj->TP_DisplayStatusMessage(_("Automated Recording Level Adjustment stopped. The total number of analyses has been exceeded without finding an acceptable volume. Still too high."));
+            ProjectStatus::Get( *proj ).Set(
+               XO(
+"Automated Recording Level Adjustment stopped. The total number of analyses has been exceeded without finding an acceptable volume. Still too high.") );
          else if (mAILAMax < mAILAGoalPoint - mAILAGoalDelta)
-            proj->TP_DisplayStatusMessage(_("Automated Recording Level Adjustment stopped. The total number of analyses has been exceeded without finding an acceptable volume. Still too low."));
+            ProjectStatus::Get( *proj ).Set(
+               XO(
+"Automated Recording Level Adjustment stopped. The total number of analyses has been exceeded without finding an acceptable volume. Still too low.") );
          else {
-            wxString msg;
-            msg.Printf(_("Automated Recording Level Adjustment stopped. %.2f seems an acceptable volume."), Px_GetInputVolume(mPortMixer));
-            proj->TP_DisplayStatusMessage(msg);
+            auto msg = XO(
+"Automated Recording Level Adjustment stopped. %.2f seems an acceptable volume.")
+               .Format( Px_GetInputVolume(mPortMixer) );
+            ProjectStatus::Get( *proj ).Set(msg);
          }
       }
    }
@@ -4701,11 +3622,9 @@ static void DoSoftwarePlaythrough(const void *inputBuffer,
 {
    for (unsigned int i=0; i < inputChannels; i++) {
       samplePtr inputPtr = ((samplePtr)inputBuffer) + (i * SAMPLE_SIZE(inputFormat));
-      samplePtr outputPtr = ((samplePtr)outputBuffer) + (i * SAMPLE_SIZE(floatSample));
 
-      CopySamples(inputPtr, inputFormat,
-                  (samplePtr)outputPtr, floatSample,
-                  len, true, inputChannels, 2);
+      SamplesToFloats(inputPtr, inputFormat,
+         outputBuffer + i, len, inputChannels, 2);
    }
 
    // One mono input channel goes to both output channels...
@@ -4719,6 +3638,7 @@ int audacityAudioCallback(const void *inputBuffer, void *outputBuffer,
                           const PaStreamCallbackTimeInfo *timeInfo,
                           const PaStreamCallbackFlags statusFlags, void *userData )
 {
+   auto gAudioIO = AudioIO::Get();
    return gAudioIO->AudioCallback(
       inputBuffer, outputBuffer, framesPerBuffer,
       timeInfo, statusFlags, userData);
@@ -4736,9 +3656,6 @@ void AudioIoCallback::ComputeMidiTimings(
        mStartTime = SystemTime(mUsingAlsa) - mPlaybackSchedule.mT0;
        // later, mStartTime - mSystemMinusAudioTime will tell us latency
    }
-
-   /* GSW: Save timeInfo in case MidiPlayback needs it */
-   mAudioCallbackClockTime = PaUtil_GetTime();
 
    /* for Linux, estimate a smooth audio time as a slowly-changing
       offset from system time */
@@ -4815,31 +3732,37 @@ void AudioIoCallback::ComputeMidiTimings(
 //   to run in the main GUI thread after the next event loop iteration.
 //   That's important, because Pause() updates GUI, such as status bar,
 //   and that should NOT happen in this audio non-gui thread.
-void AudioIoCallback::CheckSoundActivatedRecordingLevel( const void *inputBuffer )
+void AudioIoCallback::CheckSoundActivatedRecordingLevel(
+      float *inputSamples,
+      unsigned long framesPerBuffer
+   )
 {
-   if( !inputBuffer)
-      return;
    // Quick returns if next to nothing to do.
    if( !mPauseRec )
       return;
-   if( !mInputMeter )
-      return;
-   
-   bool bShouldBePaused = mInputMeter->GetMaxPeak() < mSilenceLevel;
-   if( bShouldBePaused != IsPaused())
+
+   float maxPeak = 0.;
+   for( unsigned long i = 0, cnt = framesPerBuffer * mNumCaptureChannels; i < cnt; ++i ) {
+      float sample = fabs(*(inputSamples++));
+      if (sample > maxPeak) {
+         maxPeak = sample;
+      }
+   }
+
+   bool bShouldBePaused = maxPeak < mSilenceLevel;
+   if( bShouldBePaused != IsPaused() )
    {
-      ControlToolBar *bar = mOwningProject->GetControlToolBar();
-      bar->CallAfter(&ControlToolBar::Pause);
+      auto pListener = GetListener();
+      if ( pListener )
+         pListener->OnSoundActivationThreshold();
    }
 }
-
 
 // A function to apply the requested gain, fading up or down from the
 // most recently applied gain.
 void AudioIoCallback::AddToOutputChannel( unsigned int chan,
    float * outputMeterFloats,
    float * outputFloats,
-   float * tempFloats,
    float * tempBuf,
    bool drop,
    unsigned long len,
@@ -4857,7 +3780,7 @@ void AudioIoCallback::AddToOutputChannel( unsigned int chan,
    if (outputMeterFloats != outputFloats)
       for ( unsigned i = 0; i < len; ++i)
          outputMeterFloats[numPlaybackChannels*i+chan] +=
-            gain*tempFloats[i];
+            gain*tempBuf[i];
 
    if (mEmulateMixerOutputVol)
       gain *= mMixerOutputVol;
@@ -4879,7 +3802,7 @@ void AudioIoCallback::AddToOutputChannel( unsigned int chan,
 // Limit values to -1.0..+1.0
 void ClampBuffer(float * pBuffer, unsigned long len){
    for(unsigned i = 0; i < len; i++)
-      pBuffer[i] = wxClip( -1.0f, pBuffer[i], 1.0f);
+      pBuffer[i] = wxClip( pBuffer[i], -1.0f, 1.0f);
 };
 
 
@@ -4889,8 +3812,7 @@ void ClampBuffer(float * pBuffer, unsigned long len){
 //
 bool AudioIoCallback::FillOutputBuffers(
    void *outputBuffer,
-   unsigned long framesPerBuffer,
-   float * tempFloats, float *outputMeterFloats
+   unsigned long framesPerBuffer, float *outputMeterFloats
 )
 {
    const auto numPlaybackTracks = mPlaybackTracks.size();
@@ -4930,7 +3852,7 @@ bool AudioIoCallback::FillOutputBuffers(
       tempBufs[c] = (float *) alloca(framesPerBuffer * sizeof(float));
    // ------ End of MEMORY ALLOCATION ---------------
 
-   EffectManager & em = EffectManager::Get();
+   auto & em = RealtimeEffectManager::Get();
    em.RealtimeProcessStart();
 
    bool selected = false;
@@ -4991,7 +3913,7 @@ bool AudioIoCallback::FillOutputBuffers(
 
       if (dropQuickly)
       {
-         len = mPlaybackBuffers[t]->Discard(framesPerBuffer);
+         len = mPlaybackBuffers[t]->Discard(toGet);
          // keep going here.  
          // we may still need to issue a paComplete.
       }
@@ -5052,11 +3974,13 @@ bool AudioIoCallback::FillOutputBuffers(
 
          if (vt->GetChannelIgnoringPan() == Track::LeftChannel ||
                vt->GetChannelIgnoringPan() == Track::MonoChannel )
-            AddToOutputChannel( 0, outputMeterFloats, outputFloats, tempFloats, tempBufs[c], drop, len, vt);
+            AddToOutputChannel( 0, outputMeterFloats, outputFloats,
+               tempBufs[c], drop, len, vt);
 
          if (vt->GetChannelIgnoringPan() == Track::RightChannel ||
                vt->GetChannelIgnoringPan() == Track::MonoChannel  )
-            AddToOutputChannel( 1, outputMeterFloats, outputFloats, tempFloats, tempBufs[c], drop, len, vt);
+            AddToOutputChannel( 1, outputMeterFloats, outputFloats,
+               tempBufs[c], drop, len, vt);
       }
 
       chanCnt = 0;
@@ -5154,8 +4078,14 @@ void AudioIoCallback::FillInputBuffers(
       auto start = mPlaybackSchedule.GetTrackTime() +
             len / mRate + mRecordingSchedule.mLatencyCorrection;
       auto duration = (framesPerBuffer - len) / mRate;
-      auto interval = std::make_pair( start, duration );
-      mLostCaptureIntervals.push_back( interval );
+      auto pLast = mLostCaptureIntervals.empty()
+         ? nullptr : &mLostCaptureIntervals.back();
+      if (pLast &&
+          fabs(pLast->first + pLast->second - start) < 0.5/mRate)
+         // Make one bigger interval, not two butting intervals
+         pLast->second = start + duration - pLast->first;
+      else
+         mLostCaptureIntervals.emplace_back( start, duration );
    }
 
    if (len < framesPerBuffer)
@@ -5286,8 +4216,7 @@ void AudioIoCallback::DoPlaythrough(
 /* Send data to recording VU meter if applicable */
 // Also computes rms
 void AudioIoCallback::SendVuInputMeterData(
-   float *tempFloats,
-   const void *inputBuffer,
+   float *inputSamples,
    unsigned long framesPerBuffer   
    )
 {
@@ -5296,8 +4225,6 @@ void AudioIoCallback::SendVuInputMeterData(
    if (!mInputMeter)
       return;
    if( mInputMeter->IsMeterDisabled())
-      return;
-   if( !inputBuffer) 
       return;
 
    // get here if meters are actually live , and being updated
@@ -5313,18 +4240,9 @@ void AudioIoCallback::SendVuInputMeterData(
    //TODO use atomics instead.
    mUpdatingMeters = true;
    if (mUpdateMeters) {
-      if (mCaptureFormat == floatSample)
          mInputMeter->UpdateDisplay(numCaptureChannels,
-                                                framesPerBuffer,
-                                                (float *)inputBuffer);
-      else {
-         CopySamples((samplePtr)inputBuffer, mCaptureFormat,
-                     (samplePtr)tempFloats, floatSample,
-                     framesPerBuffer * numCaptureChannels);
-         mInputMeter->UpdateDisplay(numCaptureChannels,
-                                                framesPerBuffer,
-                                                tempFloats);
-      }
+                                    framesPerBuffer,
+                                    inputSamples);
    }
    mUpdatingMeters = false;
 }
@@ -5369,7 +4287,7 @@ void AudioIoCallback::SendVuOutputMeterData(
       //MixerBoard* pMixerBoard = mOwningProject->GetMixerBoard();
       //if (pMixerBoard)
       //   pMixerBoard->UpdateMeters(GetStreamTime(),
-      //                              (pProj->mLastPlayMode == loopedPlay));
+      //                              (pProj->GetControlToolBar()->GetLastPlayMode() == loopedPlay));
    }
    mUpdatingMeters = false;
 }
@@ -5467,7 +4385,7 @@ int AudioIoCallback::AudioCallback(const void *inputBuffer, void *outputBuffer,
 #endif
 
    // ------ MEMORY ALLOCATIONS -----------------------------------------------
-   // tempFloats will be a resusable scratch pad for (possibly format converted)
+   // tempFloats will be a reusable scratch pad for (possibly format converted)
    // audio data.  One temporary use is for the InputMeter data.
    const auto numPlaybackChannels = mNumPlaybackChannels;
    const auto numCaptureChannels = mNumCaptureChannels;
@@ -5484,22 +4402,34 @@ int AudioIoCallback::AudioCallback(const void *inputBuffer, void *outputBuffer,
          (float *)outputBuffer;
    // ----- END of MEMORY ALLOCATIONS ------------------------------------------
 
+   if (inputBuffer && numCaptureChannels) {
+      float *inputSamples;
 
-   SendVuInputMeterData(
-      tempFloats, 
-      inputBuffer,
-      framesPerBuffer); 
+      if (mCaptureFormat == floatSample) {
+         inputSamples = (float *) inputBuffer;
+      }
+      else {
+         SamplesToFloats(reinterpret_cast<constSamplePtr>(inputBuffer),
+            mCaptureFormat, tempFloats, framesPerBuffer * numCaptureChannels);
+         inputSamples = tempFloats;
+      }
 
-   // This function may queue up a pause or resume.
-   // TODO this is a bit dodgy as it toggles the Pause, and
-   // relies on an idle event to have handled that, so could 
-   // queue up multiple toggle requests and so do nothing.
-   // Eventually it will sort itself out by random luck, but
-   // the net effect is a delay in starting/stopping sound activated 
-   // recording.
-   CheckSoundActivatedRecordingLevel(
-      inputBuffer);
-  
+      SendVuInputMeterData(
+         inputSamples,
+         framesPerBuffer);
+
+      // This function may queue up a pause or resume.
+      // TODO this is a bit dodgy as it toggles the Pause, and
+      // relies on an idle event to have handled that, so could 
+      // queue up multiple toggle requests and so do nothing.
+      // Eventually it will sort itself out by random luck, but
+      // the net effect is a delay in starting/stopping sound activated 
+      // recording.
+      CheckSoundActivatedRecordingLevel(
+         inputSamples,
+         framesPerBuffer);
+   }
+
    // Even when paused, we do playthrough.
    // Initialise output buffer to zero or to playthrough data.
    // Initialise output meter values.
@@ -5518,7 +4448,6 @@ int AudioIoCallback::AudioCallback(const void *inputBuffer, void *outputBuffer,
    if( FillOutputBuffers(
          outputBuffer,
          framesPerBuffer,
-         tempFloats,
          outputMeterFloats))
       return mCallbackReturn;
 
@@ -5537,7 +4466,7 @@ int AudioIoCallback::AudioCallback(const void *inputBuffer, void *outputBuffer,
    return mCallbackReturn;
 }
 
-PaStreamCallbackResult AudioIoCallback::CallbackDoSeek()
+int AudioIoCallback::CallbackDoSeek()
 {
    const int token = mStreamToken;
    wxMutexLocker locker(mSuspendAudioThread);
@@ -5605,95 +4534,10 @@ void AudioIoCallback::CallbackCheckCompletion(
    if(!done) 
       return;
 
-   // PRL: singalling MIDI output complete is necessary if
-   // not USE_MIDI_THREAD, otherwise it's harmlessly redundant
 #ifdef EXPERIMENTAL_MIDI_OUT
    mMidiOutputComplete = true,
 #endif
    callbackReturn = paComplete;
-}
-
-bool AudioIO::PlaybackSchedule::PassIsComplete() const
-{
-   // Test mTime within the PortAudio callback
-   if (Scrubbing())
-      return false; // but may be true if playing at speed
-   return Overruns( GetTrackTime() );
-}
-
-bool AudioIO::PlaybackSchedule::Overruns( double trackTime ) const
-{
-   return (ReversedTime() ? trackTime <= mT1 : trackTime >= mT1);
-}
-
-double AudioIO::PlaybackSchedule::AdvancedTrackTime(
-   double time, double realElapsed, double speed ) const
-{
-   if (ReversedTime())
-      realElapsed *= -1.0;
-
-   // Defense against cases that might cause loops not to terminate
-   if ( fabs(mT0 - mT1) < 1e-9 )
-      return mT0;
-
-   if (mTimeTrack) {
-       wxASSERT( speed == 1.0 );
-
-      double total=0.0;
-      bool foundTotal = false;
-      do {
-         auto oldTime = time;
-         if (foundTotal && fabs(realElapsed) > fabs(total))
-            // Avoid SolveWarpedLength
-            time = mT1;
-         else
-            time = mTimeTrack->SolveWarpedLength(time, realElapsed);
-
-         if (!Looping() || !Overruns( time )) 
-            break;
-
-         // Bug1922:  The part of the time track outside the loop should not
-         // influence the result
-         double delta;
-         if (foundTotal && oldTime == mT0)
-            // Avoid integrating again
-            delta = total;
-         else {
-            delta = mTimeTrack->ComputeWarpedLength(oldTime, mT1);
-            if (oldTime == mT0)
-               foundTotal = true, total = delta;
-         }
-         realElapsed -= delta;
-         time = mT0;
-      } while ( true );
-   }
-   else {
-      time += realElapsed * speed;
-
-      // Wrap to start if looping
-      if (Looping()) {
-         while ( Overruns( time ) ) {
-            // LL:  This is not exactly right, but I'm at my wits end trying to
-            //      figure it out.  Feel free to fix it.  :-)
-            // MB: it's much easier than you think, mTime isn't warped at all!
-            time -= mT1 - mT0;
-         }
-      }
-   }
-
-   return time;
-}
-
-void AudioIO::PlaybackSchedule::TrackTimeUpdate(double realElapsed)
-{
-   // Update mTime within the PortAudio callback
-
-   if (Interactive())
-      return;
-
-   auto time = GetTrackTime();
-   auto newTime = AdvancedTrackTime( time, realElapsed, 1.0 );
-   SetTrackTime( newTime );
 }
 
 void AudioIO::TimeQueue::Producer(
@@ -5751,62 +4595,6 @@ double AudioIO::TimeQueue::Consumer( size_t nSamples, double rate )
    }
    mHead.mRemainder = remainder + nSamples;
    return mData[ mHead.mIndex ];
-}
-
-double AudioIO::PlaybackSchedule::TrackDuration(double realElapsed) const
-{
-   if (mTimeTrack)
-      return mTimeTrack->SolveWarpedLength(mT0, realElapsed);
-   else
-      return realElapsed;
-}
-
-double AudioIO::PlaybackSchedule::RealDuration(double trackTime1) const
-{
-   double duration;
-   if (mTimeTrack)
-      duration = mTimeTrack->ComputeWarpedLength(mT0, trackTime1);
-   else
-      duration = trackTime1 - mT0;
-   return fabs(duration);
-}
-
-double AudioIO::PlaybackSchedule::RealTimeRemaining() const
-{
-   return mWarpedLength - mWarpedTime;
-}
-
-void AudioIO::PlaybackSchedule::RealTimeAdvance( double increment )
-{
-   mWarpedTime += increment;
-}
-
-void AudioIO::PlaybackSchedule::RealTimeInit( double trackTime )
-{
-   if (Scrubbing())
-      mWarpedTime = 0.0;
-   else
-      mWarpedTime = RealDuration( trackTime );
-}
-
-void AudioIO::PlaybackSchedule::RealTimeRestart()
-{
-   mWarpedTime = 0;
-}
-
-double AudioIO::RecordingSchedule::ToConsume() const
-{
-   return mDuration - Consumed();
-}
-
-double AudioIO::RecordingSchedule::Consumed() const
-{
-   return std::max( 0.0, mPosition + TotalCorrection() );
-}
-
-double AudioIO::RecordingSchedule::ToDiscard() const
-{
-   return std::max(0.0, -( mPosition + TotalCorrection() ) );
 }
 
 bool AudioIO::IsCapturing() const

@@ -14,8 +14,9 @@
 *//********************************************************************/
 
 
-#include "../Audacity.h"
+
 #include "Reverse.h"
+#include "LoadEffects.h"
 
 #include <math.h>
 
@@ -29,6 +30,11 @@
 // EffectReverse
 //
 
+const ComponentInterfaceSymbol EffectReverse::Symbol
+{ XO("Reverse") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectReverse > reg; }
+
 EffectReverse::EffectReverse()
 {
 }
@@ -41,12 +47,12 @@ EffectReverse::~EffectReverse()
 
 ComponentInterfaceSymbol EffectReverse::GetSymbol()
 {
-   return REVERSE_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectReverse::GetDescription()
+TranslatableString EffectReverse::GetDescription()
 {
-   return _("Reverses the selected audio");
+   return XO("Reverses the selected audio");
 }
 
 // EffectDefinitionInterface implementation
@@ -195,12 +201,13 @@ bool EffectReverse::ProcessOneWave(int count, WaveTrack * track, sampleCount sta
    // PRL:  I don't think that matters, the sequence of storage of clips in the track
    // is not elsewhere assumed to be by time
    {
-      for (auto it = revClips.rbegin(), revEnd = revClips.rend(); it != revEnd; ++it)
-         track->AddClip(std::move(*it));
+      for (auto it = revClips.rbegin(), revEnd = revClips.rend(); rValue && it != revEnd; ++it)
+         rValue = track->AddClip(*it);
    }
 
    for (auto &clip : otherClips)
-      track->AddClip(std::move(clip));
+      if (!(rValue = track->AddClip(clip)))
+          break;
 
    return rValue;
 }
@@ -225,8 +232,8 @@ bool EffectReverse::ProcessOneClip(int count, WaveTrack *track,
          limitSampleBufferSize( track->GetBestBlockSize(first), len / 2 );
       auto second = first + (len - block);
 
-      track->Get((samplePtr)buffer1.get(), floatSample, first, block);
-      track->Get((samplePtr)buffer2.get(), floatSample, second, block);
+      track->GetFloats(buffer1.get(), first, block);
+      track->GetFloats(buffer2.get(), second, block);
       for (decltype(block) i = 0; i < block; i++) {
          tmp = buffer1[i];
          buffer1[i] = buffer2[block-i-1];

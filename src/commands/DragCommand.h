@@ -19,20 +19,20 @@
 #include "Command.h"
 #include "CommandType.h"
 
-#define DRAG_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Drag") }
-
 class DragCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    DragCommand();
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return DRAG_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Drags mouse from one place to another.");};
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Drags mouse from one place to another.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#move_mouse");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#move_mouse";}
 
    bool Apply(const CommandContext & context) override;
 

@@ -13,13 +13,18 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "MessageCommand.h"
 
-#include "CommandType.h"
+#include "LoadCommands.h"
 #include "CommandContext.h"
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
+
+const ComponentInterfaceSymbol MessageCommand::Symbol
+{ XO("Message") };
+
+namespace{ BuiltinCommandsModule::Registration< MessageCommand > reg; }
 
 bool MessageCommand::DefineParams( ShuttleParams & S ){
    S.Define( mMessage, wxT("Text"),  "Some message" );
@@ -32,7 +37,7 @@ void MessageCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieTextBox(_("Text:"),mMessage,60);
+      S.TieTextBox(XXO("Text:"),mMessage,60);
    }
    S.EndMultiColumn();
 }

@@ -12,7 +12,7 @@
 #ifndef __WRAPPED_TYPE__
 #define __WRAPPED_TYPE__
 
-#include "Audacity.h"
+
 
 enum teWrappedType
 {
@@ -58,9 +58,6 @@ public:
    void WriteToAsInt( const int InInt);
    void WriteToAsDouble( const double InDouble);
    void WriteToAsBool( const bool InBool);
-
-   bool ValuesMatch( const WrappedType & W );
-   void WriteToAsWrappedType( const WrappedType & W );
 
 public :
 

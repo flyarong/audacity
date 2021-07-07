@@ -16,11 +16,7 @@ Describes shared object that is used to access FFmpeg libraries.
 #if !defined(__AUDACITY_FFMPEG__)
 #define __AUDACITY_FFMPEG__
 
-#include "Audacity.h" // for USE_* macros
 
-#include "MemoryX.h"
-
-#include "Internat.h"
 
 #include "widgets/wxPanelWrapper.h" // to inherit
 
@@ -42,11 +38,6 @@ class wxCheckBox;
  * The symptoms are that INT64_C is not a valid type, which tends to break
  * somewhere down in the implementations using this file */
 
-/* In order to be able to compile this file when ffmpeg is not available we
- * need access to the value of USE_FFMPEG, which means config*.h needs to come
- * in before this file. The suggest way to achieve this is by including
- * Audacity.h */
-
 #if defined(USE_FFMPEG)
 extern "C" {
    // Include errno.h before the ffmpeg includes since they depend on
@@ -56,6 +47,7 @@ extern "C" {
 
    #include <libavcodec/avcodec.h>
    #include <libavformat/avformat.h>
+   #include <libavutil/error.h>
    #include <libavutil/fifo.h>
    #include <libavutil/mathematics.h>
 
@@ -159,7 +151,7 @@ extern "C" {
 #include "ShuttleGui.h"
 #include "Prefs.h"
 
-#include "audacity/Types.h"
+#include "Identifier.h"
 
 class wxDynamicLibrary;
 
@@ -171,7 +163,7 @@ void av_log_wx_callback(void* ptr, int level, const char* fmt, va_list vl);
 //----------------------------------------------------------------------------
 // Get FFmpeg library version
 //----------------------------------------------------------------------------
-wxString GetFFmpegVersion(wxWindow *parent);
+TranslatableString GetFFmpegVersion();
 
 /* from here on in, this stuff only applies when ffmpeg is available */
 #if defined(USE_FFMPEG)
@@ -246,10 +238,14 @@ public:
 #if defined(__WXMSW__)
    /* Library names and file filters for Windows only */
 
-   wxString GetLibraryTypeString()
+   FileNames::FileTypes GetLibraryTypes()
    {
-      /* i18n-hint: do not translate avformat.  Preserve the computer gibberish.*/
-      return _("Only avformat.dll|*avformat*.dll|Dynamically Linked Libraries (*.dll)|*.dll|All Files|*");
+      return {
+         /* i18n-hint: do not translate avformat.  Preserve the computer gibberish.*/
+         { XO("Only avformat.dll"), { GetLibAVFormatName() } },
+         FileNames::DynamicLibraries,
+         FileNames::AllFiles
+      };
    }
 
    wxString GetLibAVFormatPath()
@@ -280,9 +276,12 @@ public:
    }
 #elif defined(__WXMAC__)
    /* Library names and file filters for Mac OS only */
-   wxString GetLibraryTypeString()
+   FileNames::FileTypes GetLibraryTypes()
    {
-      return _("Dynamic Libraries (*.dylib)|*.dylib|All Files (*)|*");
+      return {
+         FileNames::DynamicLibraries,
+         FileNames::AllFiles
+      };
    }
 
    wxString GetLibAVFormatPath()
@@ -313,9 +312,13 @@ public:
 #else
    /* Library names and file filters for other platforms, basically Linux and
     * other *nix platforms */
-   wxString GetLibraryTypeString()
+   FileNames::FileTypes GetLibraryTypes()
    {
-      return _("Only libavformat.so|libavformat*.so*|Dynamically Linked Libraries (*.so*)|*.so*|All Files (*)|*");
+      return {
+         { XO("Only libavformat.so"), { wxT("libavformat*.so*") } },
+         FileNames::DynamicLibraries,
+         FileNames::AllFiles
+      };
    }
 
    wxString GetLibAVFormatPath()
@@ -367,7 +370,7 @@ private:
 FFmpegLibs *PickFFmpegLibs();
 
 ///! Helper function - destroys FFmpegLibs object if there is no need for it
-///! anymore, or just decrements it's reference count
+///! anymore, or just decrements its reference count
 void        DropFFmpegLibs();
 
 // This object allows access to the AVFormatContext,
@@ -386,7 +389,7 @@ int ufile_close(AVIOContext *pb);
 
 struct streamContext;
 // common utility functions
-// utility calls that are shared with ImportFFmpeg and ODDecodeFFmpegTask
+// utility calls that are shared with ImportFFmpeg
 streamContext *import_ffmpeg_read_next_frame(AVFormatContext* formatContext,
                                              streamContext** streams,
                                              unsigned int numStreams);
@@ -422,12 +425,12 @@ extern "C" {
    //
    // The FFMPEG_FUNCTION_WITH_RETURN takes 4 arguments:
    // 1)  The return type           <---|
-   // 2)  The function name             | Taken from the FFmpeg funciton prototype
+   // 2)  The function name             | Taken from the FFmpeg function prototype
    // 3)  The function arguments    <---|
    // 4)  The argument list to pass to the real function
    //
    // The FFMPEG_FUNCTION_NO_RETURN takes 3 arguments:
-   // 1)  The function name         <---| Taken from the FFmpeg funciton prototype
+   // 1)  The function name         <---| Taken from the FFmpeg function prototype
    // 2)  The function arguments    <---|
    // 3)  The argument list to pass to the real function
    //
@@ -519,6 +522,12 @@ extern "C" {
       av_get_default_channel_layout,
       (int nb_channels),
       (nb_channels)
+   );
+   FFMPEG_FUNCTION_WITH_RETURN(
+      int,
+      av_strerror,
+      (int errnum, char *errbuf, size_t errbuf_size),
+      (errnum, errbuf, errbuf_size)
    );
 
    //
@@ -915,7 +924,7 @@ private:
    }
 };
 
-// utilites for RAII:
+// utilities for RAII:
 
 // Deleter adaptor for functions like av_free that take a pointer
 
@@ -998,7 +1007,7 @@ struct streamContext
    AVStream            *m_stream{};                        // an AVStream *
    AVCodecContext      *m_codecCtx{};                      // pointer to m_stream->codec
 
-   Maybe<AVPacketEx>    m_pkt;                           // the last AVPacket we read for this stream
+   Optional<AVPacketEx>    m_pkt;                           // the last AVPacket we read for this stream
    uint8_t             *m_pktDataPtr{};                    // pointer into m_pkt.data
    int                  m_pktRemainingSiz{};
 
@@ -1025,6 +1034,8 @@ struct streamContext
 
 using Scs = ArrayOf<std::unique_ptr<streamContext>>;
 using ScsPtr = std::shared_ptr<Scs>;
+
+extern FFmpegLibs *FFmpegLibsInst();
 
 #endif // USE_FFMPEG
 #endif // __AUDACITY_FFMPEG__

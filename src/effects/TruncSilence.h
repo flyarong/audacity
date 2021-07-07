@@ -24,21 +24,21 @@ class wxChoice;
 class wxTextCtrl;
 class wxCheckBox;
 
-#define TRUNCATESILENCE_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Truncate Silence") }
-
 class RegionList;
 
 class EffectTruncSilence final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectTruncSilence();
    virtual ~EffectTruncSilence();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

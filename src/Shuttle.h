@@ -11,7 +11,6 @@
 #ifndef __AUDACITY_SHUTTLE__
 #define __AUDACITY_SHUTTLE__
 
-#include "commands/CommandTargets.h"
 #include "../include/audacity/ComponentInterface.h"
 
 class ComponentInterfaceSymbol;
@@ -56,8 +55,9 @@ class CommandParameters;
 /**************************************************************************//**
 \brief Shuttle that deals with parameters.  This is a base class with lots of
 virtual functions that do nothing by default.
+Unrelated to class Shuttle.
 ********************************************************************************/
-class ShuttleParams : public Shuttle
+class AUDACITY_DLL_API ShuttleParams /* not final */
 {
 public:
    wxString mParams;
@@ -65,7 +65,6 @@ public:
    CommandParameters * mpEap;
    ShuttleParams() { mpEap = NULL; pOptionalFlag = NULL; }
    virtual ~ShuttleParams() {}
-   bool ExchangeWithMaster(const wxString & Name) override;
    bool ShouldSet();
    virtual ShuttleParams & Optional( bool & WXUNUSED(var) ){ pOptionalFlag = NULL;return *this;};
    virtual ShuttleParams & OptionalY( bool & var ){ return Optional( var );};
@@ -84,7 +83,7 @@ public:
 /**************************************************************************//**
 \brief Shuttle that gets parameter values into a string.
 ********************************************************************************/
-class ShuttleGetAutomation : public ShuttleParams
+class AUDACITY_DLL_API ShuttleGetAutomation final : public ShuttleParams
 {
 public:
    ShuttleParams & Optional( bool & var ) override;
@@ -102,7 +101,7 @@ public:
 /**************************************************************************//**
 \brief Shuttle that sets parameters to a value (from a string)
 ********************************************************************************/
-class ShuttleSetAutomation : public ShuttleParams
+class AUDACITY_DLL_API ShuttleSetAutomation final : public ShuttleParams
 {
 public:
    ShuttleSetAutomation(){ bWrite = false; bOK = false;};
@@ -123,32 +122,11 @@ public:
       const EnumValueSymbol strings[], size_t nStrings ) override;
 };
 
-/**************************************************************************//**
-\brief Shuttle that retrieves a JSON format definition of a command's parameters.
-********************************************************************************/
-class ShuttleGetDefinition : public ShuttleParams, public CommandMessageTargetDecorator
-{
-public:
-   ShuttleGetDefinition( CommandMessageTarget & target );
-   wxString Result;
-   bool IsOptional();
-   ShuttleParams & Optional( bool & var ) override;
-   void Define( bool & var,     const wxChar * key, const bool vdefault, const bool vmin, const bool vmax, const bool vscl ) override;
-   void Define( int & var,      const wxChar * key, const int vdefault, const int vmin, const int vmax, const int vscl ) override;
-   void Define( size_t & var,   const wxChar * key, const int vdefault, const int vmin, const int vmax, const int vscl ) override;
-   void Define( float & var,    const wxChar * key, const float vdefault, const float vmin, const float vmax, const float vscl ) override;
-   void Define( double & var,   const wxChar * key, const float vdefault, const float vmin, const float vmax, const float vscl ) override;
-   void Define( double & var,   const wxChar * key, const double vdefault, const double vmin, const double vmax, const double vscl ) override;
-   void Define( wxString &var,  const wxChar * key, const wxString vdefault, const wxString vmin, const wxString vmax, const wxString vscl ) override;
-   void DefineEnum( int &var, const wxChar * key, const int vdefault,
-      const EnumValueSymbol strings[], size_t nStrings ) override;
-};
-
 
 /**************************************************************************//**
 \brief Shuttle that sets parameters to their default values.
 ********************************************************************************/
-class ShuttleDefaults : public ShuttleParams
+class ShuttleDefaults final : public ShuttleParams
 {
 public:
    wxString Result;

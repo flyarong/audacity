@@ -26,19 +26,19 @@ channel.
 class wxMenuBar;
 class wxPoint;
 
-#define GET_INFO_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Get Info") }
-
 class GetInfoCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return GET_INFO_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Gets information in JSON format.");};
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Gets information in JSON format.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#get_info");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#get_info";}
    bool Apply(const CommandContext &context) override;
    bool ApplyInner(const CommandContext &context);
 

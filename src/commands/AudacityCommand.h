@@ -11,32 +11,29 @@
 #ifndef __AUDACITY_COMMAND__
 #define __AUDACITY_COMMAND__
 
-#include "../Audacity.h"
 
-#include "../MemoryX.h"
+
 #include <set>
 
-#include "../MemoryX.h"
 #include <wx/defs.h>
+#include <wx/event.h> // to inherit
 
-class wxWindow;
+#include "../widgets/wxPanelWrapper.h" // to inherit
 
-#include "../SampleFormat.h"
-#include "../SelectedRegion.h"
-#include "../Internat.h"
 #include "../include/audacity/ComponentInterface.h"
 #include "../include/audacity/EffectAutomationParameters.h" // for command automation
 
-#include "../Track.h"
-#include "../effects/Effect.h"
 #include "../Registrar.h"
 
 class ShuttleGui;
 
 #define BUILTIN_GENERIC_COMMAND_PREFIX wxT("Built-in AudacityCommand: ")
 
+class AudacityCommand;
 class AudacityProject;
 class CommandContext;
+class EffectUIHostInterface;
+class ProgressDialog;
 
 
 class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
@@ -48,6 +45,11 @@ class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
  public:
    AudacityCommand();
    virtual ~AudacityCommand();
+   
+   // Type of a registered function that, if it returns true,
+   // causes ShowInterface to return early without making any dialog
+   using VetoDialogHook = bool (*) ( wxDialog* );
+   static VetoDialogHook SetVetoDialogHook( VetoDialogHook hook );
 
    // ComponentInterface implementation
 
@@ -59,21 +61,19 @@ class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
 
    //These two must be implemented by instances.
    ComponentInterfaceSymbol GetSymbol() override = 0;
-   virtual wxString GetDescription() override
-   {wxFAIL_MSG( "Implement a Description for this command");return "FAIL";};
+   virtual TranslatableString GetDescription() override
+   {wxFAIL_MSG( "Implement a Description for this command");return XO("FAIL");};
 
    // Name of page in the Audacity alpha manual
-   virtual wxString ManualPage(){ return wxEmptyString;};
+   virtual ManualPageID ManualPage(){ return {}; }
    virtual bool IsBatchProcessing(){ return mIsBatch;}
    virtual void SetBatchProcessing(bool start){ mIsBatch = start;};
    
-   virtual bool Apply(const CommandContext & WXUNUSED(context) ) {return false;}; 
-   virtual bool Apply(); // redirects to the command context version.
+   virtual bool Apply(const CommandContext & WXUNUSED(context) ) {return false;};
 
    bool ShowInterface(wxWindow *parent, bool forceModal = false);
    virtual void SetHostUI(EffectUIHostInterface * WXUNUSED(host)){;};
 
-   bool PopulateUI(wxWindow *parent);
    wxDialog *CreateUI(wxWindow *parent, AudacityCommand *client);
 
    virtual bool GetAutomationParameters(wxString & parms);
@@ -85,9 +85,9 @@ class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
    // Display a message box, using effect's (translated) name as the prefix
    // for the title.
    enum : long { DefaultMessageBoxStyle = wxOK | wxCENTRE };
-   int MessageBox(const wxString& message,
+   int MessageBox(const TranslatableString& message,
                   long style = DefaultMessageBoxStyle,
-                  const wxString& titleStr = wxString{});
+                  const TranslatableString& titleStr = {});
 
 //
 // protected virtual methods
@@ -144,7 +144,7 @@ class AUDACITY_DLL_API AudacityCommandDialog /* not final */ : public wxDialogWr
 public:
    // constructors and destructors
    AudacityCommandDialog(wxWindow * parent,
-                const wxString & title,
+                const TranslatableString & title,
                 AudacityCommand * pCommand,
                 int type = 0,
                 int flags = wxDEFAULT_DIALOG_STYLE,

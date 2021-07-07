@@ -11,25 +11,25 @@ Paul Licameli
 #ifndef __AUDACITY_SPECTROGRAM_SETTINGS__
 #define __AUDACITY_SPECTROGRAM_SETTINGS__
 
-#include "../Experimental.h"
-
+#include "../Prefs.h"
 #include "../SampleFormat.h"
 #include "../RealFFTf.h"
 
 #undef SPECTRAL_SELECTION_GLOBAL_SWITCH
 
+class EnumValueSymbols;
 struct FFTParam;
 class NumberScale;
 class SpectrumPrefs;
 class wxArrayStringEx;
 
-class SpectrogramSettings
+class AUDACITY_DLL_API SpectrogramSettings : public PrefsListener
 {
    friend class SpectrumPrefs;
 public:
 
    // Singleton for settings that are not per-track
-   class Globals
+   class AUDACITY_DLL_API Globals
    {
    public:
       static Globals &Get();
@@ -66,8 +66,9 @@ public:
       stNumScaleTypes,
    };
 
-   static const wxArrayStringEx &GetScaleNames();
-   static const wxArrayStringEx &GetAlgorithmNames();
+   static const EnumValueSymbols &GetScaleNames();
+   static const EnumValueSymbols &GetColorSchemeNames();
+   static const TranslatableStrings &GetAlgorithmNames();
 
    static SpectrogramSettings &defaults();
    SpectrogramSettings();
@@ -83,6 +84,9 @@ public:
    bool Validate(bool quiet);
    void LoadPrefs();
    void SavePrefs();
+
+   void UpdatePrefs() override;
+
    void InvalidateCaches();
    void DestroyWindows();
    void CacheWindows() const;
@@ -125,7 +129,22 @@ public:
    size_t GetFFTLength() const; // window size (times zero padding, if STFT)
    size_t NBins() const;
 
-   bool isGrayscale;
+   enum ColorScheme : int {
+      // Keep in correspondence with AColor::colorSchemes, AColor::gradient_pre
+      csColorNew = 0,
+      csColorTheme,
+      csGrayscale,
+      csInvGrayscale,
+
+      csNumColorScheme,
+   };
+   ColorScheme colorScheme;
+
+   class ColorSchemeEnumSetting : public EnumSetting< ColorScheme > {
+       using EnumSetting< ColorScheme >::EnumSetting;
+       void Migrate(wxString &value) override;
+   };
+   static ColorSchemeEnumSetting colorSchemeSetting;
 
    ScaleType scaleType;
 

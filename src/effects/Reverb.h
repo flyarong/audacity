@@ -19,13 +19,13 @@ class wxSlider;
 class wxSpinCtrl;
 class ShuttleGui;
 
-#define REVERB_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Reverb") }
-
 struct Reverb_priv_t;
 
 class EffectReverb final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectReverb();
    virtual ~EffectReverb();
 
@@ -46,8 +46,8 @@ public:
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

@@ -43,42 +43,20 @@
 #define __AUDACITY_TYPES_H__
 
 #include <algorithm>
+#include <functional>
+#include <limits>
 #include <type_traits>
 #include <vector>
 #include <wx/debug.h> // for wxASSERT
+#include <wx/string.h> // type used in inline function and member variable
 
-class wxString;
+#include "Internat.h"
 
 // ----------------------------------------------------------------------------
 // TODO:  I'd imagine this header may be replaced by other public headers. But,
 //        to try and minimize more changes to the base code, we can use this
 //        until proper public headers are created for the stuff in here.
 // ----------------------------------------------------------------------------
-
-/**************************************************************************//**
-
-\brief type alias for identifying a Plugin supplied by a module, each module
-defining its own interpretation of the strings, which may or may not be as a
-file system path
-********************************************************************************/
-using PluginPath = wxString;
-using PluginPaths = std::vector< PluginPath >;
-
-// A key to be passed to wxConfigBase
-using RegistryPath = wxString;
-using RegistryPaths = std::vector< RegistryPath >;
-
-class wxArrayStringEx;
-
-// File extensions, not including any leading dot
-using FileExtension = wxString;
-using FileExtensions = wxArrayStringEx;
-
-using FilePath = wxString;
-using FilePaths = wxArrayStringEx;
-
-using CommandID = wxString;
-using CommandIDs = std::vector< CommandID >;
 
 // ----------------------------------------------------------------------------
 // A native 64-bit integer...used when referring to any number of samples
@@ -214,9 +192,15 @@ inline size_t limitSampleBufferSize( size_t bufferSize, sampleCount limit )
 // ----------------------------------------------------------------------------
 enum sampleFormat : unsigned
 {
+   //! The increasing sequence of these enum values must correspond to the increasing data type width
+   //! These values persist in saved project files, so must not be changed in later program versions
    int16Sample = 0x00020001,
    int24Sample = 0x00040001,
-   floatSample = 0x0004000F
+   floatSample = 0x0004000F,
+
+   //! Two synonyms for previous values that might change if more values were added
+   narrowestSampleFormat = int16Sample,
+   widestSampleFormat = floatSample,
 };
 
 // ----------------------------------------------------------------------------
@@ -284,74 +268,5 @@ using NumericFormatSymbol = EnumValueSymbol;
 using VendorSymbol = ComponentInterfaceSymbol;
 
 using EffectFamilySymbol = ComponentInterfaceSymbol;
-
-// LLL FIXME: Until a complete API is devised, we have to use
-//            AUDACITY_DLL_API when defining API classes.  This
-//            it ugly, but a part of the game.  Remove it when
-//            the API is complete.
-
-
-#if !defined(AUDACITY_DLL_API)
-   // This was copied from "Audacity.h" so these headers wouldn't have
-   // to include it.
-
-   /* Magic for dynamic library import and export. This is unfortunately
-    * compiler-specific because there isn't a standard way to do it. Currently it
-    * works with the Visual Studio compiler for windows, and for GCC 4+. Anything
-    * else gets all symbols made public, which gets messy */
-   /* The Visual Studio implementation */
-   #ifdef _MSC_VER
-      #ifndef AUDACITY_DLL_API
-         #ifdef BUILDING_AUDACITY
-            #define AUDACITY_DLL_API _declspec(dllexport)
-         #else
-            #ifdef _DLL
-               #define AUDACITY_DLL_API _declspec(dllimport)
-            #else
-               #define AUDACITY_DLL_API
-            #endif
-         #endif
-      #endif
-   #endif //_MSC_VER
-
-   #ifdef __GNUC__
-      #ifndef __CONFIG_UNIX_INCLUDED
-         #define __CONFIG_UNIX_INCLUDED
-         #include "configunix.h"
-      #endif
-   #endif
-
-   /* The GCC-elf implementation */
-   #ifdef HAVE_VISIBILITY // this is provided by the configure script, is only
-   // enabled for suitable GCC versions
-   /* The incantation is a bit weird here because it uses ELF symbol stuff. If we
-    * make a symbol "default" it makes it visible (for import or export). Making it
-    * "hidden" means it is invisible outside the shared object. */
-      #ifndef AUDACITY_DLL_API
-         #ifdef BUILDING_AUDACITY
-            #define AUDACITY_DLL_API __attribute__((visibility("default")))
-         #else
-            #define AUDACITY_DLL_API __attribute__((visibility("default")))
-         #endif
-      #endif
-   #endif
-
-   /* The GCC-win32 implementation */
-   // bizzarely, GCC-for-win32 supports Visual Studio style symbol visibility, so
-   // we use that if building on Cygwin
-   #if defined __CYGWIN__ && defined __GNUC__
-      #ifndef AUDACITY_DLL_API
-         #ifdef BUILDING_AUDACITY
-            #define AUDACITY_DLL_API _declspec(dllexport)
-         #else
-            #ifdef _DLL
-               #define AUDACITY_DLL_API _declspec(dllimport)
-            #else
-               #define AUDACITY_DLL_API
-            #endif
-         #endif
-      #endif
-   #endif
-#endif
 
 #endif // __AUDACITY_TYPES_H__

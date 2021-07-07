@@ -14,28 +14,27 @@
 #ifndef __AUDACITY_EFFECT_DTMF__
 #define __AUDACITY_EFFECT_DTMF__
 
-#include "../widgets/NumericTextCtrl.h"
-
 #include "Effect.h"
 
 class wxSlider;
 class wxStaticText;
 class wxTextCtrl;
+class NumericTextCtrl;
 class ShuttleGui;
-
-#define DTMFTONES_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("DTMF Tones") }
 
 class EffectDtmf final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectDtmf();
    virtual ~EffectDtmf();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

@@ -11,14 +11,15 @@ Paul Licameli
 #ifndef __AUDACITY_SLIDER_HANDLE__
 #define __AUDACITY_SLIDER_HANDLE__
 
-#include "../../MemoryX.h"
 #include "../../UIHandle.h"
 
 class wxMouseEvent;
+class wxMouseState;
 class LWSlider;
 class Track;
+class TranslatableString;
 
-class SliderHandle /* not final */ : public UIHandle
+class AUDACITY_DLL_API SliderHandle /* not final */ : public UIHandle
 {
    SliderHandle(const SliderHandle&) = delete;
 
@@ -46,7 +47,11 @@ protected:
    virtual Result CommitChanges
       (const wxMouseEvent &event, AudacityProject *pProject) = 0;
 
-   void Enter(bool forward) override;
+   // Define a message for the status bar and tooltip.
+   virtual TranslatableString Tip(
+      const wxMouseState &state, AudacityProject &project) const = 0;
+ 
+   void Enter(bool forward, AudacityProject *) override;
 
    Result Click
       (const TrackPanelMouseEvent &event, AudacityProject *pProject)
@@ -57,7 +62,7 @@ protected:
       final override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       final override;
 
    Result Release

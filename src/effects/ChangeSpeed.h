@@ -13,28 +13,27 @@
 #ifndef __AUDACITY_EFFECT_CHANGESPEED__
 #define __AUDACITY_EFFECT_CHANGESPEED__
 
-#include "../widgets/NumericTextCtrl.h"
-
 #include "Effect.h"
 
 class wxSlider;
 class wxChoice;
 class wxTextCtrl;
+class NumericTextCtrl;
 class ShuttleGui;
-
-#define CHANGESPEED_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Change Speed") }
 
 class EffectChangeSpeed final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectChangeSpeed();
    virtual ~EffectChangeSpeed();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

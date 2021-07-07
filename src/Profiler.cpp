@@ -20,7 +20,7 @@ but it will probably work fine if you use it on a high level.
 
 *//*******************************************************************/
 
-#include "Audacity.h"
+
 #include "Profiler.h"
 
 #include <stdio.h>
@@ -63,20 +63,18 @@ Profiler::~Profiler()
 ///start the task timer.
 void Profiler::Begin(const char* fileName, int lineNum, const char* taskDescription)
 {
-   mTasksMutex.Lock();
+   std::lock_guard<std::mutex> guard{ mTasksMutex };
    GetOrCreateTaskProfile(fileName,lineNum)->Begin(fileName,lineNum,taskDescription);
-   mTasksMutex.Unlock();
 }
 
 ///end the task timer.
 void Profiler::End(const char* fileName, int lineNum, const char* taskDescription)
 {
-   mTasksMutex.Lock();
+   std::lock_guard<std::mutex> guard{ mTasksMutex };
    TaskProfile* tp;
    tp=GetTaskProfileByDescription(taskDescription);
    if(tp)
       tp->End(fileName,lineNum,taskDescription);
-   mTasksMutex.Unlock();
 }
 
 ///Gets the singleton instance

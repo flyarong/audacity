@@ -21,7 +21,7 @@
 class NyquistEffectsModule final : public ModuleInterface
 {
 public:
-   NyquistEffectsModule(ModuleManagerInterface *moduleManager, const wxString *path);
+   NyquistEffectsModule();
    virtual ~NyquistEffectsModule();
 
    // ComponentInterface implementation
@@ -30,31 +30,27 @@ public:
    ComponentInterfaceSymbol GetSymbol() override;
    VendorSymbol GetVendor() override;
    wxString GetVersion() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // ModuleInterface implementation
 
    bool Initialize() override;
    void Terminate() override;
+   EffectFamilySymbol GetOptionalFamilySymbol() override;
 
-   FileExtensions GetFileExtensions() override;
+
+   const FileExtensions &GetFileExtensions() override;
    FilePath InstallPath() override;
 
    bool AutoRegisterPlugins(PluginManagerInterface & pm) override;
    PluginPaths FindPluginPaths(PluginManagerInterface & pm) override;
    unsigned DiscoverPluginsAtPath(
-      const PluginPath & path, wxString &errMsg,
+      const PluginPath & path, TranslatableString &errMsg,
       const RegistrationCallback &callback)
          override;
 
    bool IsPluginValid(const PluginPath & path, bool bFast) override;
 
-   ComponentInterface *CreateInstance(const PluginPath & path) override;
-   void DeleteInstance(ComponentInterface *instance) override;
-
-   // NyquistEffectModule implementation
-
-private:
-   ModuleManagerInterface *mModMan;
-   PluginPath mPath;
+   std::unique_ptr<ComponentInterface>
+      CreateInstance(const PluginPath & path) override;
 };

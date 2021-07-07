@@ -16,7 +16,7 @@
 #ifndef __COMMANDHANDLER__
 #define __COMMANDHANDLER__
 
-#include "../MemoryX.h"
+#include <memory>
 class AudacityApp;
 class AudacityProject;
 class AppCommandEvent;
@@ -24,15 +24,9 @@ class CommandContext;
 
 class CommandHandler
 {
-   private:
-      std::unique_ptr<CommandContext> mCurrentContext;
-
    public:
       CommandHandler();
       ~CommandHandler();
-
-      // This should only be used during initialization
-      void SetProject(AudacityProject *proj);
 
       // Whenever a command is received, process it.
       void OnReceiveCommand(AppCommandEvent &event);

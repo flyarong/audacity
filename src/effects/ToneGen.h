@@ -13,16 +13,12 @@
 #ifndef __AUDACITY_EFFECT_TONEGEN__
 #define __AUDACITY_EFFECT_TONEGEN__
 
-#include "../widgets/NumericTextCtrl.h"
-
 #include "Effect.h"
 
+class NumericTextCtrl;
 class ShuttleGui;
 
-#define CHIRP_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Chirp") }
-#define TONE_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Tone") }
-
-class EffectToneGen final : public Effect
+class EffectToneGen : public Effect
 {
 public:
    EffectToneGen(bool isChirp);
@@ -31,8 +27,8 @@ public:
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 
@@ -77,6 +73,23 @@ private:
    NumericTextCtrl *mToneDurationT;
 
    DECLARE_EVENT_TABLE()
+};
+
+class EffectChirp final : public EffectToneGen
+{
+public:
+   static const ComponentInterfaceSymbol Symbol;
+
+   EffectChirp() : EffectToneGen{ true } {}
+};
+
+
+class EffectTone final : public EffectToneGen
+{
+public:
+   static const ComponentInterfaceSymbol Symbol;
+
+   EffectTone() : EffectToneGen{ false } {}
 };
 
 #endif

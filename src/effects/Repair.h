@@ -13,20 +13,20 @@
 
 #include "Effect.h"
 
-#define REPAIR_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Repair") }
-
 class WaveTrack;
 
 class EffectRepair final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectRepair();
    virtual ~EffectRepair();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 
@@ -38,7 +38,7 @@ public:
    bool Process() override;
 
 private:
-   // EffectRepair implementaion
+   // EffectRepair implementation
 
    bool ProcessOne(int count, WaveTrack * track,
                    sampleCount start,

@@ -12,12 +12,6 @@ Version in Audacity SVN: 2.1.0
 Patches: None
 Upstream version: 2.1.0
 
-FileDialog
-----------
-The customised file saving dialogs for wxwidgets to provide the options
-button for format preferences. This is written and maintained by us so doesn't
-have an upstream at the moment.
-
 libflac
 -------
 http://flac.sourceforge.net/
@@ -55,11 +49,8 @@ Upstream version: 0.15.1 (beta)
 libnyquist
 ----------
 Digital Audio scripting language, with our own library interface added to it
-Version in Audacity SVN: 3.09
-nyquist.patch  Fix for a couple of memory leaks
-xlisp.patch    Fix build in Windows
-sound.patch    Fix build when using VS2013 (log2 is included in VS2013)
-revert-convolve.patch  Replaces broken convolve with previous version
+Version in Audacity SVN: r331 (r3.16+)
+NOTE: Patch files no longer being created. Use git history instead.
 
 libogg
 ------
@@ -73,21 +64,8 @@ Upstream Version: 1.3.1
 
 libsndfile
 ----------
-Erik de Castro Lopo's uncompressed audio file I/O library. Core and essential
-to Audacity.
-Version in Audacity SVN: 1.0.24
-Patches: maintainer-mode.patch: AM_MAINTAINER_MODE added to configure.ac
-         id3.patch: already in upstream 1.0.26 (git 41da64d9270b2fa10c93ce74dea014fe8f0bd303)
-                    fixes crash when importing mp3s that have duplicated tags
-         libsndfile-ppc-crash-on-some-id3-mp3s.patch - submitted to libsndfile
-                    list on may 22 2012 (mchinen)
-         Add-support-for-Album-and-Track-tags-in-RIFF-files.patch 
-                    Add support for Album and Track tags in RIFF files in the LIST chunk of WAV files.
-                    0001-Add-support-for-Album-and-Track-tags-in-RIFF-files-for-libsndfile-1.0.24.patch for libsndfile 1.0.24, and
-                    0001-Add-support-for-Album-and-Track-tags-in-RIFF-files-for-libsndfile-1.0.25.patch for libsndfile 1.0.25,
-                    submitted to libsndfile list on August 19 2012.
-         autotools.patch: Fix all autotools warnings.
-Upstream Version: 1.0.26
+Erik de Castro Lopo's audio file I/O library. Core and essential to Audacity.
+Version in Audacity GIT: 1.0.29rc2+git4bdd741
 
 libsoxr
 -------
@@ -119,67 +97,35 @@ Patches: autotools.patch: Fix all autotools warnings.
 Upstream Version: 1.3.3
 
 
-lib-widget-extra
-----------------
-
 lv2
 ---------
 A merging of the lilv, lv2, msinttypes, serd, sord, sratom, and suil libraries to support
 LV2 plug-ins.
 Versions in Audacity SVN:
-    lilv-0.20.0
-    lv2-1.10.0
-    msinttypes-r29
-    serd-0.20.0
-    sord-0.12.2
-    sratom-0.4.6
-    suil-0.8.2
-Patches:
-    usegetprocaddress.patch - ticket #923 opened upstream on 10/23/2013
-                              fix commited (r5164) upstream on 10/30/2013
-    serdnode.patch - Both lilv and serd have a node.c which causes problems during build.
-                     This is just a copy of serd/node.c and is a way to work around the
-                     problem.
-Modifications:
-    Run lib-src/lv2/unpack-waf to unpack the waf scripts.
-    See http://lintian.debian.org/tags/source-contains-waf-binary.html for details.
-Upstream Versions:
-    lilv-0.20.0
-    lv2-1.10.0
-    msinttypes-r29
-    serd-0.20.0
-    sord-0.12.2
-    sratom-0.8.2
-
-
-mod-script-pipe
----------------
+   lilv-0.24.6
+   lv2-1.16.0
+   serd-0.30.2
+   sord-0.16.4
+   sratom-0.6.4
+   suil-0.10.6
 
 portaudio-v19
 -------------
 http://portaudio.com/
 cross-platform audio I/O library version 19, used for 1.3.2 onwards releases
-Version in Audacity Git:  January 04 2016 SVN snapshot (revision 1966).
+Version in Audacity Git:  Fri Apr 26 16:48:28 2019 snapshot (commit 3ebfacc)
 Patches applied:
-* ../portmixer/portaudio.patch	add features needed to make portmixer work
-  (Integration by upstream in progress. Will need updating as upstream
-  portaudio moves)
-* portaudio-srcdir.patch  Adds srcdir handling
-* portaudio-v19/wasapi-fix.patch  Patch to WASAPI hostapi that corrects incorrect
-  reporting of stream open/running/closed state.
-* portaudio-v19/wasapi-loopback.patch  Patch to add loopback devices to the WASAPI
-  hostapi.
-* portaudio-v19/jack.patch  Patch to add JACK support to Windows.
-
-* "Remove aclocal.m4 files" as per https://github.com/audacity/audacity/commit/20c438d.
-
-? portaudio/libtool22.patch	Patch from Gentoo to ensure that static libraries
-are always built, not shared ones, otherwise the assumptions elsewhere in the
-build system break. Not suitable for upstream, what is needed is more
-powerful autoconf features to pass the right options to portaudio's configure
-script, which suffers from the broken-ness of autoconf's subdirectory support
-
-* linkage.patch  allows compilation as C++ with correct "C" linkage of one function
+* portmixer/portaudio.patch      Add features needed to make portmixer work
+* portaudio-srcdir.patch         Adds srcdir handling
+* wasapi-fix.patch               Fix for WASAPI hostapi that corrects incorrect
+                                 reporting of stream open/running/closed state.
+* wasapi-loopback.patch          Add loopback devices to the WASAPI hostapi.
+* jack.patch                     Add JACK support to Windows.
+* linkage.patch                  Allows compilation as C++ with correct "C" linkage of one function
+* mmefix.patch                   Bug 1969 - Windows: no monitored sound for 15 secs with software playthrough with default MME hos
+* vs2015.patch                   Update for VS2015+
+* 16bit.patch                    Bug 193 - Audacity can't record at > 16-bit under MME or Windows DirectSound
+* ringbuf.patch                  pa_ringbuffer.c wasn't compiled by Travis, that broke the build
 
 portmidi
 -------
@@ -206,32 +152,27 @@ by the Audacity project with some help from portaudio development.
 
 sbsms
 -----
-http://sbsms.sourceforge.net/
+https://github.com/claytonotey/libsbsms
 An audio stretching library for changing pitch or tempo without changing the
 other. Alternative to SoundTouch, better on large changes but slower.
-Version in Audacity SVN: 2.0.2
-Patches:
-Misc fixes to configure.in/Makefile.am for autoconf macros and libtool. More
-files added to m4/ directory by libtoolizing commited to Audacity SVN.
-AM_MAINTAINER_MODE has been added to configure.ac to disable autotools rebuilds
-by default
-dont-mangle-cflags.patch	patch to stop sed-ing the CXXFLAGS and achieve the
-same ends by better means, replacing a hacked version from Gentoo. Patch
-linked to from upstream tracker at
-https://sourceforge.net/tracker/index.php?func=detail&aid=2561247&group_id=177794&atid=882654
-because attachements there don't seem to work.
-autotools.patch: Fix all autotools warnings.
-autotools-fix-make-dist.patch: Correct file lists to make dist target work.
-sbsms-srcdir.patch: Adds srcdir handling
+Version in Audacity GIT: 2.2.0
+Upstream Version: 2.2.0
 
 soundtouch
 ----------
 http://www.surina.net/soundtouch/
-Independant Pitch and Tempo changing library.
+Independent Pitch and Tempo changing library.
 Version in Audacity SVN: 1.7.1
 Patches: autotools.patch: Fix all autotools warnings.
 AM_MAINTAINER_MODE([disable]) has been added to configure.ac to disable autotools rebuilds.
 Upstream Version: 1.7.1
+
+sqlite
+----------
+https://sqlite.org
+SQLite is a C-language library that implements a small, fast, self-contained, high-reliability, full-featured, SQL database engine.
+Version in Audacity GIT: 3.32.3
+Upstream Version: 3.32.3
 
 twolame
 -------
@@ -277,7 +218,7 @@ separately in the next argument, with the final one being the path to inside
 the directory with the new source in it.
 
 3. Answer the questions as posed by the script (it is interactive). The tag
-should be correct as you specfied it in the command. Several temporary SVN
+should be correct as you specified it in the command. Several temporary SVN
 checkouts will be created (in /tmp) and merges done. Deleted and Added files
 will be printed (with a pause after each screen). If some of these should
 actually be renames (that is, a delete and an addition go together), then

@@ -6,14 +6,15 @@
 //
 //
 
-#include "../Audacity.h"
+
 #include "wxPanelWrapper.h"
 
 #include <wx/grid.h>
 
 void wxTabTraversalWrapperCharHook(wxKeyEvent &event)
 {
-#ifdef __WXMAC__
+//#ifdef __WXMAC__
+#if defined(__WXMAC__) || defined(__WXGTK__)
    // Compensate for the regressions in TAB key navigation
    // due to the switch to wxWidgets 3.0.2
    if (event.GetKeyCode() == WXK_TAB) {
@@ -26,14 +27,58 @@ void wxTabTraversalWrapperCharHook(wxKeyEvent &event)
          event.Skip();
          return;
       }
-      focus->Navigate(
-         event.ShiftDown()
-         ? wxNavigationKeyEvent::IsBackward
-         :  wxNavigationKeyEvent::IsForward
-      );
-      return;
+      // Apparently, on wxGTK, FindFocus can return NULL
+      if (focus)
+      {
+         focus->Navigate(
+            event.ShiftDown()
+            ? wxNavigationKeyEvent::IsBackward
+            :  wxNavigationKeyEvent::IsForward
+         );
+         return;
+      }
    }
 #endif
 
    event.Skip();
+}
+
+void wxPanelWrapper::SetLabel(const TranslatableString & label)
+{
+   wxPanel::SetLabel( label.Translation() );
+}
+
+void wxPanelWrapper::SetName(const TranslatableString & name)
+{
+   wxPanel::SetName( name.Translation() );
+}
+
+void wxPanelWrapper::SetToolTip(const TranslatableString &toolTip)
+{
+   wxPanel::SetToolTip( toolTip.Stripped().Translation() );
+}
+
+void wxPanelWrapper::SetName()
+{
+   wxPanel::SetName( GetLabel() );
+}
+
+void wxDialogWrapper::SetTitle(const TranslatableString & title)
+{
+   wxDialog::SetTitle( title.Translation() );
+}
+
+void wxDialogWrapper::SetLabel(const TranslatableString & label)
+{
+   wxDialog::SetLabel( label.Translation() );
+}
+
+void wxDialogWrapper::SetName(const TranslatableString & name)
+{
+   wxDialog::SetName( name.Translation() );
+}
+
+void wxDialogWrapper::SetName()
+{
+   wxDialog::SetName( wxDialog::GetTitle() );
 }

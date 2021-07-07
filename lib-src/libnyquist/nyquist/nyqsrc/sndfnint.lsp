@@ -1,3 +1,9 @@
+ (SETF MAX-STOP-TIME 10E20) 
+
+ (SETF MIN-START-TIME -10E20) 
+
+ (setf OP-AVERAGE 1) (setf OP-PEAK 2) 
+
  (setf snd-head-none 0) 
 
  (setf snd-head-AIFF 1) 
@@ -42,6 +48,8 @@
 
  (setf snd-head-OGG 21) 
 
+ (setf snd-head-WAVEX 22) 
+
  (setf snd-head-channels 1) 
 
  (setf snd-head-mode 2) 
@@ -81,10 +89,4 @@
  (setf snd-mode-msadpcm 11) 
 
  (setf snd-mode-vorbis 11) 
-
- (SETF MAX-STOP-TIME 10E20) 
-
- (SETF MIN-START-TIME -10E20) 
-
- (setf OP-AVERAGE 1) (setf OP-PEAK 2) 
 

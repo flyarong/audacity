@@ -13,10 +13,9 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
-#include "DtmfGen.h"
 
-#include "../Experimental.h"
+#include "DtmfGen.h"
+#include "LoadEffects.h"
 
 #include <wx/intl.h>
 #include <wx/slider.h>
@@ -27,6 +26,7 @@
 #include "../Prefs.h"
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
+#include "../widgets/NumericTextCtrl.h"
 #include "../widgets/valnum.h"
 
 
@@ -73,6 +73,11 @@ const static wxChar *kSymbols[] =
 // EffectDtmf
 //
 
+const ComponentInterfaceSymbol EffectDtmf::Symbol
+{ XO("DTMF Tones") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectDtmf > reg; }
+
 BEGIN_EVENT_TABLE(EffectDtmf, wxEvtHandler)
     EVT_TEXT(ID_Sequence, EffectDtmf::OnSequence)
     EVT_TEXT(ID_DutyCycle, EffectDtmf::OnAmplitude)
@@ -97,17 +102,17 @@ EffectDtmf::~EffectDtmf()
 
 ComponentInterfaceSymbol EffectDtmf::GetSymbol()
 {
-   return DTMFTONES_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectDtmf::GetDescription()
+TranslatableString EffectDtmf::GetDescription()
 {
-   return _("Generates dual-tone multi-frequency (DTMF) tones like those produced by the keypad on telephones");
+   return XO("Generates dual-tone multi-frequency (DTMF) tones like those produced by the keypad on telephones");
 }
 
-wxString EffectDtmf::ManualPage()
+ManualPageID EffectDtmf::ManualPage()
 {
-   return wxT("DTMF_Tones");
+   return L"DTMF_Tones";
 }
 
 // EffectDefinitionInterface implementation
@@ -126,6 +131,13 @@ unsigned EffectDtmf::GetAudioOutCount()
 
 bool EffectDtmf::ProcessInitialize(sampleCount WXUNUSED(totalLen), ChannelNames WXUNUSED(chanMap))
 {
+   if (dtmfNTones <= 0) {   // Bail if no DTFM sequence.
+      ::Effect::MessageBox(
+               XO("DTMF sequence empty.\nCheck ALL settings for this effect."),
+         wxICON_ERROR );
+
+      return false;
+   }
    double duration = GetDuration();
 
    // all dtmf sequence durations in samples from seconds
@@ -325,16 +337,21 @@ void EffectDtmf::PopulateOrExchange(ShuttleGui & S)
    S.AddSpace(0, 5);
    S.StartMultiColumn(2, wxCENTER);
    {
-      wxTextValidator vldDtmf(wxFILTER_INCLUDE_CHAR_LIST, &dtmfSequence);
-      vldDtmf.SetIncludes(wxArrayString(WXSIZEOF(kSymbols), kSymbols));
-      mDtmfSequenceT = S.Id(ID_Sequence).AddTextBox(_("DTMF sequence:"), wxT(""), 10);
-      mDtmfSequenceT->SetValidator(vldDtmf);
+      mDtmfSequenceT = S.Id(ID_Sequence)
+         .Validator([this]{
+            wxTextValidator vldDtmf(wxFILTER_INCLUDE_CHAR_LIST, &dtmfSequence);
+            vldDtmf.SetIncludes(wxArrayString(WXSIZEOF(kSymbols), kSymbols));
+            return vldDtmf;
+         })
+         .AddTextBox(XXO("DTMF &sequence:"), wxT(""), 10);
 
-      FloatingPointValidator<double> vldAmp(3, &dtmfAmplitude, NumValidatorStyle::NO_TRAILING_ZEROES);
-      vldAmp.SetRange(MIN_Amplitude, MAX_Amplitude);
-      S.Id(ID_Amplitude).AddTextBox(_("Amplitude (0-1):"), wxT(""), 10)->SetValidator(vldAmp);
+      S.Id(ID_Amplitude)
+         .Validator<FloatingPointValidator<double>>(
+            3, &dtmfAmplitude, NumValidatorStyle::NO_TRAILING_ZEROES,
+            MIN_Amplitude, MAX_Amplitude)
+         .AddTextBox(XXO("&Amplitude (0-1):"), wxT(""), 10);
 
-      S.AddPrompt(_("Duration:"));
+      S.AddPrompt(XXO("&Duration:"));
       mDtmfDurationT = safenew
          NumericTextCtrl(S.GetParent(), ID_Duration,
                          NumericConverter::TIME,
@@ -343,29 +360,35 @@ void EffectDtmf::PopulateOrExchange(ShuttleGui & S)
                          mProjectRate,
                          NumericTextCtrl::Options{}
                             .AutoPos(true));
-      mDtmfDurationT->SetName(_("Duration"));
-      S.AddWindow(mDtmfDurationT);
+      S.Name(XO("Duration"))
+         .AddWindow(mDtmfDurationT);
 
-      S.AddFixedText(_("Tone/silence ratio:"), false);
-      S.SetStyle(wxSL_HORIZONTAL | wxEXPAND);
-      mDtmfDutyCycleS = S.Id(ID_DutyCycle).AddSlider( {},
-                                                     dtmfDutyCycle * SCL_DutyCycle,
-                                                     MAX_DutyCycle * SCL_DutyCycle, 
-                                                     MIN_DutyCycle * SCL_DutyCycle);
-      S.SetSizeHints(-1,-1);
+      S.AddFixedText(XO("&Tone/silence ratio:"), false);
+      mDtmfDutyCycleS = S.Id(ID_DutyCycle)
+         .Style(wxSL_HORIZONTAL | wxEXPAND)
+         .MinSize( { -1, -1 } )
+         .AddSlider( {},
+                     dtmfDutyCycle * SCL_DutyCycle,
+                     MAX_DutyCycle * SCL_DutyCycle,
+                     MIN_DutyCycle * SCL_DutyCycle);
    }
    S.EndMultiColumn();
 
    S.StartMultiColumn(2, wxCENTER);
    {
-      S.AddFixedText(_("Duty cycle:"), false);
-      mDtmfDutyT = S.AddVariableText(wxString::Format(wxT("%.1f %%"), dtmfDutyCycle), false);
+      S.AddFixedText(XO("Duty cycle:"), false);
+      mDtmfDutyT =
+         S.AddVariableText(XO("%.1f %%").Format( dtmfDutyCycle ), false);
       
-      S.AddFixedText(_("Tone duration:"), false);
-      mDtmfSilenceT = S.AddVariableText(wxString::Format(wxString(wxT("%.0f ")) + _("ms"), dtmfTone * 1000.0), false);
+      S.AddFixedText(XO("Tone duration:"), false);
+      mDtmfSilenceT =
+         /* i18n-hint milliseconds */
+         S.AddVariableText(XO("%.0f ms").Format( dtmfTone * 1000.0 ), false);
 
-      S.AddFixedText(_("Silence duration:"), false);
-      mDtmfToneT = S.AddVariableText(wxString::Format(wxString(wxT("%0.f ")) + _("ms"), dtmfSilence * 1000.0), false);
+      S.AddFixedText(XO("Silence duration:"), false);
+      mDtmfToneT =
+         /* i18n-hint milliseconds */
+         S.AddVariableText(XO("%0.f ms").Format( dtmfSilence * 1000.0 ), false);
    }
    S.EndMultiColumn();
 }
@@ -555,24 +578,21 @@ bool EffectDtmf::MakeDtmfTone(float *buffer, size_t len, float fs, wxChar tone, 
 
    // generate a fade-in of duration 1/250th of second
    if (last == 0) {
-      A = (fs / kFadeInOut);
+      A = wxMin(len, (fs / kFadeInOut));
       for(size_t i = 0; i < A; i++) {
          buffer[i] *= i/A;
       }
    }
 
    // generate a fade-out of duration 1/250th of second
-   if (last == total - len) {
+   if (last >= total - len) {
       // we are at the last buffer of 'len' size, so, offset is to
       // backup 'A' samples, from 'len'
-      A = (fs / kFadeInOut);
-      auto offset = long(len) - long(fs / kFadeInOut);
-      // protect against negative offset, which can occur if too a
-      // small selection is made
-      if (offset >= 0) {
-         for(size_t i = 0; i < A; i++) {
-            buffer[i + offset] *= (1 - (i / A));
-         }
+      A = wxMin(len, (fs / kFadeInOut));
+      size_t offset = len - A;
+      wxASSERT(offset >= 0);
+      for(size_t i = 0; i < A; i++) {
+         buffer[i + offset] *= (1 - (i / A));
       }
    }
    return true;

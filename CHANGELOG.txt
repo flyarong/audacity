@@ -1,7 +1,205 @@
 List of significant changes and bug fixes going back to version 1.1.0
 
 
-Changes in version 2.3.0
+
+Changes in version 3.0.0: 
+
+
+Improvements
+
+ * Audacity now uses 'aup3' format, with all audio in one file, rather than 
+   the previous 'pile of file' format.  We are using the SQLite library to 
+   manageis the contents of this file.  Too many users were previously getting
+   caught out by copying part of the project only, when backing up.
+ * 'Backup Project' command replaces 'Save Lossless Copy of Project' and 'Save 
+   Compressed Copy of Project'
+ * Added Corsican and Marathi languages.
+ * 'Label Sounds' replaces 'Sound Finder' and 'Silence Finder'.
+ * Added Import and Export of Macros.
+ * Added Attack, Hold and Delay times to Noise Gate.
+ * Added Multi-View option to Track Preferences
+ * Added hidden (bindable to shortcuts) commands for repeating last generator, 
+   analyzer or tool.  Previously only most recent effect could be repeated.
+ * Upgraded Nyquist to 3.16
+
+See also: https://wiki.audacityteam.org/wiki/New_features_in_Audacity_3.0.0
+
+
+Bug Fixes
+
+ Over 160 bugs in 2.4.2 fixed, including:
+
+ *  208 - Some effects (including equalization effects) delete Envelope Control 
+          Points, or do not move them when timeline changes
+ * 2367 - Change Pitch effect may create spurious clip at end
+ * 2492 - Linux: Crash when applying or previewing Sliding Stretch effect on 
+          stereo track
+ * 2544 - "Editing a clip can move other clips" turned off can cause corruption 
+          when copying and pasting audio
+ * 2630 - A project saved with an imported MP3 with Unicode metadata cannot be 
+          opened
+ * 2656 - Cannot horizontal scroll when paused in Play-at-Speed
+ * 2669 - Win: Save As can be used to overwrite the existing project without 
+          warning
+ * 1300 - Mac: COMMAND + V paste limitations in standard file save dialogs
+ * 1579 - Mac: Cut/Copy from file save dialogs using shortcuts does not work
+ * 2187 - No error/warning message when using a missing aliased audio file
+ * 2296 - There is no Import or Export for Macros
+ * 2464 - Cannot drag just the selected audio and label with Time Shift Tool
+ * 2437 - Mac: "Open with" fails when Audacity is running
+ * 2473 - Linux: Numbers on meters have opaque backgrounds
+ * 2487 - Playback meters do not respond during preview of non-real-time effects
+ * 2491 - Reset Configuration does not reset Extended Import preferences
+ * 2509 - Filter curve and Graphic EQ help links are broken in release version
+ * 2527 - Reset Configuration does not reset Project rate or selection timers
+ * 2573 - High / Low Pass filters limited to ~94 mins stereo at 44100 Hz
+ * 2581 - Inconsistent behavior when pasting and not enough room
+ * 2593 - Play-at-Speed does not play unless you have used normal Play first
+ * 2616 - Labelled Audio Cut and Delete disabled by Sync-Lock
+
+See also: https://wiki.audacityteam.org/wiki/Release_Notes_3.0.0
+
+
+
+
+Changes in version 2.4.2: 
+
+
+Improvements
+
+ * Audacity is now built with (our version of) the wx3.1.3 library.
+   Previously we used wx3.1.1.
+ * We added a command 'Reset Configuration' to reset to default 
+   settings.
+ * MP3 Audio is now exported without padding.
+
+See also: https://wiki.audacityteam.org/wiki/New_features_in_Audacity_2.4.2
+
+
+Bug Fixes
+
+ Over 30 bugs in 2.4.1 fixed, including:
+
+ * 2442 - Windows: Crash when importing (or editing) to a disk 
+   with insufficient disk space available
+ * 2471 - Mix Stereo down to Mono fails if space at start of track.
+ * 2439 - Mix and Render to New Track selects left channel of new
+   stereo track
+
+
+
+
+Changes in version 2.4.1:
+
+Critical Bug Fix:
+ * Audacity 2.4.0 was released with a critical bug, (Bug 2436),
+   which is fixed in 2.4.1.  The bug caused loss of data when using two projects at the same time.
+
+Improvements
+
+ * Audacity now runs on Mac Catalina.
+ * A new Time Toolbar showing current record/playback time has been
+   split from the Selection Toolbar.  It can be resized large.
+ * Presets for more effects can be imported and exported.
+ * A new Multi-View mode for tracks.  In this mode both 
+   spectrogram and waveform views are shown at the same time.
+ * Opus available as a new audio export format on Windows and Linux.
+ * Easier to convert labels between point labels and range labels.
+ * New Loudness Normalization effect.
+ * New RMS measurement analyzer.
+ * New Noise Gate effect.
+ * New Spectral Delete effect.
+
+See also: https://wiki.audacityteam.org/wiki/New_features_in_Audacity_2.4.1
+
+
+Bug Fixes
+
+ Over 100 bugs in 2.3.3 fixed, including:
+
+ * 2237 - Equalization effects have no Import or Export for curves
+ * 2261 - Graphic EQ sliders have no frequency labels
+ * 2265 - Track heights are reset to default on project re-opening
+ * 2303 - Playback does not start at the saved cursor position on reopening a saved project.
+ * 2314 - Zoom in fail when playing
+
+
+Changes in version 2.3.3:
+
+Improvements
+
+ * Equalization effect now split into two effects, Filter Curve and Graphic EQ.
+   * Presets (using manage button) now active/working.
+   * Can now have two points at same frequency for steep steps.
+ * 'What you hear is what you get' for exports.  Formerly the solo button 
+   preferences could lead to differences in which tracks were exported.
+ * Leading silence (blank space) not skipped over in exports.
+ * Quality setting on AAC/M4A exports.
+ * Some confusing functionality removed (better achieved in other ways)
+   * Removed Nyquist Workbench (use built-in nyquist features)
+   * Removed Vocal Remover (use Vocal Reduction)
+   * Removed On-Demand aliased files (copy files instead)
+   * Removed 'Normalize on Load' (Normalize as needed on export, instead)
+
+
+Bug Fixes
+
+ Over 150 bugs in 2.3.2 fixed, including:
+
+ * 2112 - Crash when opening Equalization settings in a Macro
+ * 2127 - Crash deleting a track while in Record/Pause state
+ * 2176 - Crash when attempting to time shift multiple tracks
+ * 2141 - Tabbing between labels stopped working
+ * 2200 - Refusal to export some large (4GB) files on size grounds
+
+
+
+Changes in version 2.3.2: 
+
+Improvements
+
+ * Audacity now includes the LAME mp3 encoder. Previously, due to now expired
+   patents, you had to download it separately.
+ * There is a new 'Select' button in the track panel to select the whole 
+   track.
+ * Audacity mod-script-pipe for driving Audacity from Python now comes with
+   Audacity and can be enabled via preferences.
+ * Options and preferences:
+   * Type to Create a Label is now off by default.
+ * A plug-in installer for Nyquist now provides a file browser for 
+   selecting '.NY' files to install.
+
+Bug Fixes
+
+ Over 20 bugs in 2.3.1 fixed, including:
+
+ * Audacity 2.3.1 would crash if append-recording to a collapsed track.
+ * Many accessibility bugs on macOS fixed
+
+
+
+Changes in version 2.3.1: 
+
+Improvements
+
+    * Audacity now supports 64 bit Mac.
+    * Options and preferences:
+        * Microfades are now an opt-in feature. They were always on in 2.3.0.
+        * The advanced vertical zooming option is now available in the 
+          View->Zoom menu.
+    * Regular interval labels now support range labels.
+
+Bug Fixes
+
+ Over 20 bugs in 2.3.0 fixed, including:
+
+    * A crashing bug on Linux that made Audacity 2.3.0. unsuitable for Linux.
+    * Crash on Mac when right clicking on label.
+    * Problems with Change Pitch, including not remembering parameter values.
+
+
+
+Changes in version 2.3.0:
 
 Improvements
 
@@ -45,6 +243,7 @@ Bug Fixes
       Mute/Solo during preview - bug #231
 
 
+
 Changes in version 2.2.2:
 
 Improvements
@@ -80,6 +279,7 @@ Improvements
       spelling of these languages is shown with accented and special characters. 
 
 Bug Fixes
+
    * Multiple use of "Save As" to the existing open project can result in data 
      corruption/loss
    * Crash undoing during record, using Discard button of History window
@@ -101,6 +301,7 @@ Bug Fixes
    * Installer has old logo for 2.2.1 and 2.2.0
    * Un-muting with a single track unnecessarily activates the Solo button
    * Applying chain to file should zoom-to-fit
+
 
 
 Changes in version 2.2.1:
@@ -128,6 +329,7 @@ Bug Fixes
        Bug #1787 - Auto-scroll stopped working in 2.2.0
        Bug #1765 - Using File > Open to import audio gives wrong zoom level
          and no scroll bar slider
+
 
 
 Changes in version 2.2.0:
@@ -172,6 +374,7 @@ Bug Fixes
           incorrect times.
 
 
+
 Changes in version 2.1.3:
 
  * Interface:
@@ -206,6 +409,7 @@ Bug fixes:
  Over 60 bugs fixed, including five longstanding bugs.
 
 
+
 Changes in version 2.1.2:
    
  * Interface:  
@@ -238,6 +442,7 @@ Bug fixes:
    
  * Mac OS X
    * Mouse preference bindings now show 'command', not 'ctrl'
+
 
 
 Changes in version 2.1.1: 
@@ -299,6 +504,7 @@ Bug fixes:
    * Confusing behaviour importing / exporting AU presets. In particular, 
      Apple Audio Units silently applied an imported preset.
  
+
 
 Changes in version 2.1.0: 
 
@@ -373,6 +579,7 @@ Bug fixes:
      will remain up to distributions to use this desktop file.    
 
 
+
 Changes in version 2.0.6:
 
  * Interface:
@@ -429,6 +636,7 @@ Bug fixes:
  * (Linux) Audacity did not build if python 2 was not available.  
  * Projects did not reopen correctly if they contained tracks having 
    2^31 samples or greater of audio (just over 13.5 hours at 44100 Hz).
+
 
 
 Changes in version 2.0.5:
@@ -493,6 +701,7 @@ Changes in version 2.0.5:
     import if the warning for importing uncompressed files appeared. 
 
 
+
 Changes in version 2.0.4:
 
  * New "Reverb" effect to replace GVerb, based on the original "Freeverb".
@@ -535,6 +744,7 @@ Bug fixes:
  * Accessibility: ENTER did not toggle selectedness of a label track unless
     a label was selected.  
  * Numerous other interface fixes.  
+
 
 
 Changes in version 2.0.3:
@@ -596,6 +806,7 @@ Bug fixes:
  * Other interface bug fixes.
 
 
+
 Changes in version 2.0.2: 
 
  * Duration controls when generating at a point now default to 
@@ -639,6 +850,7 @@ Bug fixes:
 
  * Effects and Analysis:
    * Normalize could crash if the track name contained "%". 
+
 
 
 Changes in version 2.0.1: 
@@ -700,6 +912,7 @@ Bug fixes:
     with mouse wheel or ball scrolling the content off-screen. 
 
 
+
 Changes between version 1.3.14 Beta and 2.0.0:
 
  * New Interface preference to show the track name in the display (this
@@ -742,6 +955,7 @@ Changes between version 1.3.14 Beta and 2.0.0:
  * Other miscellaneous bug fixes.  
 
 
+
 Summary of bug fixes and new features between 1.2.6 and 2.0.0:
 
  * New features: There are dozens of new features in 2.0.0, including: 
@@ -774,6 +988,7 @@ Summary of bug fixes and new features between 1.2.6 and 2.0.0:
       characters in their name. 
    * (Linux) Playing existing tracks while recording in mono could cause
       recordings to be distorted or low-pitched. 
+
 
 
 Changes in version 1.3.14 Beta: 
@@ -829,6 +1044,7 @@ Bug fixes:
    * (Windows) Data loss is now prevented when encountering a corrupted
       .aup file created in ANSI builds. 
    * (Linux) Restore building if USE_PORTMIXER is not defined. 
+
  
 
 Changes in version 1.3.13 Beta: 
@@ -914,6 +1130,7 @@ Bug fixes:
       configured with libsamplerate. 
 
 
+
 Changes in version 1.3.12 Beta: 
 
  * A hover tooltip is now provided if the Mixer Toolbar input selector 
@@ -965,6 +1182,7 @@ Bug fixes:
       folders to disappear from the list, and file filtering was broken
 
 
+
 Changes in version 1.3.11 Beta: 
 
  * (Windows) Better icon file with higher resolution and transparency
@@ -1008,6 +1226,7 @@ Bug fixes:
    * Several timing-dependent crashes and minor incorrect behaviors have been
       fixed
    * Windows installer now installs correctly over previous versions of Audacity 
+
 
 
 Changes in version 1.3.10 Beta: 
@@ -1066,6 +1285,7 @@ Bug fixes:
     * (Linux) Undoing or redoing a label edit could cause a crash 
 
 
+
 Changes in version 1.3.9 Beta:
 
            * Compressor: new option to compress based on peaks, improved
@@ -1107,6 +1327,7 @@ Bug fixes:
               * QuickTime importer now handles files greater than 16-bit 
                 or 64000 Hz
            * Various other interface bugs 
+
 
 
 Changes in version 1.3.8 Beta:
@@ -1158,6 +1379,7 @@ Bug fixes:
                  cached in memory if available RAM is above a level defined 
                  in preferences 
               * Various other crashes
+
 
 
 Changes in version 1.3.7 Beta:
@@ -1240,6 +1462,7 @@ Platform-specific Bug Fixes:
            * Fixed unavailability of FFmpeg installer
 
 
+
 Changes in 1.3.6 Beta (since 1.3.6a6 Alpha):
 
 Interface:
@@ -1270,6 +1493,7 @@ Compilation:
            without this archive to build --with -MIDI
 
 
+
 Changes in 1.3.6a6:
 
 Interface:
@@ -1292,6 +1516,7 @@ Effects:
         * LV2 plug-ins: added support (OS X and Linux only) for using
            synths as tone generators, scale point labels, grouped
            controls and i18n translations
+
 
 
 Changes in 1.3.6a5:
@@ -1326,6 +1551,7 @@ Miscellaneous:
            improvements
 
 
+
 Changes in 1.3.6a4:
 
 Interface:
@@ -1351,6 +1577,7 @@ Effects:
            not build
 
 
+
 Changes in 1.3.6a3:
 
 Import / Export:
@@ -1369,6 +1596,7 @@ Interface:
            commands and some recording preferences
         * Audio tracks are now linked to label tracks by being positioned
            above a label track, if linkage is enabled in the Tracks menu
+
 
 
 Changes in 1.3.6a2:
@@ -1400,6 +1628,7 @@ Miscellaneous:
            and in stability when screen readers are used
 
 
+
 Changes in 1.3.6a1:
 
 Interface:
@@ -1423,6 +1652,7 @@ Miscellaneous:
         * Default auto save interval reduced to 2 minutes.
         * Bug fixes to correct project rate initialisation on Linux, and
            file importing issues on PPC Macs.
+
 
 
 Changes in 1.3.5:
@@ -1465,6 +1695,7 @@ Security:
 Miscellaneous:
    * Updated translations for many locales.
    * Several stability improvements.
+
 
 
 Changes in 1.3.4:
@@ -1529,6 +1760,7 @@ Note that Help is no longer built in, but accessible on the Web via links
 in Audacity.
 
 
+
 Changes in 1.3.3:
 
 Opening/saving formats:
@@ -1574,6 +1806,7 @@ Also:
    * Numerous stability improvements
 
 
+
 Changes in 1.3.1 and 1.3.2:
 
 o Improved accessibility for the visually impaired
@@ -1595,6 +1828,7 @@ o Improved batch processing
 o File format export improvements
 o Timer recording
 o Intel Mac support
+
 
 
 Changes in 1.3.0:
@@ -1661,6 +1895,7 @@ Changes in 1.3.0:
       CleanSpeech
 
 
+
 Changes in 1.2.4:
 
   * The File menu now includes a list of recent files.
@@ -1691,6 +1926,7 @@ Changes in 1.2.4:
   * New or updated translations: Arabic (ar), Czech (cs), Finnish (fi),
     Hungarian (hu), Japanese (ja), Norwegian (nb), Slovenian (sl),
     Simplified Chinese (zh_CN), Traditional Chinese (zh_TW).
+
 
 
 Changes in 1.2.3:
@@ -1727,6 +1963,7 @@ Changes in 1.2.3:
   * New or updated translations: Italian (it), Hungarian (hu),
     Ukrainian (uk), Spanish (es). Polish (pl), Simplified Chinese (zh),
     Norsk-Bokmal (nb), French (fr).
+
 
 
 Changes in 1.2.2:
@@ -1800,6 +2037,7 @@ Changes in 1.2.2:
   * Other minor bug fixes and performance improvements.
 
 
+
 Changes in 1.2.1:
 
   * The following translations have been added or updated:  Finnish,
@@ -1841,6 +2079,7 @@ Changes in 1.2.1:
   * Other minor bug-fixes.
 
 
+
 Changes in 1.2.0:
 
   * New cross-fade effects.
@@ -1867,6 +2106,7 @@ Changes in 1.2.0:
     compile out of the box on Windows.
 
   * Many new/updated translations.
+
 
 
 Changes in 1.2.0-pre4:
@@ -1928,6 +2168,7 @@ Changes in 1.2.0-pre4:
     "About" window in localized versions.
 
 
+
 Changes in 1.2.0-pre3:
 
   * Fixed bug where Export is grayed out when nothing is
@@ -1985,6 +2226,7 @@ Changes in 1.2.0-pre3:
     (GVerb reverb, SC4 compressor, and Hard Limiter)
 
 
+
 Changes in 1.2.0-pre2:
 
   * Online help completed.  The full manual is nearly complete
@@ -2029,6 +2271,7 @@ Changes in 1.2.0-pre2:
     compatible with more MP3 players.
 
   * Minor improvements to build system on Unix systems.
+
 
 
 New features in Audacity 1.2:
@@ -2079,6 +2322,7 @@ New features in Audacity 1.2:
     - Several memory leaks are fixed.
 
 
+
 New features in Audacity 1.1.3:
   * User Interface
     - New Mixer toolbar allows you to control the output
@@ -2116,6 +2360,7 @@ New features in Audacity 1.1.3:
   * Many more bug fixes and new features
 
 
+
 New features in Audacity 1.1.2:
   * User Interface
     - Fixed bug in Windows version, for track menu commands
@@ -2124,6 +2369,7 @@ New features in Audacity 1.1.2:
     - Nyquist support on Windows (supports plug-ins written
      in Nyquist, an interpreted functional language based
      on Lisp).
+
 
 
 New features in Audacity 1.1.1:
@@ -2173,6 +2419,7 @@ New features in Audacity 1.1.1:
       the AUDACITY_PATH environment variable
 
 
+
 New features in Audacity 1.1.0:
 
   * Core audio processing:
@@ -2203,6 +2450,7 @@ New features in Audacity 1.1.0:
   * Localization
     - Audacity can now be localized to different foreign
       languages.
+
 
 
 New libraries in Audacity 1.1:

@@ -17,25 +17,26 @@
 
 #include "PrefsPanel.h"
 
+class ChoiceSetting;
 class ShuttleGui;
+
+#define EFFECTS_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Effects") }
 
 class EffectsPrefs final : public PrefsPanel
 {
  public:
    EffectsPrefs(wxWindow * parent, wxWindowID winid);
    ~EffectsPrefs();
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
+
    bool Commit() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
  private:
    void Populate();
 };
 
-/// A PrefsPanelFactory that creates one EffectsPrefs panel.
-class EffectsPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
+AUDACITY_DLL_API extern ChoiceSetting EffectsGroupBy;
 #endif

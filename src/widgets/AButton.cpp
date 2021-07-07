@@ -21,7 +21,7 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "AButton.h"
 
 #include "../AColor.h"
@@ -29,8 +29,6 @@
 #include <wx/setup.h> // for wxUSE_* macros
 
 #include <wx/app.h>
-#include <wx/dcclient.h>
-#include <wx/dcmemory.h>
 #include <wx/dcbuffer.h>
 #include <wx/eventfilter.h>
 #include <wx/image.h>
@@ -38,6 +36,8 @@
 
 //This is needed for tooltips
 #include "../Project.h"
+#include "../ProjectStatus.h"
+#include "../ProjectWindowBase.h"
 #include <wx/tooltip.h>
 
 #if wxUSE_ACCESSIBILITY
@@ -195,24 +195,6 @@ AButton::AButton(wxWindow * parent,
                  wxWindowID id,
                  const wxPoint & pos,
                  const wxSize & size,
-                 wxImage up,
-                 wxImage over,
-                 wxImage down,
-                 wxImage overDown,
-                 wxImage dis,
-                 bool toggle):
-   wxWindow()
-{
-   Init(parent, id, pos, size,
-        ImageRoll(up), ImageRoll(over),
-        ImageRoll(down), ImageRoll(overDown), ImageRoll(dis),
-        toggle);
-}
-
-AButton::AButton(wxWindow * parent,
-                 wxWindowID id,
-                 const wxPoint & pos,
-                 const wxSize & size,
                  ImageRoll up,
                  ImageRoll over,
                  ImageRoll down,
@@ -270,8 +252,8 @@ void AButton::Init(wxWindow * parent,
    mFocusRect = GetClientRect().Deflate( 3, 3 );
    mForceFocusRect = false;
 
-   SetSizeHints(mImages[0].mArr[0].GetMinSize(),
-                mImages[0].mArr[0].GetMaxSize());
+   SetMinSize(mImages[0].mArr[0].GetMinSize());
+   SetMaxSize(mImages[0].mArr[0].GetMaxSize());
 
 #if wxUSE_ACCESSIBILITY
    SetName( wxT("") );
@@ -282,6 +264,16 @@ void AButton::Init(wxWindow * parent,
 void AButton::UseDisabledAsDownHiliteImage(bool flag)
 {
    mUseDisabledAsDownHiliteImage = flag;
+}
+
+void AButton::SetToolTip( const TranslatableString &toolTip )
+{
+   wxWindow::SetToolTip( toolTip.Stripped().Translation() );
+}
+
+void AButton::SetLabel( const TranslatableString &toolTip )
+{
+   wxWindow::SetLabel( toolTip.Stripped().Translation() );
 }
 
 // This compensates for a but in wxWidgets 3.0.2 for mac:
@@ -444,7 +436,7 @@ void AButton::OnMouseEvent(wxMouseEvent & event)
       // to make it pop up when we want it.
       auto text = GetToolTipText();
       UnsetToolTip();
-      SetToolTip(text);
+      wxWindow::SetToolTip(text);
       mCursorIsInWindow = true;
    }
    else if (event.Leaving())
@@ -455,7 +447,7 @@ void AButton::OnMouseEvent(wxMouseEvent & event)
           event.m_x < clientSize.x && event.m_y < clientSize.y);
 
    if (mEnabled && event.IsButton()) {
-      if (event.ButtonIsDown(wxMOUSE_BTN_ANY)) {
+      if (event.ButtonIsDown(wxMOUSE_BTN_LEFT)) {
          mIsClicking = true;
          if (event.ButtonDClick())
             mIsDoubleClicked = true;
@@ -491,7 +483,9 @@ void AButton::OnMouseEvent(wxMouseEvent & event)
       if (mCursorIsInWindow)
          UpdateStatus();
       else {
-         GetActiveProject()->TP_DisplayStatusMessage(wxT(""));
+         auto pProject = FindProjectFromWindow( this );
+         if (pProject)
+            ProjectStatus::Get( *pProject ).Set({});
       }
    }
    else
@@ -505,10 +499,12 @@ void AButton::UpdateStatus()
       // Display the tooltip in the status bar
       wxToolTip * pTip = this->GetToolTip();
       if( pTip ) {
-         wxString tipText = pTip->GetTip();
+         auto tipText = Verbatim( pTip->GetTip() );
          if (!mEnabled)
-            tipText += _(" (disabled)");
-         GetActiveProject()->TP_DisplayStatusMessage(tipText);
+            tipText.Join( XO("(disabled)"), " " );
+         auto pProject = FindProjectFromWindow( this );
+         if (pProject)
+            ProjectStatus::Get( *pProject ).Set( tipText );
       }
 #endif
    }
@@ -574,9 +570,11 @@ bool AButton::WasControlDown()
 
 void AButton::Enable()
 {
-   wxWindow::Enable(true);
-   mEnabled = true;
-   Refresh(false);
+   bool changed = wxWindow::Enable(true);
+   if ( !mEnabled ) {
+      mEnabled = true;
+      Refresh(false);
+   }
 }
 
 void AButton::Disable()
@@ -588,10 +586,12 @@ void AButton::Disable()
 #ifndef __WXMSW__
    wxWindow::Enable(false);
 #endif
-   mEnabled = false;
    if (GetCapture()==this)
       ReleaseMouse();
-   Refresh(false);
+   if ( mEnabled ) {
+      mEnabled = false;
+      Refresh(false);
+   }
 }
 
 void AButton::PushDown()

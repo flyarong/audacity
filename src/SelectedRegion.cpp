@@ -10,9 +10,7 @@ Paul Licameli
 
 #include "SelectedRegion.h"
 
-#include "Experimental.h"
 
-#include "Internat.h"
 
 #include "xml/XMLWriter.h"
 

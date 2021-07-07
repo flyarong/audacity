@@ -13,13 +13,14 @@
 #ifndef __AUDACITY_TOOLBAR__
 #define __AUDACITY_TOOLBAR__
 
-#include "../Experimental.h"
-
+#include <functional>
 #include <vector>
 #include <wx/defs.h>
 
+#include "../Prefs.h"
 #include "../Theme.h"
 #include "../widgets/wxPanelWrapper.h" // to inherit
+#include <wx/windowptr.h>
 
 class wxBoxSizer;
 class wxDC;
@@ -38,6 +39,10 @@ class Grabber;
 class ToolDock;
 
 class ToolBarResizer;
+
+#ifdef __WXMAC__
+#define USE_AQUA_THEME 1
+#endif
 
 ////////////////////////////////////////////////////////////
 /// class ToolBar
@@ -61,7 +66,7 @@ DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_TOOLBAR_UPDATED, -1);
 //
 // ToolBar IDs
 //
-enum
+enum ToolBarID
 {
    NoBarID = -1,
    TransportBarID,
@@ -78,39 +83,49 @@ enum
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
    SpectralSelectionBarID,
 #endif
+   TimeBarID,
    ToolBarCount
 };
 
 // How may pixels padding each side of a floating toolbar
 enum { ToolBarFloatMargin = 1 };
 
-class ToolBar /* not final */ : public wxPanelWrapper
+class AudacityProject;
+
+class AUDACITY_DLL_API ToolBar /* not final */
+: public wxPanelWrapper
+, protected PrefsListener
 {
 
  public:
 
-   using Holder = Destroy_ptr<ToolBar>;
+   using Holder = wxWindowPtr<ToolBar>;
 
-   ToolBar(int type, const wxString & label, const wxString & section, bool resizable = false);
+   ToolBar( AudacityProject &project,
+      int type, const TranslatableString & label, const wxString & section,
+      bool resizable = false);
    virtual ~ToolBar();
 
    bool AcceptsFocus() const override { return false; };
 
-   void SetToDefaultSize();
+   virtual void SetToDefaultSize();
    //NEW virtuals:
    virtual void Create(wxWindow *parent);
    virtual void EnableDisableButtons() = 0;
    virtual void ReCreateButtons();
-   virtual void UpdatePrefs();
+   void UpdatePrefs() override;
    virtual void RegenerateTooltips() = 0;
 
    int GetType();
-   wxString GetTitle();
-   wxString GetLabel();
+   TranslatableString GetTitle();
+   TranslatableString GetLabel();
    wxString GetSection();
    ToolDock *GetDock();
 
+private:
    void SetLabel(const wxString & label) override;
+public:
+   void SetLabel(const TranslatableString & label);
    virtual void SetDocked(ToolDock *dock, bool pushed);
 
    // NEW virtual:
@@ -128,6 +143,10 @@ class ToolBar /* not final */ : public wxPanelWrapper
    virtual int GetInitialWidth() { return -1; }
    virtual int GetMinToolbarWidth() { return GetInitialWidth(); }
    virtual wxSize GetDockedSize() { return GetMinSize(); }
+   
+   // Utility function for certain resizable toolbars.
+   // Allows them to dock at normal or double size.
+   wxSize GetSmartDockedSize();
 
  public:
    static
@@ -157,18 +176,20 @@ class ToolBar /* not final */ : public wxPanelWrapper
 
    static
    void SetButtonToolTip
-      (AButton &button,
+      (AudacityProject &project, AButton &button,
        // If a shortcut key is defined for the command, then it is appended,
        // parenthesized, after the translated name.
-       const TranslatedInternalString commands[], size_t nCommands);
+       const ComponentInterfaceSymbol commands[], size_t nCommands);
+
+   static void MakeButtonBackgroundsSmall();
+   static void MakeButtonBackgroundsLarge();
+   virtual void ResizingDone() {};
 
  protected:
    void SetButton(bool down, AButton *button);
 
-   void MakeMacRecoloredImage(teBmps eBmpOut, teBmps eBmpIn);
-   void MakeRecoloredImage(teBmps eBmpOut, teBmps eBmpIn);
-   void MakeButtonBackgroundsLarge();
-   void MakeButtonBackgroundsSmall();
+   static void MakeMacRecoloredImage(teBmps eBmpOut, teBmps eBmpIn);
+   static void MakeRecoloredImage(teBmps eBmpOut, teBmps eBmpIn);
 
    wxBoxSizer *GetSizer();
 
@@ -211,7 +232,8 @@ class ToolBar /* not final */ : public wxPanelWrapper
    void OnMouseEvents(wxMouseEvent &event);
 
  protected:
-   wxString mLabel;
+   AudacityProject &mProject;
+   TranslatableString mLabel;
    wxString mSection;
    int mType;
  private:
@@ -234,6 +256,15 @@ class ToolBar /* not final */ : public wxPanelWrapper
    DECLARE_EVENT_TABLE()
 
    friend class ToolBarResizer;
+};
+
+struct AUDACITY_DLL_API RegisteredToolbarFactory {
+   using Function = std::function< ToolBar::Holder( AudacityProject & ) >;
+   using Functions = std::vector< Function >;
+
+   RegisteredToolbarFactory( int id, const Function &function );
+
+   static const Functions &GetFactories();
 };
 
 #endif

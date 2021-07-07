@@ -6,11 +6,11 @@
 //
 //
 
-#include "../Audacity.h"
+
 #include "OverlayPanel.h"
 
 #include "Overlay.h"
-#include "../AColor.h"
+#include "MemoryX.h"
 #include <algorithm>
 #include <wx/dcclient.h>
 
@@ -23,7 +23,16 @@ OverlayPanel::OverlayPanel(wxWindow * parent, wxWindowID id,
 
 void OverlayPanel::AddOverlay( const std::weak_ptr<Overlay> &pOverlay)
 {
-   mOverlays.push_back(pOverlay);
+   if (pOverlay.expired())
+      return;
+   Compress();
+   auto iter = std::lower_bound( mOverlays.begin(), mOverlays.end(),
+      pOverlay.lock()->SequenceNumber(),
+      []( const OverlayPtr &p, unsigned value ) {
+         return p.expired() || p.lock()->SequenceNumber() < value;
+      }
+   );
+   mOverlays.insert(iter, pOverlay);
 }
 
 void OverlayPanel::ClearOverlays()
@@ -33,6 +42,9 @@ void OverlayPanel::ClearOverlays()
 
 void OverlayPanel::DrawOverlays(bool repaint_all, wxDC *pDC)
 {
+   if ( !IsShownOnScreen() )
+      return;
+
    size_t n_pairs = mOverlays.size();
 
    using Pair = std::pair<wxRect, bool /*out of date?*/>;
@@ -71,7 +83,7 @@ void OverlayPanel::DrawOverlays(bool repaint_all, wxDC *pDC)
 
    if (!repaint_all) {
       // For each overlay that needs update, any other overlay whose
-      // rectangle instersects it will also need update.
+      // rectangle intersects it will also need update.
       bool done;
       do {
          done = true;
@@ -87,8 +99,8 @@ void OverlayPanel::DrawOverlays(bool repaint_all, wxDC *pDC)
       } while (!done);
    }
 
-   Maybe<wxClientDC> myDC;
-   auto &dc = pDC ? *pDC : (myDC.create(this), *myDC);
+   Optional<wxClientDC> myDC;
+   auto &dc = pDC ? *pDC : (myDC.emplace(this), *myDC);
 
    // Erase
    auto it2 = pairs.begin();
@@ -125,3 +137,18 @@ void OverlayPanel::Compress()
 
 BEGIN_EVENT_TABLE(OverlayPanel, BackedPanel)
 END_EVENT_TABLE()
+
+// Maybe this class needs a better home
+void DCUnchanger::operator () (wxDC *pDC) const
+{
+   if (pDC) {
+      pDC->SetPen(pen);
+      pDC->SetBrush(brush);
+      pDC->SetLogicalFunction(wxRasterOperationMode(logicalOperation));
+   }
+}
+
+ADCChanger::ADCChanger(wxDC *pDC)
+   : Base{ pDC, ::DCUnchanger{ pDC->GetBrush(), pDC->GetPen(),
+      long(pDC->GetLogicalFunction()) } }
+{}

@@ -8,13 +8,14 @@
 
 **********************************************************************/
 
-#include "../Audacity.h"
+
 
 #include <vector>
-#include "expat.h"
+struct XML_ParserStruct;
+typedef struct XML_ParserStruct *XML_Parser;
 
 #include "XMLTagHandler.h"
-#include "audacity/Types.h"
+#include "Internat.h" // for TranslatableString
 
 class AUDACITY_DLL_API XMLFileReader final {
  public:
@@ -23,8 +24,11 @@ class AUDACITY_DLL_API XMLFileReader final {
 
    bool Parse(XMLTagHandler *baseHandler,
               const FilePath &fname);
+   bool ParseString(XMLTagHandler *baseHandler,
+                    const wxString &xmldata);
 
-   wxString GetErrorStr();
+   const TranslatableString &GetErrorStr() const;
+   const TranslatableString &GetLibraryErrorStr() const;
 
    // Callback functions for expat
 
@@ -40,5 +44,6 @@ class AUDACITY_DLL_API XMLFileReader final {
    XMLTagHandler   *mBaseHandler;
    using Handlers = std::vector<XMLTagHandler*>;
    Handlers mHandler;
-   wxString         mErrorStr;
+   TranslatableString mErrorStr;
+   TranslatableString mLibraryErrorStr;
 };

@@ -15,18 +15,18 @@
 
 #include "Effect.h"
 
-#define INVERT_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Invert") }
-
 class EffectInvert final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectInvert();
    virtual ~EffectInvert();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 

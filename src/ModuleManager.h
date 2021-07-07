@@ -13,34 +13,26 @@
 #define __AUDACITY_MODULEMANAGER_H__
 
 #include "MemoryX.h"
+#include <functional>
 #include <map>
 #include <vector>
 
-#include "audacity/ModuleInterface.h"
+#include "audacity/Types.h"
+#include "Identifier.h"
 
 class wxArrayString;
 class wxDynamicLibrary;
-class CommandHandler;
-
-wxWindow *  MakeHijackPanel();
+class ComponentInterface;
+class ModuleInterface;
+class wxWindow;
 
 //
 // Module Manager
 //
 // wxPluginManager would be MUCH better, but it's an "undocumented" framework.
 //
-#define ModuleDispatchName "ModuleDispatch"
 
-typedef enum
-{
-   ModuleInitialize,
-   ModuleTerminate,
-   AppInitialized,
-   AppQuiting,
-   ProjectInitialized,
-   ProjectClosing,
-   MenusRebuilt
-} ModuleDispatchTypes;
+#include "ModuleConstants.h"
 
 typedef int (*fnModuleDispatch)(ModuleDispatchTypes type);
 
@@ -50,13 +42,16 @@ public:
    Module(const FilePath & name);
    virtual ~Module();
 
-   bool Load();
+   void ShowLoadFailureError(const wxString &Error);
+   bool Load(wxString &deferredErrorMessage);
    void Unload();
+   bool HasDispatch() { return mDispatch != NULL; };
    int Dispatch(ModuleDispatchTypes type);
    void * GetSymbol(const wxString &name);
+   const FilePath &GetName() const { return mName; }
 
 private:
-   FilePath mName;
+   const FilePath mName;
    std::unique_ptr<wxDynamicLibrary> mLib;
    fnModuleDispatch mDispatch;
 };
@@ -69,42 +64,52 @@ using ModuleInterfaceHandle = std::unique_ptr<
    ModuleInterface, ModuleInterfaceDeleter
 >;
 
-typedef std::map<wxString, ModuleMain *> ModuleMainMap;
 typedef std::map<wxString, ModuleInterfaceHandle> ModuleMap;
 typedef std::map<ModuleInterface *, std::unique_ptr<wxDynamicLibrary>> LibraryMap;
 using PluginIDs = wxArrayString;
 
-class ModuleManager final : public ModuleManagerInterface
+class AUDACITY_DLL_API ModuleManager final
 {
 public:
-   // -------------------------------------------------------------------------
-   // ModuleManagerInterface implementation
-   // -------------------------------------------------------------------------
-
-   void RegisterModule(ModuleInterface *module) override;
 
    // -------------------------------------------------------------------------
    // ModuleManager implementation
    // -------------------------------------------------------------------------
 
    static ModuleManager & Get();
+   
+   // This string persists in configuration files
+   // So config compatibility will break if it is changed across Audacity versions
+   static wxString GetPluginTypeString();
 
-   void Initialize(CommandHandler & cmdHandler);
+   static PluginID GetID(ModuleInterface *module);
+
+private:
+   static void FindModules(FilePaths &files);
+   using DelayedErrors =
+      std::vector< std::pair< std::unique_ptr<Module>, wxString > >;
+   static void TryLoadModules(
+      const FilePaths &files, FilePaths &decided, DelayedErrors &errors);
+
+public:
+   void Initialize();
    int Dispatch(ModuleDispatchTypes type);
 
    // PluginManager use
+   // Can be called before Initialize()
    bool DiscoverProviders();
 
-   // Seems we don't currently use FindAllPlugins
-   void FindAllPlugins(PluginIDs & providers, PluginPaths & paths);
+   // Supports range-for iteration
+   auto Providers() const
+   { return make_iterator_range(mDynModules.cbegin(), mDynModules.cend()); }
 
-   PluginPaths FindPluginsForProvider(const PluginID & provider, const PluginPath & path);
    bool RegisterEffectPlugin(const PluginID & provider, const PluginPath & path,
-                       wxString &errMsg);
+                       TranslatableString &errMsg);
 
-   ComponentInterface *CreateProviderInstance(const PluginID & provider, const PluginPath & path);
-   ComponentInterface *CreateInstance(const PluginID & provider, const PluginPath & path);
-   void DeleteInstance(const PluginID & provider, ComponentInterface *instance);
+   ModuleInterface *CreateProviderInstance(
+      const PluginID & provider, const PluginPath & path);
+   std::unique_ptr<ComponentInterface>
+      CreateInstance(const PluginID & provider, const PluginPath & path);
 
    bool IsProviderValid(const PluginID & provider, const PluginPath & path);
    bool IsPluginValid(const PluginID & provider, const PluginPath & path, bool bFast);
@@ -113,20 +118,39 @@ private:
    // I'm a singleton class
    ModuleManager();
    ~ModuleManager();
+   ModuleManager(const ModuleManager&) PROHIBITED;
+   ModuleManager &operator=(const ModuleManager&) PROHIBITED;
 
    void InitializeBuiltins();
-   ModuleInterface *LoadModule(const PluginPath & path);
 
 private:
    friend ModuleInterfaceDeleter;
    friend std::default_delete<ModuleManager>;
    static std::unique_ptr<ModuleManager> mInstance;
 
-   ModuleMainMap mModuleMains;
+   // Module objects, also called Providers, can each report availability of any
+   // number of Plug-Ins identified by "paths", and are also factories of
+   // ComponentInterface objects for each path:
    ModuleMap mDynModules;
-   LibraryMap mLibs;
 
+   // Other libraries that receive notifications of events described by
+   // ModuleDispatchTypes:
    std::vector<std::unique_ptr<Module>> mModules;
 };
+
+// ----------------------------------------------------------------------------
+// The module entry point prototype (a factory of ModuleInterface objects)
+// ----------------------------------------------------------------------------
+using ModuleMain = ModuleInterface *(*)();
+
+AUDACITY_DLL_API
+void RegisterProvider(ModuleMain rtn);
+AUDACITY_DLL_API
+void UnregisterProvider(ModuleMain rtn);
+
+// Guarantee the registry exists before any registrations, so it will
+// be destroyed only after the un-registrations
+static struct Init{
+   Init() { RegisterProvider(nullptr); } } sInitBuiltinModules;
 
 #endif /* __AUDACITY_MODULEMANAGER_H__ */

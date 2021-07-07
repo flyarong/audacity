@@ -16,16 +16,22 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "DragCommand.h"
 
+#include "LoadCommands.h"
 #include "../Project.h"
-#include "../Track.h"
-#include "../TrackPanel.h"
 #include "../WaveTrack.h"
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "CommandContext.h"
+
+#include <wx/frame.h>
+
+const ComponentInterfaceSymbol DragCommand::Symbol
+{ XO("Drag") };
+
+namespace{ BuiltinCommandsModule::Registration< DragCommand > reg; }
 
 DragCommand::DragCommand()
 {
@@ -67,14 +73,14 @@ void DragCommand::PopulateOrExchange(ShuttleGui & S)
    S.StartMultiColumn(3, wxALIGN_CENTER);
    {
       /* i18n-hint abbreviates "Identity" or "Identifier" */
-      S.Optional( bHasId         ).TieNumericTextBox(  _("Id:"),          mId );
-      S.Optional( bHasWinName    ).TieTextBox(         _("Window Name:"), mWinName );
-      S.Optional( bHasFromX      ).TieNumericTextBox(  _("From X:"),      mFromX );
-      S.Optional( bHasFromY      ).TieNumericTextBox(  _("From Y:"),      mFromY );
-      S.Optional( bHasToX        ).TieNumericTextBox(  _("To X:"),        mToX );
-      S.Optional( bHasToY        ).TieNumericTextBox(  _("To Y:"),        mToY );
-      S.Optional( bHasRelativeTo ).TieChoice(          _("Relative To:"), mRelativeTo,
-         LocalizedStrings( kCoordTypeStrings, nCoordTypes ) );
+      S.Optional( bHasId         ).TieNumericTextBox(  XXO("Id:"),          mId );
+      S.Optional( bHasWinName    ).TieTextBox(         XXO("Window Name:"), mWinName );
+      S.Optional( bHasFromX      ).TieNumericTextBox(  XXO("From X:"),      mFromX );
+      S.Optional( bHasFromY      ).TieNumericTextBox(  XXO("From Y:"),      mFromY );
+      S.Optional( bHasToX        ).TieNumericTextBox(  XXO("To X:"),        mToX );
+      S.Optional( bHasToY        ).TieNumericTextBox(  XXO("To Y:"),        mToY );
+      S.Optional( bHasRelativeTo ).TieChoice(          XXO("Relative To:"), mRelativeTo,
+         Msgids( kCoordTypeStrings, nCoordTypes ) );
    }
    S.EndMultiColumn();
 }
@@ -91,7 +97,7 @@ bool DragCommand::Apply(const CommandContext & context)
    if( !bHasToY )
       mToY = 10;
 
-   wxWindow * pWin = context.GetProject();
+   wxWindow * pWin = &GetProjectFrame( context.project );
    wxWindow * pWin1 = nullptr;
    wxMouseEvent Evt( wxEVT_MOTION );
    Evt.m_x = mFromX;

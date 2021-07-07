@@ -35,31 +35,17 @@
 **		long int lrint  (double x) ;
 */
 
-#include "Audacity.h" // for HAVE_LRINT, HAVE_LRINTF
+
 
 /*	The presence of the required functions are detected during the configure
 **	process and the values HAVE_LRINT and HAVE_LRINTF are set accordingly in
 **	the config.h file.
 */
-
-#if (HAVE_LRINT && HAVE_LRINTF)
-
-	/*	These defines enable functionality introduced with the 1999 ISO C
-	**	standard. They must be defined before the inclusion of math.h to
-	**	engage them. If optimisation is enabled, these functions will be
-	**	inlined. With optimisation switched off, you have to link in the
-	**	maths library using -lm.
-	*/
-
-	#define	_ISOC9X_SOURCE 1
-	#define  _ISOC99_SOURCE 1
-
-	#define	__USE_ISOC9X   1
-	#define	__USE_ISOC99   1
-
-	#include	<math.h>
-
-#elif (defined (WIN32) || defined (_WIN32))
+#if (defined (WIN32) || defined (_WIN32)) && defined(_MSC_VER) && defined(_M_IX86)
+	// As of Visual Studio 2019 16.9, these functions have been made intrinsic and the build
+	// will fail. Unfortunately, the intrinsic versions run a LOT slower than the ones
+   // below, so force the compiler to use ours instead.
+	#pragma function( lrint, lrintf )
 
    // Including math.h allows us to use the inline assembler versions without
    // producing errors in newer Visual Studio versions.
@@ -120,7 +106,33 @@
 
 		return intgr ;
 	}
+#elif (defined (WIN32) || defined (_WIN32)) && defined(_M_3X64)
 
+	#include <math.h>
+	#include <immintrin.h>
+
+	__inline long int
+	lrintf (float flt)
+	{
+		return _mm_cvt_ss2si(_mm_set_ss(flt));
+	}
+
+#elif (HAVE_LRINT && HAVE_LRINTF)
+
+	/*	These defines enable functionality introduced with the 1999 ISO C
+	**	standard. They must be defined before the inclusion of math.h to
+	**	engage them. If optimisation is enabled, these functions will be
+	**	inlined. With optimisation switched off, you have to link in the
+	**	maths library using -lm.
+	*/
+
+	#define	_ISOC9X_SOURCE 1
+	#define  _ISOC99_SOURCE 1
+
+	#define	__USE_ISOC9X   1
+	#define	__USE_ISOC99   1
+
+	#include	<math.h>
 #else
 
    /* dmazzoni: modified these to do a proper rounding, even though

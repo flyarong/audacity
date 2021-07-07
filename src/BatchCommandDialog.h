@@ -21,12 +21,13 @@ class wxTextCtrl;
 class wxListCtrl;
 class wxListEvent;
 class wxButton;
+class AudacityProject;
 class ShuttleGui;
 
 class MacroCommandDialog final : public wxDialogWrapper {
  public:
    // constructors and destructors
-   MacroCommandDialog(wxWindow *parent, wxWindowID id);
+   MacroCommandDialog(wxWindow *parent, wxWindowID id, AudacityProject &project);
    void SetCommandAndParams(const CommandID &Command, const wxString &Params);
  public:
    CommandID   mSelectedCommand;
@@ -41,7 +42,7 @@ class MacroCommandDialog final : public wxDialogWrapper {
    void OnCancel(wxCommandEvent &event);
    void OnHelp(wxCommandEvent &event);
    void OnItemSelected(wxListEvent &event);
-   wxString GetHelpPageName() { return wxT("Scripting Reference") ; }
+   ManualPageID GetHelpPageName() { return L"Scripting Reference" ; }
 
    void ValidateChoices();
    void PopulateCommandList();

@@ -13,119 +13,35 @@
 modelled on BuiltinEffectsModule
 *****************************************************************************/
 
-#include "../Audacity.h"
+
 #include "LoadCommands.h"
+#include "AudacityCommand.h"
+#include "ModuleManager.h"
 
 #include "../Prefs.h"
 
-#include "../MemoryX.h"
+namespace {
+bool sInitialized = false;
+}
 
-#include "../effects/EffectManager.h"
-#include "Demo.h"
-#include "../commands/MessageCommand.h"
-#include "../commands/ScreenshotCommand.h"
-#include "../commands/CompareAudioCommand.h"
-#include "../commands/SetTrackInfoCommand.h"
-#include "../commands/GetTrackInfoCommand.h"
-#include "../commands/SelectCommand.h"
-#include "../commands/PreferenceCommands.h"
-#include "../commands/GetInfoCommand.h"
-#include "../commands/HelpCommand.h"
-#include "../commands/ImportExportCommands.h"
-#include "../commands/OpenSaveCommands.h"
-#include "../commands/SetLabelCommand.h"
-#include "../commands/SetEnvelopeCommand.h"
-#include "../commands/SetClipCommand.h"
-#include "../commands/SetProjectCommand.h"
-#include "../commands/DragCommand.h"
+struct BuiltinCommandsModule::Entry {
+   ComponentInterfaceSymbol name;
+   Factory factory;
 
-//
-// Define the list of COMMANDs that will be autoregistered and how to instantiate each
-//
-#define COMMAND_LIST \
-   COMMAND( DEMO,                DemoCommand, () )             \
-   COMMAND( MESSAGE,             MessageCommand,   () )        \
-   COMMAND( SCREENSHOT,          ScreenshotCommand,   () )     \
-   COMMAND( DRAG,                DragCommand, () )             \
-   COMMAND( COMPARE_AUDIO,       CompareAudioCommand, () )     \
-   COMMAND( SET_TRACK,           SetTrackCommand, () )         \
-   COMMAND( SET_TRACK_STATUS,    SetTrackStatusCommand, () )   \
-   COMMAND( SET_TRACK_AUDIO,     SetTrackAudioCommand, () )    \
-   COMMAND( SET_TRACK_VISUALS,   SetTrackVisualsCommand, () )  \
-   COMMAND( SET_ENVELOPE,        SetEnvelopeCommand, () )      \
-   COMMAND( SET_CLIP,            SetClipCommand, () )          \
-   COMMAND( SET_LABEL,           SetLabelCommand, () )         \
-   COMMAND( SET_PROJECT,         SetProjectCommand, () )       \
-   COMMAND( SELECT,              SelectCommand, () )           \
-   COMMAND( SELECT_TIME,         SelectTimeCommand, () )       \
-   COMMAND( SELECT_FREQUENCIES,  SelectFrequenciesCommand, () )\
-   COMMAND( SELECT_TRACKS,       SelectTracksCommand, () )     \
-   COMMAND( GET_PREFERENCE,      GetPreferenceCommand, () )    \
-   COMMAND( SET_PREFERENCE,      SetPreferenceCommand, () )    \
-   COMMAND( GET_INFO,            GetInfoCommand, () )          \
-   COMMAND( HELP,                HelpCommand, () )             \
-   COMMAND( IMPORT,              ImportCommand, () )           \
-   COMMAND( EXPORT,              ExportCommand, () )           \
-   COMMAND( OPEN_PROJECT,        OpenProjectCommand, () )      \
-   COMMAND( SAVE_PROJECT,        SaveProjectCommand, () )      \
-
-   // GET_TRACK_INFO subsumed by GET_INFO
-   //COMMAND( GET_TRACK_INFO,    GetTrackInfoCommand, () )   
-   // SELECT_TIME and SELECT_TRACKS subsumed by SELECT
-   //COMMAND( SELECT_TIME,       SelectTimeCommand, () )     
-   //COMMAND( SELECT_TRACKS,     SelectTracksCommand, () )   
-
-
-//
-// Define the list of COMMANDs that do not get autoregistered
-//
-#define EXCLUDE_LIST \
-
-
-//
-// Define the COMMAND() macro to generate enum names
-//
-#define COMMAND(n, i, args) ENUM_ ## n,
-
-//
-// Create the enum for the list of COMMANDs (will be used in a switch statement)
-//
-enum
-{
-   COMMAND_LIST
-   EXCLUDE_LIST
+   using Entries = std::vector< Entry >;
+   static Entries &Registry()
+   {
+      static Entries result;
+      return result;
+   }
 };
 
-//
-// Redefine COMMAND() to add the COMMAND's name to an array
-//
-#undef COMMAND
-#define COMMAND(n, i, args) results.push_back( (n ## _PLUGIN_SYMBOL).Internal() );
-
-//
-// Create the COMMAND name array
-//
-static const std::vector<wxString> kCOMMANDNames()
+void BuiltinCommandsModule::DoRegistration(
+   const ComponentInterfaceSymbol &name, const Factory &factory )
 {
-   std::vector<wxString> results;
-   COMMAND_LIST;
-   return results;
-};
-
-/*
-//
-// Create the COMMAND name array of excluded COMMANDs
-//
-static const wxChar *kExcludedNames[] =
-{
-   EXCLUDE_LIST
-};
-*/
-//
-// Redefine COMMAND() to generate a case statement for the lookup switch
-//
-#undef COMMAND
-#define COMMAND(n, i, args) case ENUM_ ## n: return std::make_unique<i> args;
+   wxASSERT( !sInitialized );
+   Entry::Registry().emplace_back( Entry{ name, factory } );
+}
 
 // ============================================================================
 // Module registration entry point
@@ -140,7 +56,7 @@ DECLARE_MODULE_ENTRY(AudacityModule)
 {
    // Create and register the importer
    // Trust the module manager not to leak this
-   return safenew BuiltinCommandsModule(moduleManager, path);
+   return safenew BuiltinCommandsModule();
 }
 
 // ============================================================================
@@ -154,19 +70,12 @@ DECLARE_BUILTIN_MODULE(BuiltinsCommandBuiltin);
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-BuiltinCommandsModule::BuiltinCommandsModule(ModuleManagerInterface *moduleManager,
-                                           const wxString *path)
+BuiltinCommandsModule::BuiltinCommandsModule()
 {
-   mModMan = moduleManager;
-   if (path)
-   {
-      mPath = *path;
-   }
 }
 
 BuiltinCommandsModule::~BuiltinCommandsModule()
 {
-   mPath.clear();
 }
 
 // ============================================================================
@@ -175,7 +84,7 @@ BuiltinCommandsModule::~BuiltinCommandsModule()
 
 PluginPath BuiltinCommandsModule::GetPath()
 {
-   return mPath;
+   return {};
 }
 
 ComponentInterfaceSymbol BuiltinCommandsModule::GetSymbol()
@@ -194,9 +103,9 @@ wxString BuiltinCommandsModule::GetVersion()
    return AUDACITY_VERSION_STRING;
 }
 
-wxString BuiltinCommandsModule::GetDescription()
+TranslatableString BuiltinCommandsModule::GetDescription()
 {
-   return _("Provides builtin commands to Audacity");
+   return XO("Provides builtin commands to Audacity");
 }
 
 // ============================================================================
@@ -205,20 +114,12 @@ wxString BuiltinCommandsModule::GetDescription()
 
 bool BuiltinCommandsModule::Initialize()
 {
-   const auto &names = kCOMMANDNames();
-   for (const auto &name : names)
-   {
-      //wxLogDebug("Adding %s", name );
-      mNames.push_back(wxString(BUILTIN_GENERIC_COMMAND_PREFIX) + name);
+   for ( const auto &entry : Entry::Registry() ) {
+      auto path = wxString(BUILTIN_GENERIC_COMMAND_PREFIX)
+         + entry.name.Internal();
+      mCommands[ path ] = &entry;
    }
-
-/*
-   for (size_t i = 0; i < WXSIZEOF(kExcludedNames); i++)
-   {
-      mNames.push_back(wxString(BUILTIN_COMMAND_PREFIX) + kExcludedNames[i]);
-   }
-*/
-
+   sInitialized = true;
    return true;
 }
 
@@ -228,15 +129,25 @@ void BuiltinCommandsModule::Terminate()
    return;
 }
 
+EffectFamilySymbol BuiltinCommandsModule::GetOptionalFamilySymbol()
+{
+   // Commands are not enabled and disabled in EffectsPrefs
+   return {};
+}
+
+const FileExtensions &BuiltinCommandsModule::GetFileExtensions()
+{
+   static FileExtensions empty;
+   return empty;
+}
+
 bool BuiltinCommandsModule::AutoRegisterPlugins(PluginManagerInterface & pm)
 {
-   wxString ignoredErrMsg;
-   const auto &names = kCOMMANDNames();
-   for (const auto &name : names)
+   TranslatableString ignoredErrMsg;
+   for (const auto &pair : mCommands)
    {
-      wxString path(wxString(BUILTIN_GENERIC_COMMAND_PREFIX) + name);
-
-      if (!pm.IsPluginRegistered(path))
+      const auto &path = pair.first;
+      if (!pm.IsPluginRegistered(path, &pair.second->name.Msgid()))
       {
          // No checking of error ?
          // Uses Generic Registration, not Default.
@@ -252,14 +163,17 @@ bool BuiltinCommandsModule::AutoRegisterPlugins(PluginManagerInterface & pm)
 
 PluginPaths BuiltinCommandsModule::FindPluginPaths(PluginManagerInterface & WXUNUSED(pm))
 {
-   return mNames;
+   PluginPaths names;
+   for ( const auto &pair : mCommands )
+      names.push_back( pair.first );
+   return names;
 }
 
 unsigned BuiltinCommandsModule::DiscoverPluginsAtPath(
-   const PluginPath & path, wxString &errMsg,
+   const PluginPath & path, TranslatableString &errMsg,
    const RegistrationCallback &callback)
 {
-   errMsg.clear();
+   errMsg = {};
    auto Command = Instantiate(path);
    if (Command)
    {
@@ -269,7 +183,7 @@ unsigned BuiltinCommandsModule::DiscoverPluginsAtPath(
       return 1;
    }
 
-   errMsg = _("Unknown built-in command name");
+   errMsg = XO("Unknown built-in command name");
    return 0;
 }
 
@@ -277,22 +191,14 @@ bool BuiltinCommandsModule::IsPluginValid(const PluginPath & path, bool bFast)
 {
    // bFast is unused as checking in the list is fast.
    static_cast<void>(bFast); // avoid unused variable warning
-   return make_iterator_range( mNames ).contains( path );
+   return mCommands.find( path ) != mCommands.end();
 }
 
-ComponentInterface *BuiltinCommandsModule::CreateInstance(const PluginPath & path)
+std::unique_ptr<ComponentInterface>
+BuiltinCommandsModule::CreateInstance(const PluginPath & path)
 {
    // Acquires a resource for the application.
-   // Safety of this depends on complementary calls to DeleteInstance on the module manager side.
-   return Instantiate(path).release();
-}
-
-void BuiltinCommandsModule::DeleteInstance(ComponentInterface *instance)
-{
-   // Releases the resource.
-   std::unique_ptr < AudacityCommand > {
-      dynamic_cast<AudacityCommand *>(instance)
-   };
+   return Instantiate(path);
 }
 
 // ============================================================================
@@ -302,14 +208,10 @@ void BuiltinCommandsModule::DeleteInstance(ComponentInterface *instance)
 std::unique_ptr<AudacityCommand> BuiltinCommandsModule::Instantiate(const PluginPath & path)
 {
    wxASSERT(path.StartsWith(BUILTIN_GENERIC_COMMAND_PREFIX));
-   auto index = make_iterator_range( mNames ).index( path );
-   wxASSERT( index != wxNOT_FOUND );
+   auto iter = mCommands.find( path );
+   if ( iter != mCommands.end() )
+      return iter->second->factory();
 
-   switch ( index )
-   {
-      COMMAND_LIST;
-      EXCLUDE_LIST;
-   }
-
+   wxASSERT( false );
    return nullptr;
 }

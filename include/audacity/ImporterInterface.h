@@ -42,7 +42,7 @@
 #ifndef __AUDACITY_IMPORTERINTERFACE_H__
 #define __AUDACITY_IMPORTERINTERFACE_H__
 
-#include "audacity/Types.h"
+#include "Identifier.h"
 #include "audacity/ConfigInterface.h"
 #include "audacity/ComponentInterface.h"
 
@@ -67,13 +67,13 @@ public:
 
    // Get a description of the file type this importer can import.
    // Examples: "Ogg Vorbis", "MP3", "Uncompressed PCM"
-   virtual wxString GetPluginFormatDescription() = 0;
+   virtual TranslatableString GetPluginFormatDescription() = 0;
 
    // Get a list of extensions this plugin expects to be able to
    // import.  If a filename matches any of these extensions,
    // this importer will get first dibs on importing it.
    virtual FileExtensions GetSupportedExtensions() = 0;
-   virtual bool SupportsExtension(const wxString & extension) = 0;
+   virtual bool SupportsExtension(const FileExtension & extension) = 0;
 
    // Create the client that will be used to import a file.
    virtual ImporterClientInterface *CreateClient() = 0;
@@ -119,7 +119,7 @@ class ImporterClientInterface
 public:
    virtual ~ImporterClientInterface() {};
 
-   // Provides a pointer to the assocated host for this importer.
+   // Provides a pointer to the associated host for this importer.
    virtual void SetHost(ImporterHostInterface *host) = 0;
 
    // Open the given file, returning true if it is a recognized
@@ -134,7 +134,7 @@ public:
    // This is similar to GetImporterDescription, but if possible the
    // importer will return a more specific description of the
    // specific file that is open.
-   virtual wxString GetFileDescription() = 0;
+   virtual TranslatableString GetFileDescription() = 0;
 
    // Return stream descriptions list
    virtual void GetStreamInfo(wxArrayString & streamInfo) = 0;
@@ -143,7 +143,7 @@ public:
    virtual void SetStreamUsage(int streamID, bool use) = 0;
 
    // do the actual import, creating whatever tracks are necessary with
-   // the TrackFactory and calling the progress callback every iteration
+   // the WaveTrackFactory and calling the progress callback every iteration
    // through the importing loop
    virtual bool Import() = 0;
 };

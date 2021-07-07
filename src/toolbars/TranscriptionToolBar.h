@@ -13,15 +13,11 @@
 #ifndef __AUDACITY_TRANSCRIPTION_TOOLBAR__
 #define __AUDACITY_TRANSCRIPTION_TOOLBAR__
 
-#include "../Experimental.h"
-
 #include "ToolBar.h"
 
-#include "../MemoryX.h"
 #include <wx/brush.h> // member variable
 
-#include "audacity/Types.h"
-#include "../Theme.h"
+#include "Identifier.h"
 
 class wxChoice;
 class wxCommandEvent;
@@ -30,7 +26,8 @@ class wxKeyEvent;
 
 class AButton;
 class ASlider;
-class TimeTrack;
+class AudacityProject;
+class BoundedEnvelope;
 class WaveTrack;
 
 #ifdef EXPERIMENTAL_VOICE_DETECTION
@@ -66,8 +63,11 @@ class TranscriptionToolBar final : public ToolBar {
 
  public:
 
-   TranscriptionToolBar();
+   TranscriptionToolBar( AudacityProject &project );
    virtual ~TranscriptionToolBar();
+
+   static TranscriptionToolBar &Get( AudacityProject &project );
+   static const TranscriptionToolBar &Get( const AudacityProject &project );
 
    void Create(wxWindow *parent) override;
 
@@ -100,7 +100,6 @@ class TranscriptionToolBar final : public ToolBar {
    //void Populate() override;
    //void Repaint(wxDC * WXUNUSED(dc)) override {}
    //void EnableDisableButtons() override;
-   //void UpdatePrefs() override;
 
    //void OnFocus(wxFocusEvent &event);
    //void OnCaptureKey(wxCommandEvent &event);
@@ -120,12 +119,12 @@ class TranscriptionToolBar final : public ToolBar {
 
  private:
 
-   void InitializeTranscriptionToolBar();
+   void SetPlaySpeed( double value );
    static AButton *AddButton(
       TranscriptionToolBar *pBar,
       teBmps eFore, teBmps eDisabled,
       int id,
-      const wxChar *label);
+      const TranslatableString &label);
    void MakeAlternateImages(
       teBmps eFore, teBmps eDisabled,
       int id, unsigned altIdx);
@@ -151,7 +150,7 @@ class TranscriptionToolBar final : public ToolBar {
    int mBackgroundWidth;
    int mBackgroundHeight;
 
-   std::shared_ptr<TimeTrack> mTimeTrack;
+   std::shared_ptr<BoundedEnvelope> mEnvelope;
 
  public:
 

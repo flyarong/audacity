@@ -37,9 +37,6 @@ Some of these methods have been overridden only because they used the unsafe wxL
 #define __AUDACITY_ODPCMALIASBLOCKFILE__
 
 #include "PCMAliasBlockFile.h"
-#include "../BlockFile.h"
-#include "../ondemand/ODTaskThread.h"
-#include "../DirManager.h"
 
 /// An AliasBlockFile that references uncompressed data in an existing file
 class ODPCMAliasBlockFile final : public PCMAliasBlockFile
@@ -61,7 +58,7 @@ class ODPCMAliasBlockFile final : public PCMAliasBlockFile
    /// Returns TRUE if the summary has not yet been written, but is actively being computed and written to disk
    bool IsSummaryBeingComputed() override { return mSummaryBeingComputed; }
 
-   //Calls that rely on summary files need to be overidden
+   //Calls that rely on summary files need to be overridden
    DiskByteCount GetSpaceUsage() const override;
    /// Gets extreme values for the specified region
    MinMaxRMS GetMinMaxRMS(
@@ -113,7 +110,7 @@ class ODPCMAliasBlockFile final : public PCMAliasBlockFile
    sampleCount GetGlobalEnd() const {return mClipOffset+mStart+GetLength();}
 
 
-   //Below calls are overrided just so we can take wxlog calls out, which are not threadsafe.
+   //Below calls are overridden just so we can take wxlog calls out, which are not threadsafe.
 
    /// Reads the specified data from the aliased file using libsndfile
    size_t ReadData(samplePtr data, sampleFormat format,

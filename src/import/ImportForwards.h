@@ -10,13 +10,13 @@
 #define __AUDACITY_IMPORT_FORWARDS__
 
 #include <vector>
-#include "../MemoryX.h"
+#include <memory>
 
 class ImportPlugin;
 class UnusableImportPlugin;
 
 using ImportPluginList =
-   std::vector< std::unique_ptr<ImportPlugin> >;
+   std::vector< ImportPlugin * >;
 using UnusableImportPluginList =
    std::vector< std::unique_ptr<UnusableImportPlugin> >;
 

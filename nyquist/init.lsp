@@ -1,4 +1,6 @@
 ; init.lsp -- default Nyquist startup file
+
+(setf *breakenable* t)
 (load "nyinit.lsp" :verbose nil)
 
 ; add your customizations here:
@@ -65,14 +67,22 @@
     (setf info (aud-do (format nil "GetInfo: type=~a format=LISP" type)))
     (if (not (last info))
         (error (format nil "(aud-get-info ~a) failed.~%" str)))
-    (let ((info-string (first info)))
-      (eval-string (quote-string info-string)))))
+    (let* ((info-string (first info))
+           (sanitized ""))
+      ;; Escape backslashes
+      (dotimes (i (length info-string))
+        (setf ch (subseq info-string i (1+ i)))
+        (if (string= ch "\\")
+            (string-append sanitized "\\\\")
+            (string-append sanitized ch)))
+      (eval-string (quote-string sanitized)))))
 
 
-;;; Path to Nyquist .lsp files.
-(setf *NYQ-PATH* (current-path))
+;;; *NYQ-PATH* is not required as path to Nyquist .lsp files
+;;; is already defined (but not previously documented) as *runtime-path*
+;;(setf *NYQ-PATH* (current-path))
 
 ;;; Load wrapper functions for aud-do commands.
 ;;; If commented out, "aud-do-support.lsp" may be loaded by a plug-in.
-;;; Example: (lisp-loader (strcat *NYQ-PATH* "aud-do-support.lsp"))
-(load "aud-do-support.lsp")
+;;; Example: (lisp-loader (strcat *runtime-path* "aud-do-support.lsp"))
+(load "aud-do-support.lsp" :verbose nil)

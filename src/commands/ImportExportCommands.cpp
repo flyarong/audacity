@@ -14,15 +14,24 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "ImportExportCommands.h"
 
-#include "../Project.h"
-#include "../Track.h"
+#include "LoadCommands.h"
+#include "../ProjectFileManager.h"
+#include "../ViewInfo.h"
 #include "../export/Export.h"
+#include "../SelectUtilities.h"
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
+#include "../Track.h"
+#include "../wxFileNameWrapper.h"
 #include "CommandContext.h"
+
+const ComponentInterfaceSymbol ImportCommand::Symbol
+{ XO("Import2") };
+
+namespace{ BuiltinCommandsModule::Registration< ImportCommand > reg; }
 
 bool ImportCommand::DefineParams( ShuttleParams & S ){
    S.Define( mFileName, wxT("Filename"),  "" );
@@ -35,22 +44,39 @@ void ImportCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieTextBox(_("File Name:"),mFileName);
+      S.TieTextBox(XXO("File Name:"),mFileName);
    }
    S.EndMultiColumn();
 }
 
-bool ImportCommand::Apply(const CommandContext & context){
-   return context.GetProject()->Import(mFileName);
+bool ImportCommand::Apply(const CommandContext & context)
+{
+   bool wasEmpty = TrackList::Get( context.project ).Any().empty();
+   bool success = ProjectFileManager::Get( context.project )
+      .Import(mFileName, false);
+
+   if (success && wasEmpty)
+   {
+      SelectUtilities::SelectAllIfNone( context.project );
+   }
+
+   return success;
 }
 
 
 
 bool ExportCommand::DefineParams( ShuttleParams & S ){
-   S.Define( mFileName, wxT("Filename"),  "exported.wav" );
+   wxFileName fn = FileNames::FindDefaultPath(FileNames::Operation::Export);
+   fn.SetName("exported.wav");
+   S.Define(mFileName, wxT("Filename"), fn.GetFullPath());
    S.Define( mnChannels, wxT("NumChannels"),  1 );
    return true;
 }
+
+const ComponentInterfaceSymbol ExportCommand::Symbol
+{ XO("Export2") };
+
+namespace{ BuiltinCommandsModule::Registration< ExportCommand > reg2; }
 
 void ExportCommand::PopulateOrExchange(ShuttleGui & S)
 {
@@ -58,8 +84,8 @@ void ExportCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieTextBox(_("File Name:"),mFileName);
-      S.TieTextBox(_("Number of Channels:"),mnChannels);
+      S.TieTextBox(XXO("File Name:"),mFileName);
+      S.TieTextBox(XXO("Number of Channels:"),mnChannels);
    }
    S.EndMultiColumn();
 }
@@ -67,8 +93,9 @@ void ExportCommand::PopulateOrExchange(ShuttleGui & S)
 bool ExportCommand::Apply(const CommandContext & context)
 {
    double t0, t1;
-   t0 = context.GetProject()->mViewInfo.selectedRegion.t0();
-   t1 = context.GetProject()->mViewInfo.selectedRegion.t1();
+   auto &selectedRegion = ViewInfo::Get( context.project ).selectedRegion;
+   t0 = selectedRegion.t0();
+   t1 = selectedRegion.t1();
 
    // Find the extension and check it's valid
    int splitAt = mFileName.Find(wxUniChar('.'), true);
@@ -79,10 +106,9 @@ bool ExportCommand::Apply(const CommandContext & context)
    }
    wxString extension = mFileName.Mid(splitAt+1).MakeUpper();
 
-   Exporter exporter;
+   Exporter exporter{ context.project };
 
-   bool exportSuccess = exporter.Process(context.GetProject(),
-                                         std::max(0, mnChannels),
+   bool exportSuccess = exporter.Process(std::max(0, mnChannels),
                                          extension, mFileName,
                                          true, t0, t1);
 

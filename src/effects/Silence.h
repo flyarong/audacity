@@ -13,23 +13,23 @@
 #ifndef __AUDACITY_EFFECT_SILENCE__
 #define __AUDACITY_EFFECT_SILENCE__
 
-#include "../widgets/NumericTextCtrl.h"
-
 #include "Generator.h"
 
-#define SILENCE_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Silence") }
+class NumericTextCtrl;
 
 class EffectSilence final : public Generator
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectSilence();
    virtual ~EffectSilence();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

@@ -10,7 +10,7 @@
 
 \class Registrar
 \brief Base class for registration callback.
-Audcaity will call providers RegisterNameOfThing() functions with 
+Audacity will call providers RegisterNameOfThing() functions with
 an &Registrar as the argument.  RegisterNameOfThing() is then 
 responsible for calling the appropriate callback functions.
 
@@ -20,10 +20,11 @@ responsible for calling the appropriate callback functions.
 #ifndef __AUDACITY_REGISTRAR__
 #define __AUDACITY_REGISTRAR__
 
-#include "Audacity.h"
 
-#include "MemoryX.h"
 
+#include <memory>
+
+class AudacityCommand;
 class LoadableModule;
 class ComponentInterface;
 class Effect;

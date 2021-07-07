@@ -9,16 +9,26 @@
 #ifndef __AUDACITY_SELECTION_STATE__
 #define __AUDACITY_SELECTION_STATE__
 
+class AudacityProject;
 class Track;
 class TrackList;
 class ViewInfo;
-#include "MemoryX.h"
+#include "ClientData.h"
+#include <memory>
 #include <vector>
 
 // State relating to the set of selected tracks
-class SelectionState
+class AUDACITY_DLL_API SelectionState final
+   : public ClientData::Base
 {
 public:
+   SelectionState() = default;
+   SelectionState( const SelectionState & ) PROHIBITED;
+   SelectionState &operator=( const SelectionState & ) PROHIBITED;
+
+   static SelectionState &Get( AudacityProject &project );
+   static const SelectionState &Get( const AudacityProject &project );
+
    static void SelectTrackLength
       ( ViewInfo &viewInfo, Track &track, bool syncLocked );
 
@@ -42,7 +52,7 @@ private:
 
 // For committing or rolling-back of changes in selectedness of tracks.
 // When rolling back, it is assumed that no tracks have been added or removed.
-class SelectionStateChanger
+class AUDACITY_DLL_API SelectionStateChanger
 {
 public:
    SelectionStateChanger( SelectionState &state, TrackList &tracks );

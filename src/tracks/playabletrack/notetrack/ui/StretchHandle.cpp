@@ -8,17 +8,23 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../../../Audacity.h" // for USE_* macros
+
 
 #ifdef USE_MIDI
+#include "../lib-src/header-substitutes/allegro.h"
+
 #include "StretchHandle.h"
 
+#include "../../../ui/CommonTrackPanelCell.h"
 #include "../../../../HitTestResult.h"
 #include "../../../../NoteTrack.h"
-#include "../../../../Project.h"
+#include "../../../../ProjectAudioIO.h"
+#include "../../../../ProjectHistory.h"
+#include "../../../../ProjectSettings.h"
 #include "../../../../RefreshCode.h"
 #include "../../../../TrackPanelMouseEvent.h"
 #include "../../../../UndoManager.h"
+#include "../../../../ViewInfo.h"
 #include "../../../../../images/Cursors.h"
 
 #include <algorithm>
@@ -41,7 +47,7 @@ HitTestPreview StretchHandle::HitPreview( StretchEnum stretchMode, bool unsafe )
       ::MakeCursor(wxCURSOR_BULLSEYE, StretchCursorXpm, 16, 16);
 
    if (unsafe) {
-      return { wxT(""), &*disabledCursor };
+      return { {}, &*disabledCursor };
    }
    else {
       wxCursor *pCursor = NULL;
@@ -56,7 +62,7 @@ HitTestPreview StretchHandle::HitPreview( StretchEnum stretchMode, bool unsafe )
          pCursor = &*stretchRightCursor; break;
       }
       return {
-         _("Click and drag to stretch selected region."),
+         XO("Click and drag to stretch selected region."),
          pCursor
       };
    }
@@ -73,7 +79,7 @@ UIHandlePtr StretchHandle::HitTest
    // later, we may want a different policy, but for now, stretch is
    // selected when the cursor is near the center of the track and
    // within the selection
-   const ViewInfo &viewInfo = pProject->GetViewInfo();
+   auto &viewInfo = ViewInfo::Get( *pProject );
 
    if (!pTrack || !pTrack->GetSelected())
       return {};
@@ -153,7 +159,7 @@ UIHandle::Result StretchHandle::Click
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
    using namespace RefreshCode;
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if ( unsafe )
       return Cancelled;
 
@@ -166,7 +172,7 @@ UIHandle::Result StretchHandle::Click
 
 
    mLeftEdge = evt.rect.GetLeft();
-   ViewInfo &viewInfo = pProject->GetViewInfo();
+   auto &viewInfo = ViewInfo::Get( *pProject );
 
    viewInfo.selectedRegion.setTimes
       ( mStretchState.mBeat0.first, mStretchState.mBeat1.first );
@@ -175,14 +181,14 @@ UIHandle::Result StretchHandle::Click
    // newly selected tracks. (I'm really not sure if the label area
    // needs to be refreshed or how to just refresh non-label areas.-RBD)
 
-   return RefreshAll | UpdateSelection;
+   return RefreshAll;
 }
 
 UIHandle::Result StretchHandle::Drag
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
    using namespace RefreshCode;
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if (unsafe) {
       this->Cancel(pProject);
       return RefreshAll | Cancelled;
@@ -203,9 +209,9 @@ UIHandle::Result StretchHandle::Drag
 }
 
 HitTestPreview StretchHandle::Preview
-(const TrackPanelMouseState &, const AudacityProject *pProject)
+(const TrackPanelMouseState &, AudacityProject *pProject)
 {
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    return HitPreview( mStretchState.mMode, unsafe );
 }
 
@@ -215,7 +221,7 @@ UIHandle::Result StretchHandle::Release
 {
    using namespace RefreshCode;
 
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if (unsafe) {
       this->Cancel(pProject);
       return RefreshAll | Cancelled;
@@ -223,8 +229,9 @@ UIHandle::Result StretchHandle::Release
 
    bool left = mStretchState.mMode == stretchLeft;
    bool right = mStretchState.mMode == stretchRight;
-   ViewInfo &viewInfo = pProject->GetViewInfo();
-   if ( pProject->IsSyncLocked() && ( left || right ) ) {
+   const auto &settings = ProjectSettings::Get( *pProject );
+   auto &viewInfo = ViewInfo::Get( *pProject );
+   if ( settings.IsSyncLocked() && ( left || right ) ) {
       for ( auto track :
            TrackList::SyncLockGroup( mpTrack.get() ) ) {
          if ( track != mpTrack.get() ) {
@@ -248,19 +255,19 @@ UIHandle::Result StretchHandle::Release
 
    /* i18n-hint: (noun) The track that is used for MIDI notes which can be
    dragged to change their duration.*/
-   pProject->PushState(_("Stretch Note Track"),
+   ProjectHistory::Get( *pProject ).PushState(XO("Stretch Note Track"),
       /* i18n-hint: In the history list, indicates a MIDI note has
       been dragged to change its duration (stretch it). Using either past
       or present tense is fine here.  If unsure, go for whichever is
       shorter.*/
-      _("Stretch"),
-      UndoPush::CONSOLIDATE | UndoPush::AUTOSAVE);
+      XO("Stretch"),
+      UndoPush::CONSOLIDATE);
    return RefreshAll;
 }
 
 UIHandle::Result StretchHandle::Cancel(AudacityProject *pProject)
 {
-   pProject->RollbackState();
+   ProjectHistory::Get( *pProject ).RollbackState();
    return RefreshCode::RefreshNone;
 }
 
@@ -277,7 +284,7 @@ double StretchHandle::GetT1(const Track &track, const ViewInfo &viewInfo)
 void StretchHandle::Stretch(AudacityProject *pProject, int mouseXCoordinate, int trackLeftEdge,
    Track *pTrack)
 {
-   ViewInfo &viewInfo = pProject->GetViewInfo();
+   auto &viewInfo = ViewInfo::Get( *pProject );
 
    if (pTrack == NULL && mpTrack != NULL)
       pTrack = mpTrack.get();

@@ -3,6 +3,8 @@ lower level fft stuff including routines called in fftext.c and fft2d.c
 *******************************************************************/
 /* inline declarations modified by RBD for C99 compiler */
 
+
+#include <stdint.h>
 #include "fftlib.h"
 #include <math.h>
 #define	MCACHE	(11-(sizeof(float)/8))	// fft's with M bigger than this bust primary cache
@@ -11,10 +13,10 @@ lower level fft stuff including routines called in fftext.c and fft2d.c
 #endif
 
 // some math constants to 40 decimal places
-#define MYPI		3.141592653589793238462643383279502884197	// pi
-#define MYROOT2 	1.414213562373095048801688724209698078569	// sqrt(2)
-#define MYCOSPID8	0.9238795325112867561281831893967882868224	// cos(pi/8)
-#define MYSINPID8	0.3826834323650897717284599840303988667613	// sin(pi/8)
+#define MYPI		3.141592653589793238462643383279502884197F	// pi
+#define MYROOT2 	1.414213562373095048801688724209698078569F	// sqrt(2)
+#define MYCOSPID8	0.9238795325112867561281831893967882868224F	// cos(pi/8)
+#define MYSINPID8	0.3826834323650897717284599840303988667613F	// sin(pi/8)
 
 
 /*************************************************
@@ -32,7 +34,7 @@ unsigned long fftN = POW2(M);
 unsigned long i1;
 	Utbl[0] = 1.0;
 	for (i1 = 1; i1 < fftN/4; i1++)
-		Utbl[i1] = cos( (2.0 * MYPI * i1) / fftN );
+		Utbl[i1] = (float) cos( (2.0 * MYPI * i1) / fftN );
 	Utbl[fftN/4] = 0.0;
 }
 
@@ -55,7 +57,7 @@ for (i1 = 0; i1 < Nroot_1; i1++){
 	for (bit=1; bit <= Mroot_1; bitmask<<=1, bit++)
 		if (i1 & bitmask)
 			bitsum = bitsum + (Nroot_1 >> bit);
-	BRLow[i1] = bitsum;
+	BRLow[i1] = (short) bitsum;
 };
 }
 
@@ -107,7 +109,7 @@ posB = posA + 2;
 posBi = posB + 1;
 
 iolimit = ioptr + Nrems2;
-for (; ioptr < iolimit; ioptr += POW2(M/2+1)){
+for (; ioptr < iolimit; ioptr += (int64_t) POW2(M/2+1)){
 	for (Colstart = Nroot_1; Colstart >= 0; Colstart--){
 		iCol = Nroot_1;
 		p0r = ioptr+ Nroot_1_ColInc + BRLow[Colstart]*4;
@@ -289,7 +291,7 @@ ioptr[7] = f3i;
 //inline void fft8pt(float *ioptr);
 static inline void fft8pt(float *ioptr){
 /***   RADIX 8 fft	***/
-float w0r = 1.0/MYROOT2; /* cos(pi/4)	*/
+float w0r = 1.0F/MYROOT2; /* cos(pi/4)	*/
 float f0r, f0i, f1r, f1i, f2r, f2i, f3r, f3i;
 float f4r, f4i, f5r, f5i, f6r, f6i, f7r, f7i;
 float t0r, t0i, t1r, t1i;
@@ -420,7 +422,7 @@ float 	*p0r, *p1r, *p2r, *p3r;
 
 float f0r, f0i, f1r, f1i, f2r, f2i, f3r, f3i;
 float f4r, f4i, f5r, f5i, f6r, f6i, f7r, f7i;
-const float Two = 2.0;
+/* UNUSED: const float Two = 2.0; */
 
 pinc = NDiffU * 2;		// 2 floats per complex
 pnext =  pinc * 4;
@@ -528,7 +530,7 @@ unsigned long 	SameUCnt;
 float	*pstrt;
 float 	*p0r, *p1r, *p2r, *p3r;
 
-float w1r = 1.0/MYROOT2; /* cos(pi/4)	*/
+float w1r = 1.0F/MYROOT2; /* cos(pi/4)	*/
 float f0r, f0i, f1r, f1i, f2r, f2i, f3r, f3i;
 float f4r, f4i, f5r, f5i, f6r, f6i, f7r, f7i;
 float t1r, t1i;
@@ -731,9 +733,9 @@ unsigned long	posi;
 unsigned long	pinc;
 unsigned long	pnext;
 unsigned long 	NSameU;
-unsigned long 	Uinc;
-unsigned long 	Uinc2;
-unsigned long 	Uinc4;
+long 	Uinc;
+long 	Uinc2;
+long 	Uinc4;
 unsigned long 	DiffUCnt;
 unsigned long 	SameUCnt;
 unsigned long 	U2toU3;
@@ -981,7 +983,7 @@ for (; StageCnt > 0 ; StageCnt--){
 		w1r =  *u1r;
 		w1i =  *u1i;
 
-		if (DiffUCnt <= NDiffU/2)
+		if ((long) DiffUCnt <= NDiffU/2)
 			w0r = -w0r;
 
 		t0r = f0r - f4r * w2r - f4i * w2i;
@@ -1171,7 +1173,7 @@ posB = posA + 2;
 posBi = posB + 1;
 
 iolimit = ioptr + Nrems2;
-for (; ioptr < iolimit; ioptr += POW2(M/2+1)){
+for (; ioptr < iolimit; ioptr += (int64_t) POW2(M/2+1)){
 	for (Colstart = Nroot_1; Colstart >= 0; Colstart--){
 		iCol = Nroot_1;
 		p0r = ioptr+ Nroot_1_ColInc + BRLow[Colstart]*4;
@@ -1352,7 +1354,7 @@ ioptr[7] = scale*f3i;
 //inline void ifft8pt(float *ioptr, float scale);
 static inline void ifft8pt(float *ioptr, float scale){
 /***   RADIX 8 ifft	***/
-float w0r = 1.0/MYROOT2; /* cos(pi/4)	*/
+float w0r = 1.0F/MYROOT2; /* cos(pi/4)	*/
 float f0r, f0i, f1r, f1i, f2r, f2i, f3r, f3i;
 float f4r, f4i, f5r, f5i, f6r, f6i, f7r, f7i;
 float t0r, t0i, t1r, t1i;
@@ -1484,7 +1486,7 @@ float 	*p0r, *p1r, *p2r, *p3r;
 
 float f0r, f0i, f1r, f1i, f2r, f2i, f3r, f3i;
 float f4r, f4i, f5r, f5i, f6r, f6i, f7r, f7i;
-const float Two = 2.0;
+/* UNUSED: const float Two = 2.0; */
 
 pinc = NDiffU * 2;		// 2 floats per complex
 pnext =  pinc * 4;
@@ -1592,7 +1594,7 @@ unsigned long 	SameUCnt;
 float	*pstrt;
 float 	*p0r, *p1r, *p2r, *p3r;
 
-float w1r = 1.0/MYROOT2; /* cos(pi/4)	*/
+float w1r = 1.0F/MYROOT2; /* cos(pi/4)	*/
 float f0r, f0i, f1r, f1i, f2r, f2i, f3r, f3i;
 float f4r, f4i, f5r, f5i, f6r, f6i, f7r, f7i;
 float t1r, t1i;
@@ -1795,9 +1797,9 @@ unsigned long	posi;
 unsigned long	pinc;
 unsigned long	pnext;
 unsigned long 	NSameU;
-unsigned long 	Uinc;
-unsigned long 	Uinc2;
-unsigned long 	Uinc4;
+long 	Uinc;
+long 	Uinc2;
+long 	Uinc4;
 unsigned long 	DiffUCnt;
 unsigned long 	SameUCnt;
 unsigned long 	U2toU3;
@@ -2048,7 +2050,7 @@ for (; StageCnt > 0 ; StageCnt--){
 		w1r =  *u1r;
 		w1i =  *u1i;
 
-		if (DiffUCnt <= NDiffU/2)
+		if ((long) DiffUCnt <= NDiffU/2)
 			w0r = -w0r;
 
 		t0r = f0r - f4r * w2r + f4i * w2i;
@@ -2138,7 +2140,7 @@ void iffts1(float *ioptr, long M, long Rows, float *Utbl, short *BRLow){
 
 long 	StageCnt;
 long 	NDiffU;
-const float scale = 1.0/POW2(M);
+const float scale = 1.0F/POW2(M);
 
 switch (M){
 case 0:
@@ -2252,7 +2254,7 @@ static inline void rfft4pt(float *ioptr){
 /***   RADIX 8 rfft	***/
 float f0r, f0i, f1r, f1i, f2r, f2i, f3r, f3i;
 float t0r, t0i, t1r, t1i;
-float w0r = 1.0/MYROOT2; /* cos(pi/4)	*/
+float w0r = 1.0F/MYROOT2; /* cos(pi/4)	*/
 const float Two = 2.0;
 const float scale = 0.5;
 
@@ -2323,7 +2325,7 @@ ioptr[7] = scale*f3i;
 //inline void rfft8pt(float *ioptr);
 static inline void rfft8pt(float *ioptr){
 /***   RADIX 16 rfft	***/
-float w0r = 1.0/MYROOT2; /* cos(pi/4)	*/
+float w0r = 1.0F/MYROOT2; /* cos(pi/4)	*/
 float w1r = MYCOSPID8; /* cos(pi/8)	*/
 float w1i = MYSINPID8; /* sin(pi/8)	*/
 float f0r, f0i, f1r, f1i, f2r, f2i, f3r, f3i;
@@ -2501,9 +2503,9 @@ posi = pos + 1;
 p0r = ioptr;
 p1r = ioptr + pos/2;
 
-u0r = Utbl + POW2(M-3);
+u0r = Utbl + (int) POW2(M-3);
 
-w0r =  *u0r,
+w0r =  *u0r;
 
 f0r = *(p0r);
 f0i = *(p0r + 1);
@@ -2541,7 +2543,7 @@ f5i = *(p1r + posi);
 u0r = Utbl + 1;
 u0i = Utbl + (POW2(M-2)-1);
 
-w0r =  *u0r,
+w0r =  *u0r;
 w0i =  *u0i;
 	
 p0r = (ioptr + 2);
@@ -2747,7 +2749,7 @@ static inline void rifft4pt(float *ioptr, float scale){
 /***   RADIX 8 rifft	***/
 float f0r, f0i, f1r, f1i, f2r, f2i, f3r, f3i;
 float t0r, t0i, t1r, t1i;
-float w0r = 1.0/MYROOT2; /* cos(pi/4)	*/
+float w0r = 1.0F/MYROOT2; /* cos(pi/4)	*/
 const float Two = 2.0;
 
 	/* bit reversed load */
@@ -2816,7 +2818,7 @@ ioptr[7] = scale*f3i;
 //inline void rifft8pt(float *ioptr, float scale);
 static inline void rifft8pt(float *ioptr, float scale){
 /***   RADIX 16 rifft	***/
-float w0r = 1.0/MYROOT2; /* cos(pi/4)	*/
+float w0r = 1.0F/MYROOT2; /* cos(pi/4)	*/
 float w1r = MYCOSPID8; /* cos(pi/8)	*/
 float w1i = MYSINPID8; /* sin(pi/8)	*/
 float f0r, f0i, f1r, f1i, f2r, f2i, f3r, f3i;
@@ -2992,9 +2994,9 @@ posi = pos + 1;
 p0r = ioptr;
 p1r = ioptr + pos/2;
 
-u0r = Utbl + POW2(M-3);
+u0r = Utbl + (int) POW2(M-3);
 
-w0r =  *u0r,
+w0r =  *u0r;
 
 f0r = *(p0r);
 f0i = *(p0r + 1);
@@ -3032,7 +3034,7 @@ f5i = *(p1r + posi);
 u0r = Utbl + 1;
 u0i = Utbl + (POW2(M-2)-1);
 
-w0r =  *u0r,
+w0r =  *u0r;
 w0i =  *u0i;
 	
 p0r = (ioptr + 2);
@@ -3113,7 +3115,7 @@ float	scale;
 long 	StageCnt;
 long 	NDiffU;
 
-scale = 1.0/POW2(M);
+scale = 1.0F/POW2(M);
 M=M-1;
 switch (M){
 case -1:

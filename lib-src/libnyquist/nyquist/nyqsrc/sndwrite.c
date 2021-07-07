@@ -375,7 +375,7 @@ cvtfn_type find_cvt_to_fn(snd_type snd, char *buf)
 sample_type sound_save_sound(LVAL s_as_lval, long n, snd_type snd,
                              char *buf, long *ntotal, snd_type player)
 {
-    long blocklen;
+    int blocklen;
     long buflen;
     sound_type s;
     long debug_unit;    /* print messages at intervals of this many samples */
@@ -459,7 +459,8 @@ sample_type sound_save_sound(LVAL s_as_lval, long n, snd_type snd,
             debug_count += debug_unit;
         }
     }
-    gprintf(TRANS, "\ntotal samples: %d\n", *ntotal);
+    gprintf(TRANS, "\ntotal samples: %d (%g seconds)\n",
+                   *ntotal, *ntotal / snd->format.srate);
     xlpop();
     return max_sample;
 }
@@ -624,8 +625,8 @@ D       nyquist_printf("save scale factor %d = %g\n", (int)i, state[i].scale);
             debug_count += debug_unit;
         }
     }
-    gprintf(TRANS, "total samples: %d x %d channels\n",
-           *ntotal, chans);
+    gprintf(TRANS, "total samples: %d x %d channels (%g seconds)\n",
+            *ntotal, chans, *ntotal / snd->format.srate);
 
     /* references to sounds are shared by sa_copy and state[].
      * here, we dispose of state[], allowing GC to do the
@@ -633,7 +634,7 @@ D       nyquist_printf("save scale factor %d = %g\n", (int)i, state[i].scale);
      * would be a bug.)
      */
     free(state);
-    xlpop();
+    xlpopn(2);
     return max_sample;
 }
 

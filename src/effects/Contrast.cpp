@@ -9,17 +9,22 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "Contrast.h"
 
+#include "../CommonCommandFlags.h"
 #include "../WaveTrack.h"
 #include "../Prefs.h"
 #include "../Project.h"
+#include "../ProjectFileIO.h"
+#include "../ProjectSettings.h"
+#include "../ProjectWindow.h"
 #include "../ShuttleGui.h"
 #include "../FileNames.h"
-#include "../widgets/LinkingHtmlWindow.h"
+#include "../ViewInfo.h"
 #include "../widgets/HelpSystem.h"
 #include "../widgets/NumericTextCtrl.h"
+#include "../widgets/AudacityMessageBox.h"
 #include "../widgets/ErrorDialog.h"
 
 #include <cmath>
@@ -31,9 +36,10 @@
 #endif
 
 #include <wx/button.h>
-#include <wx/filedlg.h>
 #include <wx/valtext.h>
 #include <wx/log.h>
+#include <wx/wfstream.h>
+#include <wx/txtstrm.h>
 
 #include "../PlatformCompatibility.h"
 
@@ -48,17 +54,25 @@ bool ContrastDialog::GetDB(float &dB)
    // For stereo tracks: sqrt((mean(L)+mean(R))/2)
    double meanSq = 0.0;
 
-   AudacityProject *p = GetActiveProject();
+   auto p = FindProjectFromWindow( this );
    auto range =
-      p->GetTracks()->SelectedLeaders< const WaveTrack >();
+      TrackList::Get( *p ).SelectedLeaders< const WaveTrack >();
    auto numberSelectedTracks = range.size();
    if (numberSelectedTracks > 1) {
-      AudacityMessageDialog m(NULL, _("You can only measure one track at a time."), _("Error"), wxOK);
+      AudacityMessageDialog m(
+         nullptr,
+         XO("You can only measure one track at a time."),
+         XO("Error"),
+         wxOK);
       m.ShowModal();
       return false;
    }
    if(numberSelectedTracks == 0) {
-      AudacityMessageDialog m(NULL, _("Please select an audio track."), _("Error"), wxOK);
+      AudacityMessageDialog m(
+         nullptr,
+         XO("Please select an audio track."),
+         XO("Error"),
+         wxOK);
       m.ShowModal();
       return false;
    }
@@ -78,14 +92,22 @@ bool ContrastDialog::GetDB(float &dB)
 
       if(SelT0 > SelT1)
       {
-         AudacityMessageDialog m(NULL, _("Invalid audio selection.\nPlease ensure that audio is selected."), _("Error"), wxOK);
+         AudacityMessageDialog m(
+            nullptr,
+            XO("Invalid audio selection.\nPlease ensure that audio is selected."),
+            XO("Error"),
+            wxOK);
          m.ShowModal();
          return false;
       }
 
       if(SelT0 == SelT1)
       {
-         AudacityMessageDialog m(NULL, _("Nothing to measure.\nPlease select a section of a track."), _("Error"), wxOK);
+         AudacityMessageDialog m(
+            nullptr,
+            XO("Nothing to measure.\nPlease select a section of a track."),
+            XO("Error"),
+            wxOK);
          m.ShowModal();
          return false;
       }
@@ -112,9 +134,10 @@ bool ContrastDialog::GetDB(float &dB)
 
 void ContrastDialog::SetStartAndEndTime()
 {
-   AudacityProject *p = GetActiveProject();
-   mT0 = p->mViewInfo.selectedRegion.t0();
-   mT1 = p->mViewInfo.selectedRegion.t1();
+   auto p = FindProjectFromWindow( this );
+   auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
+   mT0 = selectedRegion.t0();
+   mT1 = selectedRegion.t1();
 }
 
 
@@ -152,7 +175,7 @@ BEGIN_EVENT_TABLE(ContrastDialog,wxDialogWrapper)
    EVT_BUTTON(wxID_CANCEL, ContrastDialog::OnClose)
 END_EVENT_TABLE()
 
-static void OnChar(wxKeyEvent & event)
+void ContrastDialog::OnChar(wxKeyEvent &event)
 {
    // Is this still required?
    if (event.GetKeyCode() == WXK_TAB) {
@@ -166,14 +189,13 @@ static void OnChar(wxKeyEvent & event)
    return;
 }
 
-/* i18n-hint: WCAG2 is the 'Web Content Accessibility Guidelines (WCAG) 2.0', see http://www.w3.org/TR/WCAG20/ */
 ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
-                           const wxString & title,
+                           const TranslatableString & title,
                            const wxPoint & pos):
   wxDialogWrapper(parent, id, title, pos, wxDefaultSize,
      wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER | wxMAXIMIZE_BOX )
 {
-   SetName(GetTitle());
+   SetName();
 
    mT0 = 0.0;
    mT1 = 0.0;
@@ -187,40 +209,41 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
    mForegroundEndT = NULL;
    mBackgroundStartT = NULL;
    mBackgroundEndT = NULL;
-   wxTextValidator vld(wxFILTER_NUMERIC);
    wxString number;
 
-   AudacityProject *p = GetActiveProject();
-   mProjectRate = p->GetRate();
+   auto p = FindProjectFromWindow( this );
+   const auto &settings = ProjectSettings::Get( *p );
+   mProjectRate = settings.GetRate();
+
+      const auto options = NumericTextCtrl::Options{}
+         .AutoPos(true)
+         .MenuEnabled(false)
+         .ReadOnly(true);
 
    ShuttleGui S(this, eIsCreating);
 
    S.SetBorder(5);
    S.StartHorizontalLay(wxCENTER, false);
    {
-      /* i18n-hint: RMS abbreviates root mean square, a certain averaging method */
-      S.AddTitle(_("Contrast Analyzer, for measuring RMS volume differences between two selections of audio."));
+      S.AddTitle(
+         /* i18n-hint: RMS abbreviates root mean square, a certain averaging method */
+         XO("Contrast Analyzer, for measuring RMS volume differences between two selections of audio."));
    }
    S.EndHorizontalLay();
-   S.StartStatic( _("Parameters") );
+   S.StartStatic( XO("Parameters") );
    {
       S.StartMultiColumn(5, wxEXPAND);
       {
 
          // Headings
          S.AddFixedText( {} );   // spacer
-         S.AddFixedText(_("Start"));
-         S.AddFixedText(_("End"));
+         S.AddFixedText(XO("Start"));
+         S.AddFixedText(XO("End"));
          S.AddFixedText( {} );   // spacer
-         S.AddFixedText(_("Volume    "));
-
-         const auto options = NumericTextCtrl::Options{}
-            .AutoPos(true)
-            .MenuEnabled(false)
-            .ReadOnly(true);
+         S.AddFixedText(XO("Volume    "));
 
          //Foreground
-         S.AddFixedText(_("&Foreground:"), false);
+         S.AddFixedText(XO("&Foreground:"), false);
          if (S.GetMode() == eIsCreating)
          {
             mForegroundStartT = safenew
@@ -230,9 +253,9 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
                          0.0,
                          mProjectRate,
                          options);
-            mForegroundStartT->SetName(_("Foreground start time"));
          }
-         S.AddWindow(mForegroundStartT);
+         S.Name(XO("Foreground start time"))
+            .AddWindow(mForegroundStartT);
 
          if (S.GetMode() == eIsCreating)
          {
@@ -243,16 +266,18 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
                          0.0,
                          mProjectRate,
                          options);
-            mForegroundEndT->SetName(_("Foreground end time"));
          }
-         S.AddWindow(mForegroundEndT);
+         S.Name(XO("Foreground end time"))
+            .AddWindow(mForegroundEndT);
 
-         m_pButton_UseCurrentF = S.Id(ID_BUTTON_USECURRENTF).AddButton(_("&Measure selection"));
-         mForegroundRMSText=S.Id(ID_FOREGROUNDDB_TEXT).AddTextBox( {}, wxT(""), 17);
-         mForegroundRMSText->Bind(wxEVT_KEY_DOWN, OnChar);
+         m_pButton_UseCurrentF = S.Id(ID_BUTTON_USECURRENTF).AddButton(XXO("&Measure selection"));
+         mForegroundRMSText = S.Id(ID_FOREGROUNDDB_TEXT)
+            .ConnectRoot(wxEVT_KEY_DOWN,
+                         &ContrastDialog::OnChar)
+            .AddTextBox( {}, wxT(""), 17);
 
          //Background
-         S.AddFixedText(_("&Background:"));
+         S.AddFixedText(XO("&Background:"));
          if (S.GetMode() == eIsCreating)
          {
             mBackgroundStartT = safenew
@@ -262,9 +287,9 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
                          0.0,
                          mProjectRate,
                          options);
-            mBackgroundStartT->SetName(_("Background start time"));
          }
-         S.AddWindow(mBackgroundStartT);
+         S.Name(XO("Background start time"))
+            .AddWindow(mBackgroundStartT);
 
          if (S.GetMode() == eIsCreating)
          {
@@ -275,36 +300,42 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
                          0.0,
                          mProjectRate,
                          options);
-            mBackgroundEndT->SetName(_("Background end time"));
          }
-         S.AddWindow(mBackgroundEndT);
+         S.Name(XO("Background end time"))
+            .AddWindow(mBackgroundEndT);
 
-         m_pButton_UseCurrentB = S.Id(ID_BUTTON_USECURRENTB).AddButton(_("Mea&sure selection"));
-         mBackgroundRMSText = S.Id(ID_BACKGROUNDDB_TEXT).AddTextBox( {}, wxT(""), 17);
-         mBackgroundRMSText->Bind(wxEVT_KEY_DOWN, OnChar);
+         m_pButton_UseCurrentB = S.Id(ID_BUTTON_USECURRENTB).AddButton(XXO("Mea&sure selection"));
+         mBackgroundRMSText = S.Id(ID_BACKGROUNDDB_TEXT)
+            .ConnectRoot(wxEVT_KEY_DOWN,
+                         &ContrastDialog::OnChar)
+            .AddTextBox( {}, wxT(""), 17);
       }
       S.EndMultiColumn();
    }
    S.EndStatic();
 
    //Result
-   S.StartStatic( _("Result") );
+   S.StartStatic( XO("Result") );
    {
       S.StartMultiColumn(3, wxCENTER);
       {
-         wxString label = _("Co&ntrast Result:");
+         auto label = XO("Co&ntrast Result:");
          S.AddFixedText(label);
-         mPassFailText = S.Id(ID_RESULTS_TEXT).AddTextBox( {}, wxT(""), 50);
-         mPassFailText->SetName(wxStripMenuCodes(label));
-         mPassFailText->Bind(wxEVT_KEY_DOWN, OnChar);
-         m_pButton_Reset = S.Id(ID_BUTTON_RESET).AddButton(_("R&eset"));
+         mPassFailText = S.Id(ID_RESULTS_TEXT)
+            .Name(label)
+            .ConnectRoot(wxEVT_KEY_DOWN,
+                         &ContrastDialog::OnChar)
+            .AddTextBox( {}, wxT(""), 50);
+         m_pButton_Reset = S.Id(ID_BUTTON_RESET).AddButton(XXO("R&eset"));
 
-         label = _("&Difference:");
+         label = XO("&Difference:");
          S.AddFixedText(label);
-         mDiffText = S.Id(ID_RESULTSDB_TEXT).AddTextBox( {}, wxT(""), 50);
-         mDiffText->SetName(wxStripMenuCodes(label));
-         mDiffText->Bind(wxEVT_KEY_DOWN, OnChar);
-         m_pButton_Export = S.Id(ID_BUTTON_EXPORT).AddButton(_("E&xport..."));
+         mDiffText = S.Id(ID_RESULTSDB_TEXT)
+            .Name(label)
+            .ConnectRoot(wxEVT_KEY_DOWN,
+                         &ContrastDialog::OnChar)
+            .AddTextBox( {}, wxT(""), 50);
+         m_pButton_Export = S.Id(ID_BUTTON_EXPORT).AddButton(XXO("E&xport..."));
       }
       S.EndMultiColumn();
    }
@@ -314,9 +345,9 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
    S.StartMultiColumn(3, wxEXPAND);
    {
       S.SetStretchyCol(1);
-      m_pButton_GetURL = S.Id(ID_BUTTON_GETURL).AddButton(_("&Help"));
-      S.AddFixedText(wxT(" "));   // spacer
-      m_pButton_Close = S.Id(ID_BUTTON_CLOSE).AddButton(_("&Close"));
+      m_pButton_GetURL = S.Id(ID_BUTTON_GETURL).AddButton(XO("&Help"));
+      S.AddFixedText({});   // spacer
+      m_pButton_Close = S.Id(ID_BUTTON_CLOSE).AddButton(XO("&Close"));
    }
    S.EndMultiColumn();
 #endif
@@ -330,7 +361,7 @@ void ContrastDialog::OnGetURL(wxCommandEvent & WXUNUSED(event))
 {
    // Original help page is back on-line (March 2016), but the manual should be more reliable.
    // http://www.eramp.com/WCAG_2_audio_contrast_tool_help.htm
-   HelpSystem::ShowHelp(this, wxT("Contrast"));
+   HelpSystem::ShowHelp(this, L"Contrast");
 }
 
 void ContrastDialog::OnClose(wxCommandEvent & WXUNUSED(event))
@@ -343,11 +374,12 @@ void ContrastDialog::OnClose(wxCommandEvent & WXUNUSED(event))
 
 void ContrastDialog::OnGetForeground(wxCommandEvent & /*event*/)
 {
-   AudacityProject *p = GetActiveProject();
+   auto p = FindProjectFromWindow( this );
+   auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
 
-   if( p->GetTracks()->Selected< const WaveTrack >() ) {
-      mForegroundStartT->SetValue(p->mViewInfo.selectedRegion.t0());
-      mForegroundEndT->SetValue(p->mViewInfo.selectedRegion.t1());
+   if( TrackList::Get( *p ).Selected< const WaveTrack >() ) {
+      mForegroundStartT->SetValue(selectedRegion.t0());
+      mForegroundEndT->SetValue(selectedRegion.t1());
    }
 
    SetStartAndEndTime();
@@ -358,11 +390,12 @@ void ContrastDialog::OnGetForeground(wxCommandEvent & /*event*/)
 
 void ContrastDialog::OnGetBackground(wxCommandEvent & /*event*/)
 {
-   AudacityProject *p = GetActiveProject();
+   auto p = FindProjectFromWindow( this );
+   auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
 
-   if( p->GetTracks()->Selected< const WaveTrack >() ) {
-      mBackgroundStartT->SetValue(p->mViewInfo.selectedRegion.t0());
-      mBackgroundEndT->SetValue(p->mViewInfo.selectedRegion.t1());
+   if( TrackList::Get( *p ).Selected< const WaveTrack >() ) {
+      mBackgroundStartT->SetValue(selectedRegion.t0());
+      mBackgroundEndT->SetValue(selectedRegion.t1());
    }
 
    SetStartAndEndTime();
@@ -377,58 +410,59 @@ namespace {
    // Should these variations in formats be collapsed further?
 
    // Pass nullptr when value is not yet defined
-   wxString FormatRMSMessage( float *pValue )
+   TranslatableString FormatRMSMessage( float *pValue )
    {
 
       /* i18n-hint: RMS abbreviates root mean square, a certain averaging method */
-      wxString format0{ _("RMS = %s.") };
+      auto format0 = XO("RMS = %s.");
 
       /* i18n-hint: dB abbreviates decibels */
-      wxString format1{ _("%s dB") };
+      auto format1 = XO("%s dB");
 
-      wxString value;
+      TranslatableString value;
 
-      if ( pValue )
+      if ( pValue ) {
          if( fabs( *pValue ) != std::numeric_limits<float>::infinity() ) {
-            auto number = wxString::Format( _("%.2f"), *pValue );
-            value = wxString::Format( format1, number );
+            auto number = wxString::Format( wxT("%.2f"), *pValue );
+            value = format1.Format( number );
          }
          else
-            value = _("zero");
+            value = XO("zero");
+      }
       else
-         value = wxString::Format( format1, "" );
+         value = format1.Format( "" );
 
-      return wxString::Format( format0, value );
+      return format0.Format( value );
    }
 
-   wxString FormatDifference( float diffdB )
+   TranslatableString FormatDifference( float diffdB )
    {
       if( diffdB != diffdB )   // test for NaN, reliant on IEEE implementation
-         return _("indeterminate");
+         return XO("indeterminate");
       else {
          if( diffdB != std::numeric_limits<float>::infinity() )
-            /* i18n-hint: dB abbreviates decibels */
-            /* i18n-hint: RMS abbreviates root mean square, a certain averaging method */
-            return wxString::Format(_("%.2f dB RMS"), diffdB);
+            /* i18n-hint: dB abbreviates decibels
+             * RMS abbreviates root mean square, a certain averaging method */
+            return XO("%.2f dB RMS").Format( diffdB );
          else
             /* i18n-hint: dB abbreviates decibels */
-            return _("Infinite dB difference");
+            return XO("Infinite dB difference");
       }
    }
 
-   wxString FormatDifferenceForExport( float diffdB )
+   TranslatableString FormatDifferenceForExport( float diffdB )
    {
       if( diffdB != diffdB ) //test for NaN, reliant on IEEE implementation
-         return _("Difference is indeterminate.");
+         return XO("Difference is indeterminate.");
       else
          if( fabs(diffdB) != std::numeric_limits<float>::infinity() )
-            /* i18n-hint: dB abbreviates decibels */
-            /* i18n-hint: RMS abbreviates root mean square, a certain averaging method */
-            return wxString::Format(_("Difference = %.2f RMS dB."), diffdB );
+            /* i18n-hint: dB abbreviates decibels
+               RMS abbreviates root mean square, a certain averaging method */
+            return XO("Difference = %.2f RMS dB.").Format( diffdB );
          else
-            /* i18n-hint: dB abbreviates decibels */
-            /* i18n-hint: RMS abbreviates root mean square, a certain averaging method */
-            return _("Difference = infinite RMS dB.");
+            /* i18n-hint: dB abbreviates decibels
+               RMS abbreviates root mean square, a certain averaging method */
+            return XO("Difference = infinite RMS dB.");
    }
 }
 
@@ -451,7 +485,7 @@ void ContrastDialog::results()
          mPassFailText->ChangeValue(_("Background higher than foreground"));
       }
       else if(diffdB > WCAG2_PASS) {
-         /* i18n-hint: WCAG abbreviates Web Content Accessibility Guidelines */
+         /* i18n-hint: WCAG2 is the 'Web Content Accessibility Guidelines (WCAG) 2.0', see http://www.w3.org/TR/WCAG20/ */
          mPassFailText->ChangeValue(_("WCAG2 Pass"));
       }
       else {
@@ -461,7 +495,7 @@ void ContrastDialog::results()
 
       /* i18n-hint: i.e. difference in loudness at the moment. */
       mDiffText->SetName(_("Current difference"));
-      mDiffText->ChangeValue( FormatDifference( diffdB ) );
+      mDiffText->ChangeValue( FormatDifference( diffdB ).Translation() );
    }
 
    if (mForegroundIsDefined) {
@@ -469,7 +503,8 @@ void ContrastDialog::results()
       if(std::isinf(- foregrounddB))
          mForegroundRMSText->ChangeValue(_("zero"));
       else
-         mForegroundRMSText->ChangeValue(wxString::Format(_("%.2f dB"), foregrounddB));   // i18n-hint: short form of 'decibels'        
+         // i18n-hint: short form of 'decibels'
+         mForegroundRMSText->ChangeValue(wxString::Format(_("%.2f dB"), foregrounddB));
    }
    else {
       mForegroundRMSText->SetName(_("No foreground measured"));   // Read by screen-readers
@@ -494,78 +529,91 @@ void ContrastDialog::results()
 void ContrastDialog::OnExport(wxCommandEvent & WXUNUSED(event))
 {
    // TODO: Handle silence checks better (-infinity dB)
-   AudacityProject * project = GetActiveProject();
+   auto project = FindProjectFromWindow( this );
    wxString fName = wxT("contrast.txt");
 
    fName = FileNames::SelectFile(FileNames::Operation::Export,
-                        _("Export Contrast Result As:"),
-                        wxEmptyString,
-                        fName,
-                        wxT("txt"),
-                        wxT("*.txt"),
-                        wxFD_SAVE | wxRESIZE_BORDER,
-                        this);
+      XO("Export Contrast Result As:"),
+      wxEmptyString,
+      fName,
+      wxT("txt"),
+      { FileNames::TextFiles, FileNames::AllFiles },
+      wxFD_SAVE | wxRESIZE_BORDER,
+      this);
 
    if (fName.empty())
       return;
 
-   wxTextFile f(fName);
-#ifdef __WXMAC__
-   wxFile{}.Create(fName);
-#else
-   f.Create();
-#endif
-   f.Open();
-   if (!f.IsOpened()) {
-      AudacityMessageBox(
-         wxString::Format( _("Couldn't write to file: %s"), fName) );
+   wxFFileOutputStream ffStream{ fName };
+
+   if (!ffStream.IsOk()) {
+      AudacityMessageBox( XO("Couldn't write to file: %s").Format( fName ) );
       return;
    }
 
-   f.AddLine(wxT("==================================="));
+   wxTextOutputStream ss(ffStream);
+
+   ss
+      << wxT("===================================") << '\n'
    /* i18n-hint: WCAG abbreviates Web Content Accessibility Guidelines */
-   f.AddLine(_("WCAG 2.0 Success Criteria 1.4.7 Contrast Results"));
-   f.AddLine(wxT(""));
-   f.AddLine(wxString::Format(_("Filename = %s."), project->GetFileName() ));
-   f.AddLine(wxT(""));
-   f.AddLine(_("Foreground"));
+      << XO("WCAG 2.0 Success Criteria 1.4.7 Contrast Results") << '\n'
+      << '\n'
+      << XO("Filename = %s.").Format( ProjectFileIO::Get(*project).GetFileName() ) << '\n'
+      << '\n'
+      << XO("Foreground") << '\n';
+
    float t = (float)mForegroundStartT->GetValue();
    int h = (int)(t/3600);  // there must be a standard function for this!
    int m = (int)((t - h*3600)/60);
    float s = t - h*3600.0 - m*60.0;
-   f.AddLine(wxString::Format(_("Time started = %2d hour(s), %2d minute(s), %.2f seconds."), h, m, s ));
+
+   ss
+      << XO("Time started = %2d hour(s), %2d minute(s), %.2f seconds.")
+         .Format( h, m, s ) << '\n';
+
    t = (float)mForegroundEndT->GetValue();
    h = (int)(t/3600);
    m = (int)((t - h*3600)/60);
    s = t - h*3600.0 - m*60.0;
-   f.AddLine(wxString::Format(_("Time ended = %2d hour(s), %2d minute(s), %.2f seconds."), h, m, s ));
-   f.AddLine( FormatRMSMessage( mForegroundIsDefined ? &foregrounddB : nullptr ) );
-   f.AddLine(wxT(""));
-   f.AddLine(_("Background"));
+
+   ss
+      << XO("Time ended = %2d hour(s), %2d minute(s), %.2f seconds.")
+         .Format( h, m, s ) << '\n'
+      << FormatRMSMessage( mForegroundIsDefined ? &foregrounddB : nullptr ) << '\n'
+      << '\n'
+      << XO("Background") << '\n';
+
    t = (float)mBackgroundStartT->GetValue();
    h = (int)(t/3600);
    m = (int)((t - h*3600)/60);
    s = t - h*3600.0 - m*60.0;
-   f.AddLine(wxString::Format(_("Time started = %2d hour(s), %2d minute(s), %.2f seconds."), h, m, s ));
+
+   ss
+      << XO("Time started = %2d hour(s), %2d minute(s), %.2f seconds.")
+         .Format( h, m, s ) << '\n';
+
    t = (float)mBackgroundEndT->GetValue();
    h = (int)(t/3600);
    m = (int)((t - h*3600)/60);
    s = t - h*3600.0 - m*60.0;
-   f.AddLine(wxString::Format(_("Time ended = %2d hour(s), %2d minute(s), %.2f seconds."), h, m, s ));
-   f.AddLine( FormatRMSMessage( mBackgroundIsDefined ? &backgrounddB : nullptr ) );
-   f.AddLine(wxT(""));
-   f.AddLine(_("Results"));
+
+   ss
+      << XO("Time ended = %2d hour(s), %2d minute(s), %.2f seconds.")
+         .Format( h, m, s ) << '\n'
+      << FormatRMSMessage( mBackgroundIsDefined ? &backgrounddB : nullptr ) << '\n'
+      << '\n'
+      << XO("Results") << '\n';
+
    float diffdB = foregrounddB - backgrounddB;
 
-   f.AddLine( FormatDifferenceForExport( diffdB ) );
-   if( diffdB > 20. )
-      f.AddLine(_("Success Criteria 1.4.7 of WCAG 2.0: Pass"));
-   else
-      f.AddLine(_("Success Criteria 1.4.7 of WCAG 2.0: Fail"));
+   ss
+      << FormatDifferenceForExport( diffdB ) << '\n'
+      << (( diffdB > 20. )
+         ? XO("Success Criteria 1.4.7 of WCAG 2.0: Pass")
+         : XO("Success Criteria 1.4.7 of WCAG 2.0: Fail")) << '\n'
+      << '\n'
+      << XO("Data gathered") << '\n';
 
-   f.AddLine(wxT(""));
-   f.AddLine(_("Data gathered"));
-   wxString sNow;
    wxDateTime now = wxDateTime::Now();
    int year = now.GetYear();
    wxDateTime::Month month = now.GetMonth();
@@ -574,19 +622,14 @@ void ContrastDialog::OnExport(wxCommandEvent & WXUNUSED(event))
    int hour = now.GetHour();
    int minute = now.GetMinute();
    int second = now.GetSecond();
-   sNow = wxString::Format(wxT("%d %s %02d %02dh %02dm %02ds"),
-        dom, monthName, year, hour, minute, second);
-   f.AddLine(sNow);
+   /* i18n-hint: day of month, month, year, hour, minute, second */
+   auto sNow = XO("%d %s %02d %02dh %02dm %02ds")
+      .Format( dom, monthName, year, hour, minute, second );
 
-   f.AddLine(wxT("==================================="));
-   f.AddLine(wxT(""));
-
-#ifdef __WXMAC__
-   f.Write(wxTextFileType_Mac);
-#else
-   f.Write();
-#endif
-   f.Close();
+   ss <<
+      sNow << '\n'
+      << wxT("===================================") << '\n'
+      << '\n';
 }
 
 void ContrastDialog::OnReset(wxCommandEvent & /*event*/)
@@ -604,4 +647,58 @@ void ContrastDialog::OnReset(wxCommandEvent & /*event*/)
    mBackgroundRMSText->ChangeValue(wxT(""));
    mPassFailText->ChangeValue(wxT(""));
    mDiffText->ChangeValue(wxT(""));
+}
+
+// Remaining code hooks this add-on into the application
+#include "commands/CommandContext.h"
+#include "commands/CommandManager.h"
+#include "../commands/ScreenshotCommand.h"
+
+namespace {
+
+// Contrast window attached to each project is built on demand by:
+AudacityProject::AttachedWindows::RegisteredFactory sContrastDialogKey{
+   []( AudacityProject &parent ) -> wxWeakRef< wxWindow > {
+      auto &window = ProjectWindow::Get( parent );
+      return safenew ContrastDialog(
+         &window, -1, XO("Contrast Analysis (WCAG 2 compliance)"),
+         wxPoint{ 150, 150 }
+      );
+   }
+};
+
+// Define our extra menu item that invokes that factory
+struct Handler : CommandHandlerObject {
+   void OnContrast(const CommandContext &context)
+   {
+      auto &project = context.project;
+      CommandManager::Get(project).RegisterLastAnalyzer(context);  //Register Contrast as Last Analyzer
+      auto contrastDialog =
+         &project.AttachedWindows::Get< ContrastDialog >( sContrastDialogKey );
+
+      contrastDialog->CentreOnParent();
+      if( ScreenshotCommand::MayCapture( contrastDialog ) )
+         return;
+      contrastDialog->Show();
+   }
+};
+
+CommandHandlerObject &findCommandHandler(AudacityProject &) {
+   // Handler is not stateful.  Doesn't need a factory registered with
+   // AudacityProject.
+   static Handler instance;
+   return instance;
+}
+
+// Register that menu item
+
+using namespace MenuTable;
+AttachedItem sAttachment{ wxT("Analyze/Analyzers/Windows"),
+   ( FinderScope{ findCommandHandler },
+      Command( wxT("ContrastAnalyser"), XXO("Contrast..."),
+         &Handler::OnContrast,
+         AudioIONotBusyFlag() | WaveTracksSelectedFlag() | TimeSelectedFlag(),
+         wxT("Ctrl+Shift+T") ) )
+};
+
 }

@@ -79,7 +79,7 @@ in the selection bar of Audacity.
 
     3758.5 seconds, "*:060:060 and .24 frames" -> "1:02:38 and 12 frames"
 
-  Note that the decimal '.' is associated with the delimeter, not
+  Note that the decimal '.' is associated with the delimiter, not
   with the 24.
 
   Additionally, the special character '#' can be used in place of a number
@@ -124,7 +124,7 @@ in the selection bar of Audacity.
   - Any non-numeric characters before the first field are treated
     as a prefix, and will be displayed to the left of the first field.
   - A delimiter ending in '.' is treated specially.  All fields after
-    this delimeter are fractional fields, after the decimal point.
+    this delimiter are fractional fields, after the decimal point.
   - The '|' character is treated as a special delimiter.  The number
     to the right of this character (which is allowed to contain a
     decimal point) is treated as a scaling factor.  The number is
@@ -165,15 +165,14 @@ different formats.
 **********************************************************************/
 
 
-#include "../Audacity.h"
+
 #include "NumericTextCtrl.h"
 
-#include "audacity/Types.h"
-#include "../Theme.h"
+#include "Identifier.h"
 #include "../AllThemeResources.h"
 #include "../AColor.h"
-#include "../Project.h"
-#include "../TranslatableStringArray.h"
+#include "../KeyboardCapture.h"
+#include "../Theme.h"
 
 #include <algorithm>
 #include <math.h>
@@ -182,7 +181,7 @@ different formats.
 #include <wx/setup.h> // for wxUSE_* macros
 
 #include <wx/wx.h>
-#include <wx/dcmemory.h>
+#include <wx/dcbuffer.h>
 #include <wx/font.h>
 #include <wx/intl.h>
 #include <wx/menu.h>
@@ -286,7 +285,7 @@ private:
 struct BuiltinFormatString
 {
    NumericFormatSymbol name;
-   wxString formatStr;
+   NumericConverter::FormatStrings formatStrings;
 
    friend inline bool operator ==
       (const BuiltinFormatString &a, const BuiltinFormatString &b)
@@ -407,9 +406,11 @@ static const BuiltinFormatString TimeConverterFormats_[] =  {
    /* i18n-hint: Format string for displaying time in hours, minutes, seconds
     * and hundredths of a second. Change the 'h' to the abbreviation for hours,
     * 'm' to the abbreviation for minutes and 's' to the abbreviation for seconds
-    * (the hundredths are shown as decimal seconds) . Don't change the numbers
-    * unless there aren't 60 minutes in an hour in your locale */
-   XO("0100 h 060 m 060.0100 s")
+    * (the hundredths are shown as decimal seconds). Don't change the numbers
+    * unless there aren't 60 minutes in an hour in your locale.
+    * The decimal separator is specified using '<' if your language uses a ',' or
+    * to '>' if your language uses a '.'. */
+   XO("0100 h 060 m 060>0100 s")
    },
 
    {
@@ -420,8 +421,10 @@ static const BuiltinFormatString TimeConverterFormats_[] =  {
     * and milliseconds. Change the 'h' to the abbreviation for hours, 'm' to the
     * abbreviation for minutes and 's' to the abbreviation for seconds (the
     * milliseconds are shown as decimal seconds) . Don't change the numbers
-    * unless there aren't 60 minutes in an hour in your locale */
-   XO("0100 h 060 m 060.01000 s")
+    * unless there aren't 60 minutes in an hour in your locale.
+    * The decimal separator is specified using '<' if your language uses a ',' or
+    * to '>' if your language uses a '.'. */
+   XO("0100 h 060 m 060>01000 s")
    },
 
    {
@@ -432,8 +435,10 @@ static const BuiltinFormatString TimeConverterFormats_[] =  {
     * and samples. Change the 'h' to the abbreviation for hours, 'm' to the
     * abbreviation for minutes, 's' to the abbreviation for seconds and
     * translate samples . Don't change the numbers
-    * unless there aren't 60 seconds in a minute in your locale */
-   XO("0100 h 060 m 060 s+.# samples")
+    * unless there aren't 60 seconds in a minute in your locale.
+    * The decimal separator is specified using '<' if your language uses a ',' or
+    * to '>' if your language uses a '.'. */
+   XO("0100 h 060 m 060 s+># samples")
    },
 
    {
@@ -457,8 +462,10 @@ static const BuiltinFormatString TimeConverterFormats_[] =  {
     * and frames at 24 frames per second. Change the 'h' to the abbreviation
     * for hours, 'm' to the abbreviation for minutes, 's' to the abbreviation
     * for seconds and translate 'frames' . Don't change the numbers
-    * unless there aren't 60 seconds in a minute in your locale */
-   XO("0100 h 060 m 060 s+.24 frames")
+    * unless there aren't 60 seconds in a minute in your locale.
+    * The decimal separator is specified using '<' if your language uses a ',' or
+    * to '>' if your language uses a '.'. */
+   XO("0100 h 060 m 060 s+>24 frames")
    },
 
    {
@@ -480,8 +487,10 @@ static const BuiltinFormatString TimeConverterFormats_[] =  {
    /* i18n-hint: Format string for displaying time in hours, minutes, seconds
     * and frames with NTSC drop frames. Change the 'h' to the abbreviation
     * for hours, 'm' to the abbreviation for minutes, 's' to the abbreviation
-    * for seconds and translate 'frames'. Leave the |N alone, it's important! */
-   XO("0100 h 060 m 060 s+.30 frames|N")
+    * for seconds and translate 'frames'. Leave the |N alone, it's important!
+    * The decimal separator is specified using '<' if your language uses a ',' or
+    * to '>' if your language uses a '.'. */
+   XO("0100 h 060 m 060 s+>30 frames|N")
    },
 
    {
@@ -493,8 +502,10 @@ static const BuiltinFormatString TimeConverterFormats_[] =  {
     * and frames with NTSC drop frames. Change the 'h' to the abbreviation
     * for hours, 'm' to the abbreviation for minutes, 's' to the abbreviation
     * for seconds and translate 'frames'. Leave the | .999000999 alone,
-    * the whole things really is slightly off-speed! */
-   XO("0100 h 060 m 060 s+.030 frames| .999000999")
+    * the whole things really is slightly off-speed!
+    * The decimal separator is specified using '<' if your language uses a ',' or
+    * to '>' if your language uses a '.'. */
+   XO("0100 h 060 m 060 s+>030 frames| .999000999")
    },
 
    {
@@ -516,8 +527,10 @@ static const BuiltinFormatString TimeConverterFormats_[] =  {
    /* i18n-hint: Format string for displaying time in hours, minutes, seconds
     * and frames with PAL TV frames. Change the 'h' to the abbreviation
     * for hours, 'm' to the abbreviation for minutes, 's' to the abbreviation
-    * for seconds and translate 'frames'. Nice simple time code! */
-   XO("0100 h 060 m 060 s+.25 frames")
+    * for seconds and translate 'frames'. Nice simple time code!
+    * The decimal separator is specified using '<' if your language uses a ',' or
+    * to '>' if your language uses a '.'. */
+   XO("0100 h 060 m 060 s+>25 frames")
    },
 
    {
@@ -538,8 +551,10 @@ static const BuiltinFormatString TimeConverterFormats_[] =  {
    /* i18n-hint: Format string for displaying time in hours, minutes, seconds
     * and frames with CD Audio frames. Change the 'h' to the abbreviation
     * for hours, 'm' to the abbreviation for minutes, 's' to the abbreviation
-    * for seconds and translate 'frames'. */
-   XO("0100 h 060 m 060 s+.75 frames")
+    * for seconds and translate 'frames'.
+    * The decimal separator is specified using '<' if your language uses a ',' or
+    * to '>' if your language uses a '.'. */
+   XO("0100 h 060 m 060 s+>75 frames")
    },
 
    {
@@ -559,19 +574,30 @@ static const BuiltinFormatString TimeConverterFormats_[] =  {
  *  needed to create that format output. This is used for the pop-up
  *  list of formats to choose from in the control. */
 static const BuiltinFormatString FrequencyConverterFormats_[] = {
-   /* i18n-hint: Name of display format that shows frequency in hertz */
    {
+      /* i18n-hint: Name of display format that shows frequency in hertz */
       { XO("Hz") },
-         /* i18n-hint: Format string for displaying frequency in hertz. Change 
-         * the decimal point for your locale. Don't change the numbers. */
-         XO("0100000.0100 Hz")
+      {
+         /* i18n-hint: Format string for displaying frequency in hertz. Change
+         * the decimal point for your locale. Don't change the numbers.
+         * The decimal separator is specified using '<' if your language uses a ',' or
+         * to '>' if your language uses a '.'. */
+         XO("010,01000>0100 Hz")
+         , XO("centihertz")
+      }
    },
 
    {
+      /* i18n-hint: Name of display format that shows frequency in kilohertz */
       { XO("kHz") },
-         /* i18n-hint: Format string for displaying frequency in kilohertz. Change 
-         * the decimal point for your locale. Don't change the numbers. */
-         XO("01000.01000 kHz|0.001")
+      {
+         /* i18n-hint: Format string for displaying frequency in kilohertz. Change
+         * the decimal point for your locale. Don't change the numbers.
+         * The decimal separator is specified using '<' if your language uses a ',' or
+         * to '>' if your language uses a '.'. */
+         XO("01000>01000 kHz|0.001")
+         , XO("hertz")
+      }
    },
 };
 
@@ -584,31 +610,44 @@ static const BuiltinFormatString BandwidthConverterFormats_[] = {
    /* i18n-hint: Name of display format that shows log of frequency
     * in octaves */
    { XO("octaves") },
-   /* i18n-hint: Format string for displaying log of frequency in octaves.
-    * Change the decimal points for your locale. Don't change the numbers. */
-   // Scale factor is 1 / ln (2)
-   XO("100.01000 octaves|1.442695041")
+   {
+      /* i18n-hint: Format string for displaying log of frequency in octaves.
+       * Change the decimal points for your locale. Don't change the numbers.
+       * The decimal separator is specified using '<' if your language uses a ',' or
+       * to '>' if your language uses a '.'. */
+      XO("100>01000 octaves|1.442695041"),    // Scale factor is 1 / ln (2)
+      /* i18n-hint: an octave is a doubling of frequency */
+      XO("thousandths of octaves")
+   }
    },
 
    {
    /* i18n-hint: Name of display format that shows log of frequency
     * in semitones and cents */
    { XO("semitones + cents") },
-   /* i18n-hint: Format string for displaying log of frequency in semitones
-    * and cents.
-    * Change the decimal points for your locale. Don't change the numbers. */
-   // Scale factor is 12 / ln (2)
-   XO("1000 semitones .0100 cents|17.312340491")
+   {
+      /* i18n-hint: Format string for displaying log of frequency in semitones
+       * and cents.
+       * Change the decimal points for your locale. Don't change the numbers.
+       * The decimal separator is specified using '<' if your language uses a ',' or
+       * to '>' if your language uses a '.'. */
+      XO("1000 semitones >0100 cents|17.312340491"),   // Scale factor is 12 / ln (2)
+      /* i18n-hint: a cent is a hundredth of a semitone (which is 1/12 octave) */
+      XO("hundredths of cents")
+   }
    },
    
    {
    /* i18n-hint: Name of display format that shows log of frequency
     * in decades */
    { XO("decades") },
-   /* i18n-hint: Format string for displaying log of frequency in decades.
-    * Change the decimal points for your locale. Don't change the numbers. */
-   // Scale factor is 1 / ln (10)
-   XO("10.01000 decades|0.434294482")
+   {
+      /* i18n-hint: Format string for displaying log of frequency in decades.
+       * Change the decimal points for your locale. Don't change the numbers. */
+      XO("10>01000 decades|0.434294482"),   // Scale factor is 1 / ln (10)
+      /* i18n-hint: a decade is a tenfold increase of frequency */
+      XO("thousandths of decades")
+   }
    },
 };
 
@@ -652,6 +691,8 @@ NumericFormatSymbol NumericConverter::TimeAndSampleFormat()
 { return TimeConverterFormats_[5].name; }
 NumericFormatSymbol NumericConverter::SecondsFormat()
 { return TimeConverterFormats_[0].name; }
+NumericFormatSymbol NumericConverter::HoursMinsSecondsFormat()
+{ return TimeConverterFormats_[1].name; }
 NumericFormatSymbol NumericConverter::HundredthsFormat()
 { return TimeConverterFormats_[3].name; }
 
@@ -707,15 +748,17 @@ NumericConverter::NumericConverter(Type type,
    SetValue(value); // mValue got overridden to -1 in ControlsToValue(), reassign
 }
 
-void NumericConverter::ParseFormatString( const wxString & untranslatedFormat)
+void NumericConverter::ParseFormatString(
+   const TranslatableString & untranslatedFormat)
 {
-   auto &format = ::wxGetTranslation( untranslatedFormat );
+   auto format = untranslatedFormat.Translation();
 
    mPrefix = wxT("");
    mFields.clear();
    mDigits.clear();
    mScalingFactor = 1.0;
 
+   // We will change inFrac to true when we hit our first decimal point.
    bool inFrac = false;
    int fracMult = 1;
    int numWholeFields = 0;
@@ -731,6 +774,8 @@ void NumericConverter::ParseFormatString( const wxString & untranslatedFormat)
 
       if (format[i] == '|') {
          wxString remainder = format.Right(format.length() - i - 1);
+         // For languages which use , as a separator.
+         remainder.Replace(wxT(","), wxT("."));
 
          if (remainder == wxT("#"))
             mScalingFactor = mSampleRate;
@@ -738,7 +783,11 @@ void NumericConverter::ParseFormatString( const wxString & untranslatedFormat)
             mNtscDrop = true;
          }
          else
-            remainder.ToDouble(&mScalingFactor);
+            // Use the C locale here for string to number.
+            // Translations are often incomplete.
+            // We can't rely on the correct ',' or '.' in the 
+            // translation, so we work based on '.' for decimal point.
+            remainder.ToCDouble(&mScalingFactor);
          i = format.length()-1; // force break out of loop
          if (!delimStr.empty())
             handleDelim = true;
@@ -798,10 +847,13 @@ void NumericConverter::ParseFormatString( const wxString & untranslatedFormat)
       if (handleDelim) {
          bool goToFrac = false;
 
-         if (!inFrac && delimStr[delimStr.length()-1]=='.') {
-            goToFrac = true;
-            if (delimStr.length() > 1)
-               delimStr = delimStr.BeforeLast('.');
+         if (!inFrac) {
+            wxChar delim = delimStr[delimStr.length()-1];
+            if (delim=='<' || delim=='>') {
+               goToFrac = true;
+               if (delimStr.length() > 1)
+                  delimStr = delimStr.BeforeLast(delim);
+            }
          }
 
          if (inFrac) {
@@ -818,6 +870,8 @@ void NumericConverter::ParseFormatString( const wxString & untranslatedFormat)
             if (numWholeFields == 0)
                mPrefix = delimStr;
             else {
+               delimStr.Replace(wxT("<"), wxT(","));
+               delimStr.Replace(wxT(">"), wxT("."));
                mFields[numWholeFields-1].label = delimStr;
             }
          }
@@ -883,6 +937,8 @@ void NumericConverter::PrintDebugInfo()
 
    wxPrintf("\n");
 }
+
+NumericConverter::NumericConverter(const NumericConverter&) = default;
 
 NumericConverter::~NumericConverter()
 {
@@ -965,15 +1021,15 @@ void NumericConverter::ValueToControls(double rawValue, bool nearest /* = true *
    }
 
    for(i = 0; i < mFields.size(); i++) {
-      int value = -1;
+      long long value = -1;
 
       if (mFields[i].frac) {
          // JKC: This old code looks bogus to me.
-         // The rounding is not propogating to earlier fields in the frac case.
+         // The rounding is not propagating to earlier fields in the frac case.
          //value = (int)(t_frac * mFields[i].base + 0.5);  // +0.5 as rounding required
          // I did the rounding earlier.
          if (t_frac >= 0)
-            value = (int)(t_frac * mFields[i].base);
+            value = t_frac * mFields[i].base;
          // JKC: TODO: Find out what the range is supposed to do.
          // It looks bogus too.
          //if (mFields[i].range > 0)
@@ -981,9 +1037,7 @@ void NumericConverter::ValueToControls(double rawValue, bool nearest /* = true *
       }
       else {
          if (t_int >= 0) {
-            // UNSAFE_SAMPLE_COUNT_TRUNCATION
-            // truncation danger!
-            value = (t_int.as_long_long() / mFields[i].base);
+            value = t_int.as_long_long() / mFields[i].base;
             if (mFields[i].range > 0)
                value = value % mFields[i].range;
          }
@@ -995,7 +1049,7 @@ void NumericConverter::ValueToControls(double rawValue, bool nearest /* = true *
             field += wxT("-");
       }
       else
-         field = wxString::Format(mFields[i].formatStr, value);
+         field = wxString::Format(mFields[i].formatStr, (int) value);
       mValueString += field;
       mValueString += mFields[i].label;
    }
@@ -1052,23 +1106,29 @@ void NumericConverter::ControlsToValue()
    mValue = std::max(mMinValue, std::min(mMaxValue, t));
 }
 
-void NumericConverter::SetFormatName(const NumericFormatSymbol & formatName)
+bool NumericConverter::SetFormatName(const NumericFormatSymbol & formatName)
 {
-   SetFormatString(GetBuiltinFormat(formatName));
+   return
+      SetFormatString(GetBuiltinFormat(formatName));
 }
 
-void NumericConverter::SetFormatString(const wxString & formatString)
+bool NumericConverter::SetFormatString(const FormatStrings & formatString)
 {
-   mFormatString = formatString;
-   ParseFormatString(mFormatString);
-   ValueToControls();
-   ControlsToValue();
+   if (mFormatString != formatString) {
+      mFormatString = formatString;
+      ParseFormatString(mFormatString.formatStr);
+      ValueToControls();
+      ControlsToValue();
+      return true;
+   }
+   else
+      return false;
 }
 
 void NumericConverter::SetSampleRate(double sampleRate)
 {
    mSampleRate = sampleRate;
-   ParseFormatString(mFormatString);
+   ParseFormatString(mFormatString.formatStr);
    ValueToControls();
    ControlsToValue();
 }
@@ -1144,15 +1204,16 @@ NumericFormatSymbol NumericConverter::GetBuiltinName(const int index)
    return {};
 }
 
-wxString NumericConverter::GetBuiltinFormat(const int index)
+auto NumericConverter::GetBuiltinFormat(const int index) -> FormatStrings
 {
    if (index >= 0 && index < GetNumBuiltins())
-      return mBuiltinFormatStrings[index].formatStr;
+      return mBuiltinFormatStrings[index].formatStrings;
 
    return {};
 }
 
-wxString NumericConverter::GetBuiltinFormat(const NumericFormatSymbol &name)
+auto NumericConverter::GetBuiltinFormat(
+   const NumericFormatSymbol &name) -> FormatStrings
 {
    int ndx =
       std::find( mBuiltinFormatStrings, mBuiltinFormatStrings + mNBuiltins,
@@ -1310,17 +1371,23 @@ NumericTextCtrl::NumericTextCtrl(wxWindow *parent, wxWindowID id,
 {
    mAllowInvalidValue = false;
 
-   mDigitBoxW = 10;
-   mDigitBoxH = 16;
+   mDigitBoxW = 11;
+   mDigitBoxH = 19;
+
+   mBorderLeft = 1;
+   mBorderTop = 1;
+   mBorderRight = 1;
+   mBorderBottom = 1;
 
    mReadOnly = options.readOnly;
    mMenuEnabled = options.menuEnabled;
-   mButtonWidth = 9;
+   mButtonWidth = mMenuEnabled ? 9 : 0;
 
    SetLayoutDirection(wxLayout_LeftToRight);
    Layout();
    Fit();
    ValueToControls();
+
    //PRL -- would this fix the following?
    //ValueToControls();
 
@@ -1331,22 +1398,28 @@ NumericTextCtrl::NumericTextCtrl(wxWindow *parent, wxWindowID id,
 
 #if wxUSE_ACCESSIBILITY
    SetLabel(wxT(""));
-   SetName(wxT(""));
+   SetName( {} );
    SetAccessible(safenew NumericTextCtrlAx(this));
 #endif
 
    if (options.hasInvalidValue)
       SetInvalidValue( options.invalidValue );
 
-   if (!options.format.empty())
+   if (!options.format.formatStr.empty())
       SetFormatString( options.format );
 
    if (options.hasValue)
       SetValue( options.value );
+
 }
 
 NumericTextCtrl::~NumericTextCtrl()
 {
+}
+
+void NumericTextCtrl::SetName( const TranslatableString &name )
+{
+   wxControl::SetName( name.Translation() );
 }
 
 // Set the focus to the first (left-most) non-zero digit
@@ -1367,19 +1440,24 @@ void NumericTextCtrl::UpdateAutoFocus()
    }
 }
 
-void NumericTextCtrl::SetFormatName(const NumericFormatSymbol & formatName)
+bool NumericTextCtrl::SetFormatName(const NumericFormatSymbol & formatName)
 {
-   SetFormatString(GetBuiltinFormat(formatName));
+   return
+      SetFormatString(GetBuiltinFormat(formatName));
 }
 
-void NumericTextCtrl::SetFormatString(const wxString & formatString)
+bool NumericTextCtrl::SetFormatString(const FormatStrings & formatString)
 {
-   NumericConverter::SetFormatString(formatString);
-   Layout();
-   Fit();
-   ValueToControls();
-   ControlsToValue();
-   UpdateAutoFocus();
+   auto result =
+      NumericConverter::SetFormatString(formatString);
+   if (result) {
+      Layout();
+      Fit();
+      ValueToControls();
+      ControlsToValue();
+      UpdateAutoFocus();
+   }
+   return result;
 }
 
 void NumericTextCtrl::SetSampleRate(double sampleRate)
@@ -1396,6 +1474,14 @@ void NumericTextCtrl::SetValue(double newValue)
    NumericConverter::SetValue(newValue);
    ValueToControls();
    ControlsToValue();
+}
+
+void NumericTextCtrl::SetDigitSize(int width, int height)
+{
+   mDigitBoxW = width;
+   mDigitBoxH = height;
+   Layout();
+   Fit();
 }
 
 void NumericTextCtrl::SetReadOnly(bool readOnly)
@@ -1430,75 +1516,130 @@ void NumericTextCtrl::SetInvalidValue(double invalidValue)
       SetValue(invalidValue);
 }
 
-bool NumericTextCtrl::Layout()
+wxSize NumericTextCtrl::ComputeSizing(bool update, wxCoord boxW, wxCoord boxH)
 {
-   unsigned int i, j;
-   int x, pos;
+   // Get current box size
+   if (boxW == 0) {
+      boxW = mDigitBoxW;
+   }
 
-   wxMemoryDC memDC;
+   if (boxH == 0) {
+      boxH = mDigitBoxH;
+   }
+   boxH -= (mBorderTop + mBorderBottom);
 
-   // Placeholder bitmap so the memDC has something to reference
-   mBackgroundBitmap = std::make_unique<wxBitmap>(1, 1, 24);
-   memDC.SelectObject(*mBackgroundBitmap);
+   // We can use the screen device context since we're not drawing to it
+   wxScreenDC dc;
 
-   mDigits.clear();
+   // First calculate a rough point size
+   wxFont pf(wxSize(boxW, boxH), wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+   int fontSize = pf.GetPointSize();
+   wxCoord strW;
+   wxCoord strH;
 
-   mBorderLeft = 1;
-   mBorderTop = 1;
-   mBorderRight = 1;
-   mBorderBottom = 1;
-
-   int fontSize = 4;
-   wxCoord strW, strH;
-   wxString exampleText = wxT("0");
-
-   // Keep making the font bigger until it's too big, then subtract one.
-   memDC.SetFont(wxFont(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
-   memDC.GetTextExtent(exampleText, &strW, &strH);
-   while (strW <= mDigitBoxW && strH <= mDigitBoxH) {
-      fontSize++;
-      memDC.SetFont(wxFont(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
-      memDC.GetTextExtent(exampleText, &strW, &strH);
+   // Now decrease it until we fit within our digit box
+   dc.SetFont(pf);
+   dc.GetTextExtent(wxT("0"), &strW, &strH);
+   while (strW > boxW || strH > boxH) {
+      dc.SetFont(wxFont(--fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+      dc.GetTextExtent(wxT("0"), &strW, &strH);
    }
    fontSize--;
 
-   mDigitFont = std::make_unique<wxFont>(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
-   memDC.SetFont(*mDigitFont);
-   memDC.GetTextExtent(exampleText, &strW, &strH);
-   mDigitW = strW;
-   mDigitH = strH;
+   // Create the digit font with the new point size
+   if (update) {
+      mDigitFont = std::make_unique<wxFont>(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+      dc.SetFont(*mDigitFont);
+
+      // Remember the actual digit width and height using the new font
+      dc.GetTextExtent(wxT("0"), &mDigitW, &mDigitH);
+   }
 
    // The label font should be a little smaller
-   fontSize--;
-   mLabelFont = std::make_unique<wxFont>(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+   std::unique_ptr<wxFont> labelFont = std::make_unique<wxFont>(fontSize - 1, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
 
-   // Figure out the x-position of each field and label in the box
-   x = mBorderLeft;
-   pos = 0;
-
-   memDC.SetFont(*mLabelFont);
-   memDC.GetTextExtent(mPrefix, &strW, &strH);
-   x += strW;
-   pos += mPrefix.length();
-
-   for(i = 0; i < mFields.size(); i++) {
-      mFields[i].fieldX = x;
-      for(j=0; j<(unsigned int)mFields[i].digits; j++) {
-         mDigits.push_back(DigitInfo(i, j, pos, wxRect(x, mBorderTop,
-                                                 mDigitBoxW, mDigitBoxH)));
-         x += mDigitBoxW;
-         pos++;
-      }
-
-      mFields[i].labelX = x;
-      memDC.GetTextExtent(mFields[i].label, &strW, &strH);
-      pos += mFields[i].label.length();
-      x += strW;
-      mFields[i].fieldW = x;
+   // Use the label font for all remaining measurements since only non-digit text is left
+   dc.SetFont(*labelFont);
+ 
+   // Remember the pointer if updating
+   if (update) {
+      mLabelFont = std::move(labelFont);
    }
 
-   mWidth = x + mBorderRight;
-   mHeight = mDigitBoxH + mBorderTop + mBorderBottom;
+   // Get the width of the prefix, if any
+   dc.GetTextExtent(mPrefix, &strW, &strH);
+
+   // Bump x-position to the end of the prefix
+   int x = mBorderLeft + strW;
+
+   if (update) {
+      // Set the character position past the prefix
+      int pos = mPrefix.length();
+
+      // Reset digits array
+      mDigits.clear();
+
+      // Figure out the x-position of each field and label in the box
+      for (int i = 0, fcnt = mFields.size(); i < fcnt; ++i) {
+         // Get the size of the label
+         dc.GetTextExtent(mFields[i].label, &strW, &strH);
+
+         // Remember this field's x-position
+         mFields[i].fieldX = x;
+
+         // Remember metrics for each digit
+         for (int j = 0, dcnt = mFields[i].digits; j < dcnt; ++j) {
+            mDigits.push_back(DigitInfo(i, j, pos, wxRect(x, mBorderTop, boxW, boxH)));
+            x += boxW;
+            pos++;
+         }
+
+         // Remember the label's x-position
+         mFields[i].labelX = x;
+
+         // Bump to end of label
+         x += strW;
+
+         // Remember the label's width
+         mFields[i].fieldW = x;
+
+         // Bump character position to end of label
+         pos += mFields[i].label.length();
+      }
+   }
+   else {
+      // Determine the maximum x-position (length) of the remaining fields
+      for (int i = 0, fcnt = mFields.size(); i < fcnt; ++i) {
+         // Get the size of the label
+         dc.GetTextExtent(mFields[i].label, &strW, &strH);
+
+         // Just bump to next field
+         x += (boxW * mFields[i].digits) + strW;
+      }
+   }
+
+   // Calculate the maximum dimensions
+   wxSize dim(x + mBorderRight, boxH + mBorderTop + mBorderBottom);
+
+   // Save maximumFinally, calculate the minimum dimensions
+   if (update) {
+      mWidth = dim.x;
+      mHeight = dim.y;
+   }
+
+   return wxSize(dim.x + mButtonWidth, dim.y);
+}
+
+bool NumericTextCtrl::Layout()
+{
+   ComputeSizing();
+
+   wxMemoryDC memDC;
+   wxCoord strW, strH;
+   memDC.SetFont(*mLabelFont);
+   memDC.GetTextExtent(mPrefix, &strW, &strH);
+
+   int i;
 
    // Draw the background bitmap - it contains black boxes where
    // all of the digits go and all of the other text
@@ -1564,7 +1705,7 @@ void NumericTextCtrl::OnErase(wxEraseEvent & WXUNUSED(event))
 
 void NumericTextCtrl::OnPaint(wxPaintEvent & WXUNUSED(event))
 {
-   wxPaintDC dc(this);
+   wxBufferedPaintDC dc(this);
    bool focused = (FindFocus() == this);
 
    dc.DrawBitmap(*mBackgroundBitmap, 0, 0);
@@ -1708,16 +1849,13 @@ void NumericTextCtrl::OnMouse(wxMouseEvent &event)
 
 void NumericTextCtrl::OnFocus(wxFocusEvent &event)
 {
-   if (event.GetEventType() == wxEVT_KILL_FOCUS) {
-      AudacityProject::ReleaseKeyboard(this);
-   }
-   else {
-      AudacityProject::CaptureKeyboard(this);
-      if( mFocusedDigit <=0 )
-         UpdateAutoFocus();
-   }
+   KeyboardCapture::OnFocus( *this, event );
 
-   Refresh(false);
+   if (event.GetEventType() != wxEVT_KILL_FOCUS &&
+       mFocusedDigit <= 0 )
+      UpdateAutoFocus();
+
+   event.Skip( false ); // PRL: not sure why, but preserving old behavior
 }
 
 void NumericTextCtrl::OnCaptureKey(wxCommandEvent &event)
@@ -1745,7 +1883,7 @@ void NumericTextCtrl::OnCaptureKey(wxCommandEvent &event)
          return;
 
       default:
-         if (keyCode >= '0' && keyCode <= '9')
+         if (keyCode >= '0' && keyCode <= '9' && !kevent->HasAnyModifiers())
             return;
    }
 
@@ -1763,7 +1901,7 @@ void NumericTextCtrl::OnKeyUp(wxKeyEvent &event)
    if ((keyCode >= WXK_NUMPAD0) && (keyCode <= WXK_NUMPAD9))
       keyCode -= WXK_NUMPAD0 - '0';
 
-   if ((keyCode >= '0' && keyCode <= '9') ||
+   if ((keyCode >= '0' && keyCode <= '9' && !event.HasAnyModifiers()) ||
        (keyCode == WXK_DELETE) ||
        (keyCode == WXK_BACK) ||
        (keyCode == WXK_UP) ||
@@ -1794,7 +1932,7 @@ void NumericTextCtrl::OnKeyDown(wxKeyEvent &event)
    if ((keyCode >= WXK_NUMPAD0) && (keyCode <= WXK_NUMPAD9))
       keyCode -= WXK_NUMPAD0 - '0';
 
-   if (!mReadOnly && (keyCode >= '0' && keyCode <= '9')) {
+   if (!mReadOnly && (keyCode >= '0' && keyCode <= '9' && !event.HasAnyModifiers())) {
       int digitPosition = mDigits[mFocusedDigit].pos;
       if (mValueString[digitPosition] == wxChar('-')) {
          mValue = std::max(mMinValue, std::min(mMaxValue, 0.0));
@@ -2103,6 +2241,22 @@ wxAccStatus NumericTextCtrlAx::GetLocation(wxRect & rect, int elementId)
    return wxACC_OK;
 }
 
+static void GetFraction( wxString &label,
+   const NumericConverter::FormatStrings &formatStrings,
+   bool isTime, int digits )
+{
+   TranslatableString tr = formatStrings.fraction;
+   if ( tr.empty() ) {
+      wxASSERT( isTime );
+      if (digits == 2)
+         tr = XO("centiseconds");
+      else if (digits == 3)
+         tr = XO("milliseconds");
+   }
+   if (!tr.empty())
+      label = tr.Translation();
+}
+
 // Gets the name of the specified object.
 wxAccStatus NumericTextCtrlAx::GetName(int childId, wxString *name)
 {
@@ -2154,26 +2308,8 @@ wxAccStatus NumericTextCtrlAx::GetName(int childId, wxString *name)
          if (field > 1 && field == cnt) {
             if (mFields[field - 2].label == decimal) {
                int digits = mFields[field - 1].digits;
-               if (digits == 2) {
-                  if (isTime)
-                     label = _("centiseconds");
-                  else {
-                     // other units
-                     // PRL:  does this create translation problems?
-                     label = _("hundredths of ");
-                     label += mFields[field - 1].label;
-                  }
-               }
-               else if (digits == 3) {
-                  if (isTime)
-                     label = _("milliseconds");
-                  else {
-                     // other units
-                     // PRL:  does this create translation problems?
-                     label = _("thousandths of ");
-                     label += mFields[field - 1].label;
-                  }
-               }
+               GetFraction( label, mCtrl->mFormatString,
+                  isTime, digits );
             }
          }
          // If the field following this one represents fractions of a

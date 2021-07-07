@@ -1,5 +1,5 @@
 /*
- * $Id: pa_jack.c 1912 2013-11-15 12:27:07Z gineera $
+ * $Id$
  * PortAudio Portable Real-Time Audio Library
  * Latest Version at: http://www.portaudio.com
  * JACK Implementation by Joshua Haberman
@@ -1008,12 +1008,18 @@ static void Terminate( struct PaUtilHostApiRepresentation *hostApi )
 
     /* note: this automatically disconnects all ports, since a deactivated
      * client is not allowed to have any ports connected */
-    ASSERT_CALL( jack_deactivate( jackHostApi->jack_client ), 0 );
+    if( !jackHostApi->jackIsDown )
+    { 
+        ASSERT_CALL( jack_deactivate( jackHostApi->jack_client ), 0 );
+    }
 
     PaJack_TerminateHostApiMutex( jackHostApi );
     PaJack_TerminateCommandSync( jackHostApi );
 
-    ASSERT_CALL( jack_client_close( jackHostApi->jack_client ), 0 );
+    if( !jackHostApi->jackIsDown )
+    { 
+        ASSERT_CALL( jack_client_close( jackHostApi->jack_client ), 0 );
+    }
 
     if( jackHostApi->deviceInfoMemory )
     {

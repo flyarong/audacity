@@ -11,12 +11,10 @@
 #ifndef __AUDACITY_COMMAND_CONTEXT__
 #define __AUDACITY_COMMAND_CONTEXT__
 
-#include "audacity/Types.h"
-#include "../MemoryX.h"
-#include "Command.h"
+#include <memory>
+#include "Identifier.h"
 
 class AudacityProject;
-class AudacityApp;
 class wxEvent;
 class CommandOutputTargets;
 using CommandParameter = CommandID;
@@ -56,7 +54,5 @@ public:
    const wxEvent *pEvt;
    int index;
    CommandParameter parameter;
-   AudacityApp *GetApp() const;
-   AudacityProject *GetProject() const;
 };
 #endif

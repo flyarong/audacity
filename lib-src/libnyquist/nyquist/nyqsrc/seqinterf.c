@@ -10,6 +10,7 @@
 #include "moxc.h"
 #include "seq.h"
 #include "seqinterf.h"
+#include "seqmwrite.h"
 
 /* seq_next -- advance to the next event, return TRUE if found */
 /**/
@@ -24,8 +25,8 @@ boolean seq_next(seq_type seq)
 
 /* seq_get -- get event data for the current event */
 /**/
-void seq_get(seq_type seq, long *eventtype, long *ntime, long *line, long *chan, 
-    long *value1, long *value2, long *dur)
+void seq_get(seq_type seq, long *eventtype, long *ntime, long *line, long *chan,
+             long *value1, long *value2, long *dur)
 {
     event_type ev = seq->current;
     if (!ev) *eventtype = SEQ_DONE;
@@ -96,3 +97,16 @@ void seq_get(seq_type seq, long *eventtype, long *ntime, long *line, long *chan,
     }
 }
 
+/* seq_xlwrite_smf -- invoke seq_write_smf and mark file as closed */
+void seq_xlwrite_smf(seq_type seq, LVAL outfile)
+{
+    if (streamp(outfile)) {
+        if (getfile(outfile) == NULL) {
+            xlfail("file for seq_write_smf not open");
+        }
+        seq_write_smf(seq, getfile(outfile));
+        setfile(outfile, NULL); /* mark file as closed */
+    } else {
+        xlerror("seq_write_smf 2nd arg must be a STREAM", outfile);
+    }
+}

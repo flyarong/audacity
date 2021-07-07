@@ -12,20 +12,24 @@
 #ifndef __AUDACITY_EFFECTMANAGER__
 #define __AUDACITY_EFFECTMANAGER__
 
-#include "../Experimental.h"
-
+#include <memory>
 #include <vector>
 
-#include "audacity/EffectInterface.h"
-#include "Effect.h"
-
 #include <unordered_map>
+#include "audacity/EffectInterface.h"
+#include "Identifier.h"
 
 class AudacityCommand;
+class AudacityProject;
 class CommandContext;
 class CommandMessageTarget;
+class ComponentInterfaceSymbol;
+class Effect;
+class TrackList;
+class SelectedRegion;
+class wxString;
+typedef wxString PluginID;
 
-using EffectArray = std::vector <Effect*> ;
 using EffectMap = std::unordered_map<wxString, Effect *>;
 using AudacityCommandMap = std::unordered_map<wxString, AudacityCommand *>;
 using EffectOwnerMap = std::unordered_map< wxString, std::shared_ptr<Effect> >;
@@ -36,9 +40,26 @@ class EffectRack;
 class AudacityCommand;
 
 
+class NotifyingSelectedRegion;
+
 class AUDACITY_DLL_API EffectManager
 {
 public:
+
+   enum : unsigned {
+      // No flags specified
+      kNone = 0x00,
+      // Flag used to disable prompting for configuration parameteres.
+      kConfigured = 0x01,
+      // Flag used to disable saving the state after processing.
+      kSkipState = 0x02,
+      // Flag used to disable "Repeat Last Effect"
+      kDontRepeatLast = 0x04,
+      // Flag used to disable "Select All during Repeat Generator Effect"
+      kRepeatGen = 0x08,
+      // Flag used for repeating Nyquist Prompt
+      kRepeatNyquistPrompt = 0x10,
+   };
 
    /** Get the singleton instance of the EffectManager. Probably not safe
        for multi-thread use. */
@@ -54,26 +75,14 @@ public:
    EffectManager();
    virtual ~EffectManager();
 
-   /** (Un)Register an effect so it can be executed. */
-   // Here solely for the purpose of Nyquist Workbench until
-   // a better solution is devised.
-   const PluginID & RegisterEffect(Effect *f);
+   //! Here solely for the purpose of Nyquist Workbench until a better solution is devised.
+   /** Register an effect so it can be executed. */
+   const PluginID & RegisterEffect(std::unique_ptr<Effect> uEffect);
+   //! Used only by Nyquist Workbench module
    void UnregisterEffect(const PluginID & ID);
 
-   /** Run an effect given the plugin ID */
-   // Returns true on success.  Will only operate on tracks that
-   // have the "selected" flag set to true, which is consistent with
-   // Audacity's standard UI.
-   bool DoEffect(const PluginID & ID,
-                 wxWindow *parent,
-                 double projectRate,
-                 TrackList *list,
-                 TrackFactory *factory,
-                 SelectedRegion *selectedRegion,
-                 bool shouldPrompt = true);
-
-   wxString GetEffectFamilyName(const PluginID & ID);
-   wxString GetVendorName(const PluginID & ID);
+   TranslatableString GetEffectFamilyName(const PluginID & ID);
+   TranslatableString GetVendorName(const PluginID & ID);
 
    /** Run a command given the plugin ID */
    // Returns true on success. 
@@ -84,11 +93,11 @@ public:
 
    // Renamed from 'Effect' to 'Command' prior to moving out of this class.
    ComponentInterfaceSymbol GetCommandSymbol(const PluginID & ID);
-   wxString GetCommandName(const PluginID & ID); // translated
+   TranslatableString GetCommandName(const PluginID & ID);
    CommandID GetCommandIdentifier(const PluginID & ID);
-   wxString GetCommandDescription(const PluginID & ID);
-   wxString GetCommandUrl(const PluginID & ID);
-   wxString GetCommandTip(const PluginID & ID);
+   TranslatableString GetCommandDescription(const PluginID & ID);
+   ManualPageID GetCommandUrl(const PluginID & ID);
+   TranslatableString GetCommandTip(const PluginID & ID);
    // flags control which commands are included.
    void GetCommandDefinition(const PluginID & ID, const CommandContext & context, int flags);
    bool IsHidden(const PluginID & ID);
@@ -97,7 +106,9 @@ public:
    bool SupportsAutomation(const PluginID & ID);
    wxString GetEffectParameters(const PluginID & ID);
    bool SetEffectParameters(const PluginID & ID, const wxString & params);
-   bool PromptUser(const PluginID & ID, wxWindow *parent);
+   bool PromptUser( const PluginID & ID,
+      const EffectClientInterface::EffectDialogFactory &factory,
+      wxWindow &parent );
    bool HasPresets(const PluginID & ID);
    wxString GetPreset(const PluginID & ID, const wxString & params, wxWindow * parent);
    wxString GetDefaultPreset(const PluginID & ID);
@@ -122,63 +133,28 @@ public:
    void SetSkipStateFlag(bool flag);
    bool GetSkipStateFlag();
 
-   // Realtime effect processing
-   bool RealtimeIsActive();
-   bool RealtimeIsSuspended();
-   void RealtimeAddEffect(Effect *effect);
-   void RealtimeRemoveEffect(Effect *effect);
-   void RealtimeSetEffects(const EffectArray & mActive);
-   void RealtimeInitialize(double rate);
-   void RealtimeAddProcessor(int group, unsigned chans, float rate);
-   void RealtimeFinalize();
-   void RealtimeSuspend();
-   void RealtimeResume();
-   void RealtimeProcessStart();
-   size_t RealtimeProcess(int group, unsigned chans, float **buffers, size_t numSamples);
-   void RealtimeProcessEnd();
-   int GetRealtimeLatency();
-
-#if defined(EXPERIMENTAL_EFFECTS_RACK)
-   void ShowRack();
-#endif
-
    const PluginID & GetEffectByIdentifier(const CommandID & strTarget);
 
-private:
    /** Return an effect by its ID. */
    Effect *GetEffect(const PluginID & ID);
-   AudacityCommand *GetAudacityCommand(const PluginID & ID);
-
-#if defined(EXPERIMENTAL_EFFECTS_RACK)
-   EffectRack *GetRack();
-#endif
 
 private:
+   AudacityCommand *GetAudacityCommand(const PluginID & ID);
+
    EffectMap mEffects;
    AudacityCommandMap mCommands;
    EffectOwnerMap mHostEffects;
 
    int mNumEffects;
 
-   wxCriticalSection mRealtimeLock;
-   EffectArray mRealtimeEffects;
-   int mRealtimeLatency;
-   bool mRealtimeSuspended;
-   bool mRealtimeActive;
-   std::vector<unsigned> mRealtimeChans;
-   std::vector<double> mRealtimeRates;
-
    // Set true if we want to skip pushing state 
    // after processing at effect run time.
    bool mSkipStateFlag;
 
 #if defined(EXPERIMENTAL_EFFECTS_RACK)
-   EffectRack *mRack;
-
    friend class EffectRack;
 #endif
 
 };
-
 
 #endif

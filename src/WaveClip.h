@@ -12,29 +12,29 @@
 #ifndef __AUDACITY_WAVECLIP__
 #define __AUDACITY_WAVECLIP__
 
-#include "Audacity.h"
 
-#include "MemoryX.h"
+
 #include "SampleFormat.h"
-#include "ondemand/ODTaskThread.h"
 #include "xml/XMLTagHandler.h"
-
-#include "RealFFTf.h"
 
 #include <wx/longlong.h>
 
 #include <vector>
+#include <functional>
 
 class BlockArray;
-class DirManager;
 class Envelope;
 class ProgressDialog;
+class SampleBlock;
+class SampleBlockFactory;
+using SampleBlockFactoryPtr = std::shared_ptr<SampleBlockFactory>;
 class Sequence;
 class SpectrogramSettings;
 class WaveCache;
 class WaveTrackCache;
+class wxFileNameWrapper;
 
-class SpecCache {
+class AUDACITY_DLL_API SpecCache {
 public:
 
    // Make invalid cache
@@ -171,32 +171,34 @@ public:
 class AUDACITY_DLL_API WaveClip final : public XMLTagHandler
 {
 private:
-   // It is an error to copy a WaveClip without specifying the DirManager.
+   // It is an error to copy a WaveClip without specifying the
+   // sample block factory.
 
    WaveClip(const WaveClip&) PROHIBITED;
    WaveClip& operator= (const WaveClip&) PROHIBITED;
 
 public:
    // typical constructor
-   WaveClip(const std::shared_ptr<DirManager> &projDirManager, sampleFormat format, 
+   WaveClip(const SampleBlockFactoryPtr &factory, sampleFormat format,
       int rate, int colourIndex);
 
    // essentially a copy constructor - but you must pass in the
-   // current project's DirManager, because we might be copying
+   // current sample block factory, because we might be copying
    // from one project to another
    WaveClip(const WaveClip& orig,
-            const std::shared_ptr<DirManager> &projDirManager,
+            const SampleBlockFactoryPtr &factory,
             bool copyCutlines);
 
    // Copy only a range from the given WaveClip
    WaveClip(const WaveClip& orig,
-            const std::shared_ptr<DirManager> &projDirManager,
+            const SampleBlockFactoryPtr &factory,
             bool copyCutlines,
             double t0, double t1);
 
    virtual ~WaveClip();
 
-   void ConvertToSampleFormat(sampleFormat format);
+   void ConvertToSampleFormat(sampleFormat format,
+      const std::function<void(size_t)> & progressReport = {});
 
    // Always gives non-negative answer, not more than sample sequence length
    // even if t0 really falls outside that range
@@ -215,7 +217,8 @@ public:
    int GetColourIndex( ) const { return mColourIndex;};
    void SetOffset(double offset);
    double GetOffset() const { return mOffset; }
-   void Offset(double delta) // NOFAIL-GUARANTEE
+   /*! @excsafety{No-fail} */
+   void Offset(double delta)
       { SetOffset(GetOffset() + delta); }
    double GetStartTime() const;
    double GetEndTime() const;
@@ -229,31 +232,35 @@ public:
    bool WithinClip(double t) const;
    bool BeforeClip(double t) const;
    bool AfterClip(double t) const;
+   bool IsClipStartAfterClip(double t) const;
 
    bool GetSamples(samplePtr buffer, sampleFormat format,
                    sampleCount start, size_t len, bool mayThrow = true) const;
-   void SetSamples(samplePtr buffer, sampleFormat format,
+   void SetSamples(constSamplePtr buffer, sampleFormat format,
                    sampleCount start, size_t len);
 
    Envelope* GetEnvelope() { return mEnvelope.get(); }
    const Envelope* GetEnvelope() const { return mEnvelope.get(); }
    BlockArray* GetSequenceBlockArray();
+   const BlockArray* GetSequenceBlockArray() const;
 
    // Get low-level access to the sequence. Whenever possible, don't use this,
    // but use more high-level functions inside WaveClip (or add them if you
    // think they are useful for general use)
    Sequence* GetSequence() { return mSequence.get(); }
+   const Sequence* GetSequence() const { return mSequence.get(); }
 
    /** WaveTrack calls this whenever data in the wave clip changes. It is
     * called automatically when WaveClip has a chance to know that something
     * has changed, like when member functions SetSamples() etc. are called. */
-   void MarkChanged() // NOFAIL-GUARANTEE
+   /*! @excsafety{No-fail} */
+   void MarkChanged()
       { mDirty++; }
 
    /** Getting high-level data for screen display and clipping
     * calculations and Contrast */
    bool GetWaveDisplay(WaveDisplay &display,
-                       double t0, double pixelsPerSecond, bool &isLoadingOD) const;
+                       double t0, double pixelsPerSecond) const;
    bool GetSpectrogram(WaveTrackCache &cache,
                        const float *& spectrogram,
                        const sampleCount *& where,
@@ -263,32 +270,27 @@ public:
       double t0, double t1, bool mayThrow = true) const;
    float GetRMS(double t0, double t1, bool mayThrow = true) const;
 
-   // Set/clear/get rectangle that this WaveClip fills on screen. This is
-   // called by TrackArtist while actually drawing the tracks and clips.
-   void ClearDisplayRect() const;
-   void SetDisplayRect(const wxRect& r) const;
-   void GetDisplayRect(wxRect* r);
-
    /** Whenever you do an operation to the sequence that will change the number
     * of samples (that is, the length of the clip), you will want to call this
     * function to tell the envelope about it. */
    void UpdateEnvelopeTrackLen();
 
+   //! For use in importing pre-version-3 projects to preserve sharing of blocks
+   std::shared_ptr<SampleBlock> AppendNewBlock(
+      samplePtr buffer, sampleFormat format, size_t len);
+
+   //! For use in importing pre-version-3 projects to preserve sharing of blocks
+   void AppendSharedBlock(const std::shared_ptr<SampleBlock> &pBlock);
+
    /// You must call Flush after the last Append
-   void Append(samplePtr buffer, sampleFormat format,
-               size_t len, unsigned int stride=1,
-               XMLWriter* blockFileLog = NULL);
+   /// @return true if at least one complete block was created
+   bool Append(constSamplePtr buffer, sampleFormat format,
+               size_t len, unsigned int stride);
    /// Flush must be called after last Append
    void Flush();
 
-   void AppendAlias(const FilePath &fName, sampleCount start,
-                    size_t len, int channel,bool useOD);
-
-   void AppendCoded(const FilePath &fName, sampleCount start,
-                            size_t len, int channel, int decodeType);
-
    /// This name is consistent with WaveTrack::Clear. It performs a "Cut"
-   /// operation (but without putting the cutted audio to the clipboard)
+   /// operation (but without putting the cut audio to the clipboard)
    void Clear(double t0, double t1);
 
    /// Clear, and add cut line that starts at t0 and contains everything until t1.
@@ -319,7 +321,7 @@ public:
                     double *cutLineEnd = NULL) const;
 
    /** Expand cut line (that is, re-insert audio, then DELETE audio saved in
-    * cut line). Returns true if a cut line could be found and sucessfully
+    * cut line). Returns true if a cut line could be found and successfully
     * expanded, false otherwise */
    void ExpandCutLine(double cutLinePosition);
 
@@ -329,19 +331,11 @@ public:
    /// Offset cutlines right to time 't0' by time amount 'len'
    void OffsetCutLines(double t0, double len);
 
-   /// Lock all blockfiles
-   void Lock();
-   /// Unlock all blockfiles
-   void Unlock();
-
-   void CloseLock(); //similar to Lock but should be called when the project closes.
+   void CloseLock(); //should be called when the project closes.
    // not balanced by unlocking calls.
 
    ///Delete the wave cache - force redraw.  Thread-safe
    void ClearWaveCache();
-
-   ///Adds an invalid region to the wavecache so it redraws that portion only.
-   void AddInvalidRegion(sampleCount startSample, sampleCount endSample);
 
    //
    // XMLTagHandler callback methods for loading and saving
@@ -364,8 +358,6 @@ public:
    mutable std::unique_ptr<SpecPxCache> mSpecPxCache;
 
 protected:
-   mutable wxRect mDisplayRect {};
-
    double mOffset { 0 };
    int mRate;
    int mDirty { 0 };
@@ -375,7 +367,6 @@ protected:
    std::unique_ptr<Envelope> mEnvelope;
 
    mutable std::unique_ptr<WaveCache> mWaveCache;
-   mutable ODLock       mWaveCacheMutex {};
    mutable std::unique_ptr<SpecCache> mSpecCache;
    SampleBuffer  mAppendBuffer {};
    size_t        mAppendBufferLen { 0 };

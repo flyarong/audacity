@@ -12,21 +12,16 @@
 #ifndef __AUDACITY_EFFECT_NOISE_REMOVAL__
 #define __AUDACITY_EFFECT_NOISE_REMOVAL__
 
-#include "../Audacity.h"
 
-#include "../Experimental.h"
 
 #if !defined(EXPERIMENTAL_NOISE_REDUCTION)
 
 #include "Effect.h"
-
-#include "../MemoryX.h"
-#include "../SampleFormat.h"
+#include "EffectUI.h"
 
 class wxButton;
 class wxSizer;
 class wxSlider;
-class wxString;
 
 class Envelope;
 class WaveTrack;
@@ -36,18 +31,18 @@ class wxTextCtrl;
 
 #include "../RealFFTf.h"
 
-#define NOISEREMOVAL_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Noise Removal") }
-
 class EffectNoiseRemoval final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectNoiseRemoval();
    virtual ~EffectNoiseRemoval();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 
@@ -56,7 +51,8 @@ public:
 
    // Effect implementation
 
-   bool PromptUser(wxWindow *parent) override;
+   bool ShowInterface( wxWindow &parent,
+      const EffectDialogFactory &factory, bool forceModal = false) override;
    bool Init() override;
    bool CheckWhetherSkipEffect() override;
    bool Process() override;
@@ -100,7 +96,7 @@ private:
    void FinishTrack();
 
    // Variables that only exist during processing
-   std::unique_ptr<WaveTrack> mOutputTrack;
+   std::shared_ptr<WaveTrack> mOutputTrack;
    sampleCount       mInSampleCount;
    sampleCount       mOutSampleCount;
    int                   mInputPos;
@@ -144,7 +140,7 @@ public:
    wxSizer *MakeNoiseRemovalDialog(bool call_fit = true,
                                    bool set_sizer = true);
 
-   void PopulateOrExchange(ShuttleGui & S);
+   void PopulateOrExchange(ShuttleGui & S) override;
    bool TransferDataToWindow() override;
    bool TransferDataFromWindow() override;
 
@@ -152,7 +148,7 @@ private:
    // handlers
    void OnGetProfile( wxCommandEvent &event );
    void OnKeepNoise( wxCommandEvent &event );
-   void OnPreview(wxCommandEvent &event);
+   void OnPreview(wxCommandEvent &event) override;
    void OnRemoveNoise( wxCommandEvent &event );
    void OnCancel( wxCommandEvent &event );
 

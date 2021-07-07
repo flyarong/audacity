@@ -11,7 +11,6 @@
 #ifndef __AUDACITY_DEVICE_TOOLBAR__
 #define __AUDACITY_DEVICE_TOOLBAR__
 
-#include "../MemoryX.h"
 #include <vector>
 #include "ToolBar.h"
 
@@ -20,22 +19,27 @@ class wxPoint;
 class wxChoice;
 struct DeviceSourceMap;
 
+class AudacityProject;
+
 class DeviceToolBar final : public ToolBar {
 
  public:
 
-   DeviceToolBar();
+   DeviceToolBar( AudacityProject &project );
    virtual ~DeviceToolBar();
+
+   static DeviceToolBar &Get( AudacityProject &project );
+   static const DeviceToolBar &Get( const AudacityProject &project );
 
    void Create(wxWindow * parent) override;
 
    void UpdatePrefs() override;
+   void UpdateSelectedPrefs( int ) override;
 
    void DeinitChildren();
    void Populate() override;
    void Repaint(wxDC * WXUNUSED(dc)) override {};
    void EnableDisableButtons() override;
-   bool Layout() override;
    void OnFocus(wxFocusEvent &event);
    void OnCaptureKey(wxCommandEvent &event);
 
@@ -51,19 +55,19 @@ class DeviceToolBar final : public ToolBar {
    void ShowHostDialog();
    void ShowChannelsDialog();
 
-   void RefillCombos();
-
  private:
+   void OnRescannedDevices( wxCommandEvent& );
+
    int  ChangeHost();
    void ChangeDevice(bool isInput);
+   void RefillCombos();
    void FillHosts();
    void FillHostDevices();
    void FillInputChannels();
    void SetDevices(const DeviceSourceMap *in, const DeviceSourceMap *out);
-   void RepositionCombos();
    void SetNames();
    void RegenerateTooltips() override;
-   void ShowComboDialog(wxChoice *combo, const wxString &title);
+   void ShowComboDialog(wxChoice *combo, const TranslatableString &title);
 
    wxChoice *mInput;
    wxChoice *mOutput;

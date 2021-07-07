@@ -12,79 +12,55 @@
 \class ErrorDialog
 \brief Gives an Error message with an option for help.
 
-*//*****************************************************************//**
-
-\class AliasedFileMissingDialog
-\brief Special case of ErrorDialog for reporting missing alias files.
-
 *//********************************************************************/
 
-#include "../Audacity.h"
+
 #include "ErrorDialog.h"
 
+#include <wx/app.h>
 #include <wx/button.h>
+#include <wx/collpane.h>
 #include <wx/icon.h>
 #include <wx/dialog.h>
 #include <wx/intl.h>
 #include <wx/sizer.h>
+#include <wx/statbmp.h>
 #include <wx/stattext.h>
 #include <wx/utils.h>
 #include <wx/html/htmlwin.h>
 #include <wx/settings.h>
 #include <wx/statusbr.h>
+#include <wx/artprov.h>
 
-#include "LinkingHtmlWindow.h"
-#include "../Theme.h"
 #include "../AllThemeResources.h"
+#include "CodeConversions.h"
 #include "../ShuttleGui.h"
 #include "../HelpText.h"
-#include "../Internat.h"
-#include "../Project.h"
 #include "../Prefs.h"
 #include "HelpSystem.h"
 
-// special case for alias missing dialog because we keep track of if it exists.
-class AliasedFileMissingDialog final : public ErrorDialog
-{
-   public:
-   AliasedFileMissingDialog(AudacityProject *parent,
-      const wxString & dlogTitle,
-      const wxString & message,
-      const wxString & helpURL,
-      const bool Close = true, const bool modal = true);
-   virtual ~AliasedFileMissingDialog();
-};
+#ifdef HAS_SENTRY_REPORTING
+#   include "ErrorReportDialog.h"
+#endif
 
 BEGIN_EVENT_TABLE(ErrorDialog, wxDialogWrapper)
+   EVT_COLLAPSIBLEPANE_CHANGED( wxID_ANY, ErrorDialog::OnPane )
    EVT_BUTTON( wxID_OK, ErrorDialog::OnOk)
    EVT_BUTTON( wxID_HELP, ErrorDialog::OnHelp)
 END_EVENT_TABLE()
 
-
-AliasedFileMissingDialog::AliasedFileMissingDialog(AudacityProject *parent,
-      const wxString & dlogTitle,
-      const wxString & message,
-      const wxString & helpURL,
-      const bool Close, const bool modal):
-ErrorDialog(parent, dlogTitle, message, helpURL, Close, modal)
-{
-   parent->SetMissingAliasFileDialog(this);
-}
-
-AliasedFileMissingDialog::~AliasedFileMissingDialog()
-{
-   ((AudacityProject*)GetParent())->SetMissingAliasFileDialog(NULL);
-}
-
 ErrorDialog::ErrorDialog(
    wxWindow *parent,
-   const wxString & dlogTitle,
-   const wxString & message,
-   const wxString & helpPage,
-   const bool Close, const bool modal):
-   wxDialogWrapper(parent, (wxWindowID)-1, dlogTitle)
+   const TranslatableString & dlogTitle,
+   const TranslatableString & message,
+   const ManualPageID & helpPage,
+   const std::wstring & log,
+   const bool Close, const bool modal)
+:  wxDialogWrapper(parent, wxID_ANY, dlogTitle,
+                   wxDefaultPosition, wxDefaultSize,
+                   wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
 {
-   SetName(GetTitle());
+   SetName();
 
    long buttonMask;
 
@@ -96,53 +72,56 @@ ErrorDialog::ErrorDialog(
 
    ShuttleGui S(this, eIsCreating);
 
-   S.StartVerticalLay();
+   S.SetBorder(2);
+   S.StartHorizontalLay(wxEXPAND, 0);
    {
-      S.SetBorder( 20 );
-      S.AddFixedText( message );
-      S.SetBorder( 2 );
-      S.AddStandardButtons( buttonMask );
+      S.SetBorder(20);
+      wxBitmap bitmap = wxArtProvider::GetBitmap(wxART_WARNING);
+      S.AddWindow(safenew wxStaticBitmap(S.GetParent(), -1, bitmap));
+
+      S.SetBorder(20);
+      S.AddFixedText(message, false, 500);
    }
-   S.EndVerticalLay();
+   S.EndHorizontalLay();
+
+   S.SetBorder(2);
+   if (!log.empty())
+   {
+      S.StartHorizontalLay(wxEXPAND, 1);
+      {
+         S.SetBorder(5);
+
+         auto pane = safenew wxCollapsiblePane(S.GetParent(),
+                                               wxID_ANY,
+                                               XO("Show &Log...").Translation());
+         S.Style(wxEXPAND | wxALIGN_LEFT);
+         S.Prop(1);
+         S.AddWindow(pane);
+
+         ShuttleGui SI(pane->GetPane(), eIsCreating);
+         auto text = SI.AddTextWindow(log);
+         text->SetInsertionPointEnd();
+         text->ShowPosition(text->GetLastPosition());
+         text->SetMinSize(wxSize(700, 250));
+      }
+      S.EndHorizontalLay();
+   }
+
+   S.SetBorder(2);
+   S.AddStandardButtons(buttonMask);
 
    Layout();
    GetSizer()->Fit(this);
    SetMinSize(GetSize());
    Center();
+}
 
-#if 0
-   // Original non ShuttleGui based code.
-   // Layout did not look good on Windows.
-   wxBoxSizer mainSizer;
+void ErrorDialog::OnPane(wxCollapsiblePaneEvent & event)
+{
+   if (!event.GetCollapsed())
    {
-      auto uMainSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
-      mainSizer = uMainSizer.get();
-      auto vSizer = make_unique<xBoxSizer>(wxVERTICAL);
-
-      auto hSizer = make_unique<wxBoxSizer>(wxHORIZONTAL);
-
-      wxStaticText *statText = safenew wxStaticText(this, -1, message);
-      mainSizer->Add(statText, 0, wxALIGN_LEFT|wxALL, 5);
-
-      wxButton *help = safenew wxButton(this, wxID_HELP, _("Help"));
-      hSizer->Add(help, 0, wxALIGN_LEFT|wxALL, 5);
-
-      wxButton *ok = safenew wxButton(this, wxID_OK, _("OK"));
-      ok->SetDefault();
-      ok->SetFocus();
-      hSizer->Add(ok, 0, wxALIGN_RIGHT|wxALL, 5);
-
-      vSizer->Add(hSizer.release(), 0, wxALIGN_CENTER|wxALL, 5);
-
-      mainSizer->Add(vSizer.release(), 0, wxALL, 15 );
-
-      SetAutoLayout(true);
-      SetSizer(uMainSizer.release());
+      Center();
    }
-
-   mainSizer->Fit(this);
-   mainSizer->SetSizeHints(this);
-#endif
 }
 
 void ErrorDialog::OnOk(wxCommandEvent & WXUNUSED(event))
@@ -153,15 +132,15 @@ void ErrorDialog::OnOk(wxCommandEvent & WXUNUSED(event))
       Destroy();
 }
 
-
 void ErrorDialog::OnHelp(wxCommandEvent & WXUNUSED(event))
 {
-   if( dhelpPage.StartsWith(wxT("innerlink:")) )
+   const auto &str = dhelpPage.GET();
+   if( str.StartsWith(wxT("innerlink:")) )
    {
       HelpSystem::ShowHtmlText(
          this,
-         TitleText(dhelpPage.Mid( 10 ) ),
-         HelpText( dhelpPage.Mid( 10 )),
+         TitleText(str.Mid( 10 ) ),
+         HelpText( str.Mid( 10 )),
          false,
          true );
       return;
@@ -173,29 +152,45 @@ void ErrorDialog::OnHelp(wxCommandEvent & WXUNUSED(event))
 }
 
 void ShowErrorDialog(wxWindow *parent,
-                     const wxString &dlogTitle,
-                     const wxString &message,
-                     const wxString &helpPage,
-                     const bool Close)
+                     const TranslatableString &dlogTitle,
+                     const TranslatableString &message,
+                     const ManualPageID &helpPage,
+                     const bool Close,
+                     const std::wstring &log)
 {
-   ErrorDialog dlog(parent, dlogTitle, message, helpPage, Close);
+   ErrorDialog dlog(parent, dlogTitle, message, helpPage, log, Close);
    dlog.CentreOnParent();
    dlog.ShowModal();
 }
 
 
+void ShowExceptionDialog(
+   wxWindow* parent, const TranslatableString& dlogTitle,
+   const TranslatableString& message, const wxString& helpPage, bool Close,
+   const wxString& log)
+{
+#ifndef HAS_SENTRY_REPORTING
+   ShowErrorDialog(parent, dlogTitle, message, helpPage, Close,
+      audacity::ToWString(log));
+#else
+   ShowErrorReportDialog(parent, dlogTitle, message, helpPage,
+      audacity::ToWString(log));
+#endif // !HAS_SENTRY_REPORTING
+}
+
 // unused.
 void ShowModelessErrorDialog(wxWindow *parent,
-                             const wxString &dlogTitle,
-                             const wxString &message,
-                             const wxString &helpPage,
-                             const bool Close)
+                             const TranslatableString &dlogTitle,
+                             const TranslatableString &message,
+                             const ManualPageID &helpPage,
+                             const bool Close,
+                             const std::wstring &log)
 {
    // ensure it has some parent.
    if( !parent )
       parent = wxTheApp->GetTopWindow();
    wxASSERT(parent);
-   ErrorDialog *dlog = safenew ErrorDialog(parent, dlogTitle, message, helpPage, Close, false);
+   ErrorDialog *dlog = safenew ErrorDialog(parent, dlogTitle, message, helpPage, log, Close, false);
    dlog->CentreOnParent();
    dlog->Show();
    // ANSWER-ME: Vigilant Sentry flagged this method as not deleting dlog, so 
@@ -204,41 +199,19 @@ void ShowModelessErrorDialog(wxWindow *parent,
    // but in practice Destroy() in OnOK does that
 }
 
-void ShowAliasMissingDialog(AudacityProject *parent,
-                            const wxString &dlogTitle,
-                            const wxString &message,
-                            const wxString &helpPage,
-                            const bool Close)
-{
-   wxASSERT(parent); // to justify safenew
-   ErrorDialog *dlog = safenew AliasedFileMissingDialog(parent, dlogTitle, message, helpPage, Close, false);
-   // Don't center because in many cases (effect, export, etc) there will be a progress bar in the center that blocks this.
-   // instead put it just above or on the top of the project.
-   wxPoint point;
-   point.x = 0;
-
-   point.y = parent ? parent->GetPosition().y - 200 : 100;
-
-   if (point.y < 100)
-      point.y = 100;
-   dlog->SetPosition(point);
-   dlog->CentreOnParent(wxHORIZONTAL);
-
-   // This needs to be modeless because user may need to
-   // stop playback AND read dialog's instructions.
-   dlog->Show();
-   // ANSWER-ME: Vigilant Sentry flags this method as not deleting dlog, so a mem leak.
-   // PRL: answer is that the parent window guarantees destruction of the dialog
-   // but in practice Destroy() in OnOK does that
-}
-
-extern wxString AudacityMessageBoxCaptionStr()
-{
-   return _("Message");
-}
-
 void AudacityTextEntryDialog::SetInsertionPointEnd()
 {
-   // m_textctrl is protected member of wxTextEntryDialog
-   m_textctrl->SetInsertionPointEnd();
+   mSetInsertionPointEnd = true;
+}
+
+bool AudacityTextEntryDialog::Show(bool show)
+{
+   bool ret = wxTabTraversalWrapper< wxTextEntryDialog >::Show(show);
+
+   if (show && mSetInsertionPointEnd) {
+      // m_textctrl is protected member of wxTextEntryDialog
+      m_textctrl->SetInsertionPointEnd();
+   }
+
+   return ret;
 }

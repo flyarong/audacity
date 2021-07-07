@@ -50,27 +50,66 @@
 *//*******************************************************************/
 
 
-#include "Audacity.h"
+
 #include "Prefs.h"
 
 #include <wx/defs.h>
 #include <wx/app.h>
 #include <wx/intl.h>
-#include <wx/fileconf.h>
 #include <wx/filename.h>
 #include <wx/stdpaths.h>
 
-#include "AudacityApp.h"
-#include "FileNames.h"
-#include "Languages.h"
-
-#include "widgets/ErrorDialog.h"
 #include "Internat.h"
+#include "MemoryX.h"
+#include <memory>
 
-std::unique_ptr<AudacityPrefs> ugPrefs {};
+std::unique_ptr<FileConfig> ugPrefs {};
 
-AudacityPrefs *gPrefs = NULL;
+FileConfig *gPrefs = nullptr;
 int gMenusDirty = 0;
+
+wxDEFINE_EVENT(EVT_PREFS_UPDATE, wxCommandEvent);
+
+struct PrefsListener::Impl : wxEvtHandler
+{
+   Impl( PrefsListener &owner );
+   ~Impl();
+   void OnEvent(wxCommandEvent&);
+   PrefsListener &mOwner;
+};
+
+PrefsListener::Impl::Impl( PrefsListener &owner )
+   : mOwner{ owner }
+{
+   wxTheApp->Bind(EVT_PREFS_UPDATE, &PrefsListener::Impl::OnEvent, this);
+}
+
+PrefsListener::Impl::~Impl()
+{
+}
+
+PrefsListener::PrefsListener()
+   : mpImpl{ std::make_unique<Impl>( *this ) }
+{
+}
+
+PrefsListener::~PrefsListener()
+{
+}
+
+void PrefsListener::UpdateSelectedPrefs( int )
+{
+}
+
+void PrefsListener::Impl::OnEvent( wxCommandEvent &evt )
+{
+   evt.Skip();
+   auto id = evt.GetId();
+   if (id <= 0)
+      mOwner.UpdatePrefs();
+   else
+      mOwner.UpdateSelectedPrefs( id );
+}
 
 #if 0
 // Copy one entry from one wxConfig object to another
@@ -133,229 +172,11 @@ static void CopyEntriesRecursive(wxString path, wxConfigBase *src, wxConfigBase 
 }
 #endif
 
-AudacityPrefs::AudacityPrefs(const wxString& appName,
-               const wxString& vendorName,
-               const wxString& localFilename,
-               const wxString& globalFilename,
-               long style,
-               const wxMBConv& conv) :
-   wxFileConfig(appName,
-               vendorName,
-               localFilename,
-               globalFilename,
-               style,
-               conv)
+void InitPreferences( std::unique_ptr<FileConfig> uPrefs )
 {
-}
-
-
-
-// Bug 825 is essentially that SyncLock requires EditClipsCanMove.
-// SyncLock needs rethinking, but meanwhile this function 
-// fixes the issues of Bug 825 by allowing clips to move when in 
-// SyncLock.
-bool AudacityPrefs::GetEditClipsCanMove()
-{
-   bool mIsSyncLocked;
-   gPrefs->Read(wxT("/GUI/SyncLockTracks"), &mIsSyncLocked, false);
-   if( mIsSyncLocked )
-      return true;
-   bool editClipsCanMove;
-   Read(wxT("/GUI/EditClipCanMove"), &editClipsCanMove, true);
-   return editClipsCanMove;
-}
-
-void InitPreferences()
-{
-   wxString appName = wxTheApp->GetAppName();
-
-   wxFileName configFileName(FileNames::DataDir(), wxT("audacity.cfg"));
-
-   ugPrefs = std::make_unique<AudacityPrefs>
-      (appName, wxEmptyString,
-       configFileName.GetFullPath(),
-       wxEmptyString, wxCONFIG_USE_LOCAL_FILE);
-   gPrefs = ugPrefs.get();
-
+   gPrefs = uPrefs.get();
+   ugPrefs = std::move(uPrefs);
    wxConfigBase::Set(gPrefs);
-
-   bool resetPrefs = false;
-   wxString langCode = gPrefs->Read(wxT("/Locale/Language"), wxEmptyString);
-   bool writeLang = false;
-
-   const wxFileName fn(
-      FileNames::ResourcesDir(), 
-      wxT("FirstTime.ini"));
-   if (fn.FileExists())   // it will exist if the (win) installer put it there
-   {
-      const wxString fullPath{fn.GetFullPath()};
-
-      wxFileConfig ini(wxEmptyString,
-                       wxEmptyString,
-                       fullPath,
-                       wxEmptyString,
-                       wxCONFIG_USE_LOCAL_FILE);
-
-      wxString lang;
-      if (ini.Read(wxT("/FromInno/Language"), &lang))
-      {
-         // Only change "langCode" if the language was actually specified in the ini file.
-         langCode = lang;
-         writeLang = true;
-
-         // Inno Setup doesn't allow special characters in the Name values, so "0" is used
-         // to represent the "@" character.
-         langCode.Replace(wxT("0"), wxT("@"));
-      }
-
-      ini.Read(wxT("/FromInno/ResetPrefs"), &resetPrefs, false);
-
-      bool gone = wxRemoveFile(fullPath);  // remove FirstTime.ini
-      if (!gone)
-      {
-         AudacityMessageBox(wxString::Format(_("Failed to remove %s"), fullPath), _("Failed!"));
-      }
-   }
-
-   langCode = wxGetApp().InitLang( langCode );
-
-   // User requested that the preferences be completely reset
-   if (resetPrefs)
-   {
-      // pop up a dialogue
-      wxString prompt = _("Reset Preferences?\n\nThis is a one-time question, after an 'install' where you asked to have the Preferences reset.");
-      int action = AudacityMessageBox(prompt, _("Reset Audacity Preferences"),
-                                wxYES_NO, NULL);
-      if (action == wxYES)   // reset
-      {
-         gPrefs->DeleteAll();
-         writeLang = true;
-      }
-   }
-
-   // Save the specified language
-   if (writeLang)
-   {
-      gPrefs->Write(wxT("/Locale/Language"), langCode);
-   }
-
-   // In AUdacity 2.1.0 support for the legacy 1.2.x preferences (depreciated since Audacity
-   // 1.3.1) is dropped. As a result we can drop the import flag
-   // first time this version of Audacity is run we try to migrate
-   // old preferences.
-   bool newPrefsInitialized = false;
-   gPrefs->Read(wxT("/NewPrefsInitialized"), &newPrefsInitialized, false);
-   if (newPrefsInitialized) {
-      gPrefs->DeleteEntry(wxT("/NewPrefsInitialized"), true);  // take group as well if empty
-   }
-
-   // record the Prefs version for future checking (this has not been used for a very
-   // long time).
-   gPrefs->Write(wxT("/PrefsVersion"), wxString(wxT(AUDACITY_PREFS_VERSION_STRING)));
-
-   // Check if some prefs updates need to happen based on audacity version.
-   // Unfortunately we can't use the PrefsVersion prefs key because that resets things.
-   // In the future we may want to integrate that better.
-   // these are done on a case-by-case basis for now so they must be backwards compatible
-   // (meaning the changes won't mess audacity up if the user goes back to an earlier version)
-   int vMajor = gPrefs->Read(wxT("/Version/Major"), (long) 0);
-   int vMinor = gPrefs->Read(wxT("/Version/Minor"), (long) 0);
-   int vMicro = gPrefs->Read(wxT("/Version/Micro"), (long) 0);
-
-   wxGetApp().SetVersionKeysInit(vMajor, vMinor, vMicro);   // make a note of these initial values
-                                                            // for use by ToolManager::ReadConfig()
-
-   // These integer version keys were introduced april 4 2011 for 1.3.13
-   // The device toolbar needs to be enabled due to removal of source selection features in
-   // the mixer toolbar.
-   if ((vMajor < 1) ||
-       (vMajor == 1 && vMinor < 3) ||
-       (vMajor == 1 && vMinor == 3 && vMicro < 13)) {
-
-
-      // Do a full reset of the Device Toolbar to get it on the screen.
-      if (gPrefs->Exists(wxT("/GUI/ToolBars/Device")))
-         gPrefs->DeleteGroup(wxT("/GUI/ToolBars/Device"));
-
-      // We keep the mixer toolbar prefs (shown/not shown)
-      // the width of the mixer toolbar may have shrunk, the prefs will keep the larger value
-      // if the user had a device that had more than one source.
-      if (gPrefs->Exists(wxT("/GUI/ToolBars/Mixer"))) {
-         // Use the default width
-         gPrefs->Write(wxT("/GUI/ToolBars/Mixer/W"), -1);
-      }
-   }
-
-   // In 2.1.0, the Meter toolbar was split and lengthened, but strange arrangements happen
-   // if upgrading due to the extra length.  So, if a user is upgrading, use the pre-2.1.0
-   // lengths, but still use the NEW split versions.
-   if (gPrefs->Exists(wxT("/GUI/ToolBars/Meter")) &&
-      !gPrefs->Exists(wxT("/GUI/ToolBars/CombinedMeter"))) {
-
-      // Read in all of the existing values
-      long dock, order, show, x, y, w, h;
-      gPrefs->Read(wxT("/GUI/ToolBars/Meter/Dock"), &dock, -1);
-      gPrefs->Read(wxT("/GUI/ToolBars/Meter/Order"), &order, -1);
-      gPrefs->Read(wxT("/GUI/ToolBars/Meter/Show"), &show, -1);
-      gPrefs->Read(wxT("/GUI/ToolBars/Meter/X"), &x, -1);
-      gPrefs->Read(wxT("/GUI/ToolBars/Meter/Y"), &y, -1);
-      gPrefs->Read(wxT("/GUI/ToolBars/Meter/W"), &w, -1);
-      gPrefs->Read(wxT("/GUI/ToolBars/Meter/H"), &h, -1);
-
-      // "Order" must be adjusted since we're inserting two NEW toolbars
-      if (dock > 0) {
-         wxString oldPath = gPrefs->GetPath();
-         gPrefs->SetPath(wxT("/GUI/ToolBars"));
-
-         wxString bar;
-         long ndx = 0;
-         bool cont = gPrefs->GetFirstGroup(bar, ndx);
-         while (cont) {
-            long o;
-            if (gPrefs->Read(bar + wxT("/Order"), &o) && o >= order) {
-               gPrefs->Write(bar + wxT("/Order"), o + 2);
-            }
-            cont = gPrefs->GetNextGroup(bar, ndx);
-         }
-         gPrefs->SetPath(oldPath);
-
-         // And override the height
-         h = 27;
-      }
-
-      // Write the split meter bar values
-      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/Dock"), dock);
-      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/Order"), order);
-      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/Show"), show);
-      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/X"), -1);
-      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/Y"), -1);
-      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/W"), w);
-      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/H"), h);
-      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/Dock"), dock);
-      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/Order"), order + 1);
-      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/Show"), show);
-      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/X"), -1);
-      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/Y"), -1);
-      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/W"), w);
-      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/H"), h);
-
-      // And hide the old combined meter bar
-      gPrefs->Write(wxT("/GUI/ToolBars/Meter/Dock"), -1);
-   }
-
-   // Upgrading pre 2.2.0 configs we assume extended set of defaults.
-   if ((0<vMajor && vMajor < 2) ||
-       (vMajor == 2 && vMinor < 2))
-   {
-      gPrefs->Write(wxT("/GUI/Shortcuts/FullDefaults"),1);
-   }
-
-   // write out the version numbers to the prefs file for future checking
-   gPrefs->Write(wxT("/Version/Major"), AUDACITY_VERSION);
-   gPrefs->Write(wxT("/Version/Minor"), AUDACITY_RELEASE);
-   gPrefs->Write(wxT("/Version/Micro"), AUDACITY_REVISION);
-
-   gPrefs->Flush();
 }
 
 void FinishPreferences()
@@ -368,9 +189,58 @@ void FinishPreferences()
 }
 
 //////////
+EnumValueSymbols::EnumValueSymbols(
+   ByColumns_t,
+   const TranslatableStrings &msgids,
+   wxArrayStringEx internals
+)
+   : mInternals( std::move( internals ) )
+{
+   auto size = mInternals.size(), size2 = msgids.size();
+   if ( size != size2 ) {
+      wxASSERT( false );
+      size = std::min( size, size2 );
+   }
+   reserve( size );
+   auto iter1 = mInternals.begin();
+   auto iter2 = msgids.begin();
+   while( size-- )
+      emplace_back( *iter1++, *iter2++ );
+}
+
+const TranslatableStrings &EnumValueSymbols::GetMsgids() const
+{
+   if ( mMsgids.empty() )
+      mMsgids = transform_container<TranslatableStrings>( *this,
+         std::mem_fn( &EnumValueSymbol::Msgid ) );
+   return mMsgids;
+}
+
+const wxArrayStringEx &EnumValueSymbols::GetInternals() const
+{
+   if ( mInternals.empty() )
+      mInternals = transform_container<wxArrayStringEx>( *this,
+         std::mem_fn( &EnumValueSymbol::Internal ) );
+   return mInternals;
+}
+
+//////////
+const EnumValueSymbol &ChoiceSetting::Default() const
+{
+   if ( mDefaultSymbol >= 0 && mDefaultSymbol < (long)mSymbols.size() )
+      return mSymbols[ mDefaultSymbol ];
+   static EnumValueSymbol empty;
+   return empty;
+}
+
 wxString ChoiceSetting::Read() const
 {
    const auto &defaultValue = Default().Internal();
+   return ReadWithDefault( defaultValue );
+}
+
+wxString ChoiceSetting::ReadWithDefault( const wxString &defaultValue ) const
+{
    wxString value;
    if ( !gPrefs->Read(mKey, &value, defaultValue) )
       if (!mMigrated) {
@@ -381,16 +251,17 @@ wxString ChoiceSetting::Read() const
    // Remap to default if the string is not known -- this avoids surprises
    // in case we try to interpret config files from future versions
    auto index = Find( value );
-   if ( index >= mnSymbols )
+   if ( index >= mSymbols.size() )
       value = defaultValue;
    return value;
 }
 
 size_t ChoiceSetting::Find( const wxString &value ) const
 {
+   auto start = GetSymbols().begin();
    return size_t(
-      std::find( begin(), end(), EnumValueSymbol{ value, {} } )
-         - mSymbols );
+      std::find( start, GetSymbols().end(), EnumValueSymbol{ value, {} } )
+         - start );
 }
 
 void ChoiceSetting::Migrate( wxString &value )
@@ -401,7 +272,7 @@ void ChoiceSetting::Migrate( wxString &value )
 bool ChoiceSetting::Write( const wxString &value )
 {
    auto index = Find( value );
-   if (index >= mnSymbols)
+   if (index >= mSymbols.size())
       return false;
 
    auto result = gPrefs->Write( mKey, value );
@@ -409,27 +280,65 @@ bool ChoiceSetting::Write( const wxString &value )
    return result;
 }
 
-int EnumSetting::ReadInt() const
-{
-   if (!mIntValues)
-      return 0;
+EnumSettingBase::EnumSettingBase(
+   const SettingBase &key,
+   EnumValueSymbols symbols,
+   long defaultSymbol,
 
+   std::vector<int> intValues, // must have same size as symbols
+   const wxString &oldKey
+)
+   : ChoiceSetting{ key, std::move( symbols ), defaultSymbol }
+   , mIntValues{ std::move( intValues ) }
+   , mOldKey{ oldKey }
+{
+   auto size = mSymbols.size();
+   if( mIntValues.size() != size ) {
+      wxASSERT( false );
+      mIntValues.resize( size );
+   }
+}
+
+void ChoiceSetting::SetDefault( long value )
+{
+   if ( value < (long)mSymbols.size() )
+      mDefaultSymbol = value;
+   else
+      wxASSERT( false );
+}
+
+int EnumSettingBase::ReadInt() const
+{
    auto index = Find( Read() );
-   wxASSERT( index < mnSymbols );
+
+   wxASSERT( index < mIntValues.size() );
    return mIntValues[ index ];
 }
 
-size_t EnumSetting::FindInt( int code ) const
+int EnumSettingBase::ReadIntWithDefault( int defaultValue ) const
 {
-   if (!mIntValues)
-      return mnSymbols;
+   wxString defaultString;
+   auto index0 = FindInt( defaultValue );
+   if ( index0 < mSymbols.size() )
+      defaultString = mSymbols[ index0 ].Internal();
+   else
+      wxASSERT( false );
 
-   return size_t(
-      std::find( mIntValues, mIntValues + mnSymbols, code )
-         - mIntValues );
+   auto index = Find( ReadWithDefault( defaultString ) );
+
+   wxASSERT( index < mSymbols.size() );
+   return mIntValues[ index ];
 }
 
-void EnumSetting::Migrate( wxString &value )
+size_t EnumSettingBase::FindInt( int code ) const
+{
+   const auto start = mIntValues.begin();
+   return size_t(
+      std::find( start, mIntValues.end(), code )
+         - start );
+}
+
+void EnumSettingBase::Migrate( wxString &value )
 {
    int intValue = 0;
    if ( !mOldKey.empty() &&
@@ -438,19 +347,75 @@ void EnumSetting::Migrate( wxString &value )
       // Do not DELETE the old key -- let that be read if user downgrades
       // Audacity.  But further changes will be stored only to the NEW key
       // and won't be seen then.
-      auto index = FindInt( intValue );
-      if ( index >= mnSymbols )
+      auto index = (long) FindInt( intValue );
+      if ( index >= (long)mSymbols.size() )
          index = mDefaultSymbol;
-      value = mSymbols[index].Internal();
-      Write(value);
-      gPrefs->Flush();
+      if ( index >= 0 && index < (long)mSymbols.size() ) {
+         value = mSymbols[index].Internal();
+         Write(value);
+         gPrefs->Flush();
+      }
    }
 }
 
-bool EnumSetting::WriteInt( int code ) // you flush gPrefs afterward
+bool EnumSettingBase::WriteInt( int code ) // you flush gPrefs afterward
 {
    auto index = FindInt( code );
-   if ( index >= mnSymbols )
+   if ( index >= mSymbols.size() )
       return false;
    return Write( mSymbols[index].Internal() );
+}
+
+wxString WarningDialogKey(const wxString &internalDialogName)
+{
+   return wxT("/Warnings/") + internalDialogName;
+}
+
+ByColumns_t ByColumns{};
+
+#include <set>
+
+namespace {
+   using PreferenceInitializers = std::set< PreferenceInitializer* >;
+   PreferenceInitializers &allInitializers()
+   {
+      static PreferenceInitializers theSet;
+      return theSet;
+   }
+}
+
+PreferenceInitializer::PreferenceInitializer()
+{
+   allInitializers().insert( this );
+}
+
+PreferenceInitializer::~PreferenceInitializer()
+{
+   allInitializers().erase( this );
+}
+
+void PreferenceInitializer::ReinitializeAll()
+{
+   for ( auto pInitializer : allInitializers() )
+      (*pInitializer)();
+}
+
+wxConfigBase *SettingBase::GetConfig() const
+{
+   return gPrefs;
+}
+
+bool SettingBase::Delete()
+{
+   auto config = GetConfig();
+   return config && config->DeleteEntry( GetPath() );
+}
+
+bool BoolSetting::Toggle()
+{
+   bool value = Read();
+   if ( Write( !value ) )
+      return !value;
+   else
+      return value;
 }

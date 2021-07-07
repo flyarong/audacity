@@ -11,9 +11,7 @@ Paul Licameli
 #ifndef __AUDACITY_CUTLINE_HANDLE__
 #define __AUDACITY_CUTLINE_HANDLE__
 
-#include "../../../../MemoryX.h"
 #include "../../../../UIHandle.h"
-#include "../../../../MemoryX.h"
 #include "../../../../WaveTrackLocation.h"
 
 class wxMouseEvent;
@@ -45,7 +43,7 @@ public:
    const WaveTrackLocation &GetLocation() { return mLocation; }
    std::shared_ptr<WaveTrack> GetTrack() { return mpTrack; }
 
-   void Enter(bool forward) override;
+   void Enter(bool forward, AudacityProject *) override;
 
    Result Click
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
@@ -54,7 +52,7 @@ public:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release

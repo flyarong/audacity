@@ -17,8 +17,8 @@
 \class Shuttle
 \brief Moves data from one place to another, converting it as required.
 
-  Shuttle provides a base class for transfering parameter data into and
-  out of clasess into some other structure.  This is a common
+  Shuttle provides a base class for transferring parameter data into and
+  out of classes into some other structure.  This is a common
   requirement and is needed for:
     - Prefs data
     - Command line parameter data
@@ -50,7 +50,7 @@ preferences.
 
 *//*******************************************************************/
 
-#include "Audacity.h"
+
 #include "Shuttle.h"
 
 #include <wx/defs.h>
@@ -67,7 +67,6 @@ preferences.
 
 #include "../include/audacity/EffectAutomationParameters.h" // for command automation
 
-//#include "Project.h"
 #include "WrappedType.h"
 //#include "effects/Effect.h"
 
@@ -307,11 +306,6 @@ bool ShuttleCli::ExchangeWithMaster(const wxString & Name)
 }
 
 
-bool ShuttleParams::ExchangeWithMaster(const wxString & WXUNUSED(Name))
-{
-   return true;
-}
-
 #ifdef _MSC_VER
 // If this is compiled with MSVC (Visual Studio)
 #pragma warning( push )
@@ -373,7 +367,7 @@ void ShuttleGetAutomation::Define( int & var,      const wxChar * key, const int
 void ShuttleGetAutomation::Define( size_t & var,      const wxChar * key, const int vdefault, const int vmin, const int vmax, const int vscl )
 {
    if( !ShouldSet() ) return;
-   mpEap->Write(key, var);
+   mpEap->Write(key, (int) var);
 }
 
 void ShuttleGetAutomation::Define( double & var,   const wxChar * key, const float vdefault, const float vmin, const float vmax, const float vscl )
@@ -523,129 +517,6 @@ void ShuttleSetAutomation::DefineEnum( int &var, const wxChar * key, const int v
       var = temp;
 }
 
-bool ShuttleGetDefinition::IsOptional(){
-   bool result = pOptionalFlag !=NULL;
-   pOptionalFlag = NULL;
-   return result;
-}
-
-// Definition distinguishes optional from not.
-ShuttleParams & ShuttleGetDefinition::Optional( bool & var ){ 
-   pOptionalFlag = &var;
-   return *this;
-};
-
-ShuttleGetDefinition::ShuttleGetDefinition( CommandMessageTarget & target ) : CommandMessageTargetDecorator( target )
-{
-}
-
-// JSON definitions.
-void ShuttleGetDefinition::Define( bool & var,     const wxChar * key, const bool vdefault, const bool vmin, const bool vmax, const bool vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "bool", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( vdefault ? "True" : "False", "default" );
-   EndStruct();
-}
-
-void ShuttleGetDefinition::Define( int & var,      const wxChar * key, const int vdefault, const int vmin, const int vmax, const int vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "int", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( (double)vdefault, "default"  );
-   EndStruct();
-}
-
-void ShuttleGetDefinition::Define( size_t & var,      const wxChar * key, const int vdefault, const int vmin, const int vmax, const int vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "size_t", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( (double)vdefault, "default"  );
-   EndStruct();
-
-}
-
-void ShuttleGetDefinition::Define( float & var,   const wxChar * key, const float vdefault, const float vmin, const float vmax, const float vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "float", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( (double)vdefault, "default"  );
-   EndStruct();
-}
-
-void ShuttleGetDefinition::Define( double & var,   const wxChar * key, const float vdefault, const float vmin, const float vmax, const float vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "float", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( (double)vdefault, "default"  );
-   EndStruct();
-}
-
-void ShuttleGetDefinition::Define( double & var,   const wxChar * key, const double vdefault, const double vmin, const double vmax, const double vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "double", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( (double)vdefault, "default"  );
-   EndStruct();
-}
-
-
-void ShuttleGetDefinition::Define( wxString &var, const wxChar * key, const wxString vdefault, const wxString vmin, const wxString vmax, const wxString vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "string", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( vdefault, "default"  );
-   EndStruct();
-}
-
-
-void ShuttleGetDefinition::DefineEnum( int &var,
-   const wxChar * key, const int vdefault,
-   const EnumValueSymbol strings[], size_t nStrings )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "enum", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( strings[vdefault].Internal(), "default"  );
-   StartField( "enum" );
-   StartArray();
-   for( size_t i = 0; i < nStrings; i++ )
-      AddItem( strings[i].Internal() );
-   EndArray();
-   EndField();
-   EndStruct();
-}
 
 #ifdef _MSC_VER
 // If this is compiled with MSVC (Visual Studio)

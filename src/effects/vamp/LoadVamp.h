@@ -8,7 +8,7 @@
 
 **********************************************************************/
 
-#include "../../Audacity.h" // for USE_* macros
+
 
 #if defined(USE_VAMP)
 
@@ -29,7 +29,7 @@
 class VampEffectsModule final : public ModuleInterface
 {
 public:
-   VampEffectsModule(ModuleManagerInterface *moduleManager, const wxString *path);
+   VampEffectsModule();
    virtual ~VampEffectsModule();
 
    // ComponentInterface implementation
@@ -38,27 +38,28 @@ public:
    ComponentInterfaceSymbol GetSymbol() override;
    VendorSymbol GetVendor() override;
    wxString GetVersion() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // ModuleInterface implementation
 
    bool Initialize() override;
    void Terminate() override;
+   EffectFamilySymbol GetOptionalFamilySymbol() override;
 
-   FileExtensions GetFileExtensions() override;
+   const FileExtensions &GetFileExtensions() override;
    FilePath InstallPath() override { return {}; }
 
    bool AutoRegisterPlugins(PluginManagerInterface & pm) override;
    PluginPaths FindPluginPaths(PluginManagerInterface & pm) override;
    unsigned DiscoverPluginsAtPath(
-      const PluginPath & path, wxString &errMsg,
+      const PluginPath & path, TranslatableString &errMsg,
       const RegistrationCallback &callback)
          override;
 
    bool IsPluginValid(const PluginPath & path, bool bFast) override;
 
-   ComponentInterface *CreateInstance(const PluginPath & path) override;
-   void DeleteInstance(ComponentInterface *instance) override;
+   std::unique_ptr<ComponentInterface>
+      CreateInstance(const PluginPath & path) override;
 
 private:
    // VampEffectModule implementation
@@ -66,10 +67,6 @@ private:
    std::unique_ptr<Vamp::Plugin> FindPlugin(const PluginPath & wpath,
                             int & output,
                             bool & hasParameters);
-
-private:
-   ModuleManagerInterface *mModMan;
-   PluginPath mPath;
 };
 
 #endif

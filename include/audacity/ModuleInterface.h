@@ -43,7 +43,8 @@
 #define __AUDACITY_MODULEINTERFACE_H__
 
 #include <functional>
-#include "audacity/Types.h"
+#include <memory>
+#include "Identifier.h"
 #include "audacity/ComponentInterface.h"
 #include "audacity/PluginInterface.h"
 
@@ -76,6 +77,11 @@ public:
    // Called just prior to deletion to allow releasing any resources.
    virtual void Terminate() = 0;
 
+   // A symbol identifying the family of plugin provided by this module;
+   // if it is not empty, then the family as a whole can be enabled or
+   // disabled by the user in Preferences
+   virtual EffectFamilySymbol GetOptionalFamilySymbol() = 0;
+
    // "Paths" returned by FindPluginPaths() and passed back to
    // DiscoverPluginsAtPath() have module-specific meaning.
    // They are not necessarily file system paths to existent files that
@@ -84,7 +90,7 @@ public:
    // This function returns nonempty only when that is the case, and lists
    // the possible extensions of such files (an empty string in a nonempty
    // array means any file is a candidate).
-   virtual FileExtensions GetFileExtensions() = 0;
+   virtual const FileExtensions &GetFileExtensions() = 0;
 
    // Returns empty, or else, where to copy a plug-in file or bundle.
    // Drag-and-drop is supported only if GetFileExtensions() returns nonempty and
@@ -103,7 +109,7 @@ public:
    // Once the user selects desired paths from FindPluginPaths(),
    // a call to DiscoverPluginsAtPath()
    // will be made to request registration of one or more plugins.  If the module must create
-   // an instance of the plugin to register it, then then instance should be deleted
+   // an instance of the plugin to register it, then the instance should be deleted
    // after registration.
    // May discover more than one plug-in at the path, and
    // may call-back with paths not equal to path (perhaps appending
@@ -115,7 +121,7 @@ public:
       std::function<
          const PluginID &(ModuleInterface *, ComponentInterface *) >;
    virtual unsigned DiscoverPluginsAtPath(
-      const PluginPath & path, wxString &errMsg,
+      const PluginPath & path, TranslatableString &errMsg,
       const RegistrationCallback &callback )
          = 0;
 
@@ -124,53 +130,19 @@ public:
    virtual bool IsPluginValid(const PluginPath & path, bool bFast) = 0;
 
    // When appropriate, CreateInstance() will be called to instantiate the plugin.
-   virtual ComponentInterface *CreateInstance(const PluginPath & path) = 0;
-
-   // When appropriate, DeleteInstance() will be called to delete the plugin.
-   virtual void DeleteInstance(ComponentInterface *instance) = 0;
+   virtual std::unique_ptr<ComponentInterface>
+      CreateInstance(const PluginPath & path) = 0;
 };
-
-// ============================================================================
-//
-// ModuleManagerInterface class
-//
-// ============================================================================
-
-class ModuleManagerInterface /* not final */
-{
-public:
-
-   // Modules call this to register their interface
-   virtual void RegisterModule(ModuleInterface *module) = 0;
-};
-
-// ----------------------------------------------------------------------------
-// The default entry point name and the name that will be searched for during
-// load if the module has been built as a external library.
-// ----------------------------------------------------------------------------
-#define MODULE_ENTRY AudacityModule
-
-// ----------------------------------------------------------------------------
-// The module entry point prototype
-// ----------------------------------------------------------------------------
-typedef ModuleInterface *(*ModuleMain)(ModuleManagerInterface *moduleManager,
-                                       const wxString *path);
-
-// ----------------------------------------------------------------------------
-// If BUILDING_AUDACITY is defined during the current build, it is assumed
-// that the module wishes to be embedded in the Audacity executable.
-// ----------------------------------------------------------------------------
-#if defined(BUILDING_AUDACITY)
 
 // ----------------------------------------------------------------------------
 // Since there may be multiple embedded modules, the module entry function will
 // be declared static so as not to interfere with other modules during link.
 // ----------------------------------------------------------------------------
 #define DECLARE_MODULE_ENTRY(name)                    \
-static ModuleInterface * name(ModuleManagerInterface *moduleManager, const wxString *path)
+static ModuleInterface * name()
 
 // ----------------------------------------------------------------------------
-// This will create a class and instnace that will register the module entry
+// This will create a class and instance that will register the module entry
 // point during Audacity startup.  At the appropriate time, the entry point
 // will be called to create the module instance.
 // ----------------------------------------------------------------------------
@@ -179,13 +151,15 @@ static ModuleInterface * name(ModuleManagerInterface *moduleManager, const wxStr
 // Provides the base for embedded module registration.  If used, a Register()
 // method must be supplied explicitly.
 // ----------------------------------------------------------------------------
+
 #define DECLARE_BUILTIN_MODULE_BASE(name)             \
-extern void RegisterBuiltinModule(ModuleMain rtn);    \
 class name                                            \
 {                                                     \
 public:                                               \
    name() {Register();}                               \
+   ~name() {Unregister();}                            \
    void Register();                                   \
+   void Unregister();                                 \
 };                                                    \
 static name name ## _instance;
 
@@ -197,28 +171,11 @@ static name name ## _instance;
 DECLARE_BUILTIN_MODULE_BASE(name)                     \
 void name::Register()                                 \
 {                                                     \
-   RegisterBuiltinModule(MODULE_ENTRY);               \
+   RegisterProvider(AudacityModule);                  \
+}                                                     \
+void name::Unregister()                               \
+{                                                     \
+   UnregisterProvider(AudacityModule);                \
 }
-
-#else
-
-// ----------------------------------------------------------------------------
-// When building as an external module, the entry point must be declared with
-// "C" linkage and whatever method is used to make the function externally
-// visible.
-// ----------------------------------------------------------------------------
-#define DECLARE_MODULE_ENTRY(name)                                            \
-extern "C" __declspec(dllexport)                                              \
-   ModuleInterface * name(ModuleManagerInterface *moduleManager,              \
-                          const wxString *path)
-
-// ----------------------------------------------------------------------------
-// Define these as empty will effectively remove the embedded registration
-// functionality.
-// ----------------------------------------------------------------------------
-#define DECLARE_BUILTIN_MODULE_BASE(name)
-#define DECLARE_BUILTIN_MODULE(name)
-
-#endif
 
 #endif // __AUDACITY_MODULEINTERFACE_H__

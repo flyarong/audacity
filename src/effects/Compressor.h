@@ -12,7 +12,6 @@
 #define __AUDACITY_EFFECT_COMPRESSOR__
 
 #include "TwoPassSimpleMono.h"
-#include "../SampleFormat.h"
 
 class wxCheckBox;
 class wxSlider;
@@ -20,11 +19,10 @@ class wxStaticText;
 class EffectCompressorPanel;
 class ShuttleGui;
 
-#define COMPRESSOR_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Compressor") }
-
 class EffectCompressor final : public EffectTwoPassSimpleMono
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
 
    EffectCompressor();
    virtual ~EffectCompressor();
@@ -32,8 +30,8 @@ public:
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

@@ -2,7 +2,7 @@
 #define PA_UNIX_OSS_H
 
 /*
- * $Id: portaudio.patch,v 1.10 2009-06-30 04:52:59 llucius Exp $
+ * $Id: pa_unix_oss.h,v 1.6 2008-12-31 15:38:31 richardash1981 Exp $
  * PortAudio Portable Real-Time Audio Library
  * OSS-specific extensions
  *

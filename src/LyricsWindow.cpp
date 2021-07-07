@@ -12,9 +12,12 @@
 #include "LyricsWindow.h"
 #include "Lyrics.h"
 #include "AudioIO.h"
-#include "Prefs.h" // for RTL_WORKAROUND
+#include "CommonCommandFlags.h"
+#include "prefs/GUISettings.h" // for RTL_WORKAROUND
 #include "Project.h"
-#include "TrackPanel.h" // for EVT_TRACK_PANEL_TIMER
+#include "ProjectAudioIO.h"
+#include "ProjectFileIO.h"
+#include "ViewInfo.h"
 
 #include <wx/radiobut.h>
 #include <wx/toolbar.h>
@@ -30,6 +33,8 @@
    #include <Carbon/Carbon.h>
 #endif
 
+#define AudacityKaraokeTitle XO("Audacity Karaoke%s")
+
 enum {
    kID_RadioButton_BouncingBall = 10101,
    kID_RadioButton_Highlight,
@@ -43,14 +48,8 @@ END_EVENT_TABLE()
 
 const wxSize gSize = wxSize(LYRICS_DEFAULT_WIDTH, LYRICS_DEFAULT_HEIGHT);
 
-LyricsWindow::LyricsWindow(AudacityProject *parent):
-   wxFrame(parent, -1,
-            wxString::Format(_("Audacity Karaoke%s"),
-                              ((parent->GetName().empty()) ?
-                                 wxT("") :
-                                 wxString::Format(
-                                   wxT(" - %s"),
-                                   parent->GetName()))),
+LyricsWindow::LyricsWindow(AudacityProject *parent)
+   : wxFrame( &GetProjectFrame( *parent ), -1, wxString{},
             wxPoint(100, 300), gSize,
             //v Bug in wxFRAME_FLOAT_ON_PARENT:
             // If both the project frame and LyricsWindow are minimized and you restore LyricsWindow,
@@ -65,6 +64,14 @@ LyricsWindow::LyricsWindow(AudacityProject *parent):
    //      SetWindowClass((WindowRef) MacGetWindowRef(), kFloatingWindowClass);
    //   #endif
    mProject = parent;
+
+   SetWindowTitle();
+   auto titleChanged = [&](wxCommandEvent &evt)
+   {
+      SetWindowTitle();
+      evt.Skip();
+   };
+   wxTheApp->Bind( EVT_PROJECT_TITLE_CHANGE, titleChanged );
 
    // loads either the XPM or the windows resource, depending on the platform
 #if !defined(__WXMAC__) && !defined(__WXX11__)
@@ -151,17 +158,77 @@ void LyricsWindow::OnStyle_Highlight(wxCommandEvent & WXUNUSED(event))
 
 void LyricsWindow::OnTimer(wxCommandEvent &event)
 {
-   if (mProject->IsAudioActive())
+   if (ProjectAudioIO::Get( *mProject ).IsAudioActive())
    {
+      auto gAudioIO = AudioIO::Get();
       GetLyricsPanel()->Update(gAudioIO->GetStreamTime());
    }
    else
    {
       // Reset lyrics display.
-      const auto &selectedRegion = mProject->GetViewInfo().selectedRegion;
+      const auto &selectedRegion = ViewInfo::Get( *mProject ).selectedRegion;
       GetLyricsPanel()->Update(selectedRegion.t0());
    }
 
    // Let other listeners get the notification
    event.Skip();
+}
+
+void LyricsWindow::SetWindowTitle()
+{
+   wxString name = mProject->GetProjectName();
+   if (!name.empty())
+   {
+      name.Prepend(wxT(" - "));
+   }
+
+   SetTitle(AudacityKaraokeTitle.Format(name).Translation());
+}
+
+void LyricsWindow::UpdatePrefs()
+{
+   SetWindowTitle();
+}
+
+// Remaining code hooks this add-on into the application
+#include "commands/CommandContext.h"
+#include "commands/CommandManager.h"
+
+namespace {
+
+// Lyrics window attached to each project is built on demand by:
+AudacityProject::AttachedWindows::RegisteredFactory sLyricsWindowKey{
+   []( AudacityProject &parent ) -> wxWeakRef< wxWindow > {
+      return safenew LyricsWindow( &parent );
+   }
+};
+
+// Define our extra menu item that invokes that factory
+struct Handler : CommandHandlerObject {
+   void OnKaraoke(const CommandContext &context)
+   {
+      auto &project = context.project;
+
+      auto lyricsWindow = &project.AttachedWindows::Get( sLyricsWindowKey );
+      lyricsWindow->Show();
+      lyricsWindow->Raise();
+   }
+};
+
+CommandHandlerObject &findCommandHandler(AudacityProject &) {
+   // Handler is not stateful.  Doesn't need a factory registered with
+   // AudacityProject.
+   static Handler instance;
+   return instance;
+}
+
+// Register that menu item
+
+using namespace MenuTable;
+AttachedItem sAttachment{ wxT("View/Windows"),
+   ( FinderScope{ findCommandHandler },
+      Command( wxT("Karaoke"), XXO("&Karaoke..."), &Handler::OnKaraoke,
+         LabelTracksExistFlag() ) )
+};
+
 }

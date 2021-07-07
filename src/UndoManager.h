@@ -49,13 +49,12 @@
 #ifndef __AUDACITY_UNDOMANAGER__
 #define __AUDACITY_UNDOMANAGER__
 
-#include "MemoryX.h"
 #include <vector>
 #include <wx/event.h> // to declare custom event types
-#include "ondemand/ODTaskThread.h"
+#include "ClientData.h"
 #include "SelectedRegion.h"
 
-// Events emitted by UndoManager for the use of listeners
+// Events emitted by AudacityProject for the use of listeners
 
 // Project state did not change, but a new state was copied into Undo history
 // and any redo states were lost
@@ -64,15 +63,25 @@ wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API, EVT_UNDO_PUSHED, wxCommandEvent);
 // Project state did not change, but current state was modified in Undo history
 wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API, EVT_UNDO_MODIFIED, wxCommandEvent);
 
-// Project state changed because of undo or redo or rollback; undo manager
+// Project state did not change, but current state was renamed in Undo history
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API, EVT_UNDO_RENAMED, wxCommandEvent);
+
+// Project state changed because of undo or redo; undo manager
+// contents did not change other than the pointer to current state
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API, EVT_UNDO_OR_REDO, wxCommandEvent);
+
+// Project state changed other than for single-step undo/redo; undo manager
 // contents did not change other than the pointer to current state
 wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API, EVT_UNDO_RESET, wxCommandEvent);
 
+// Undo or redo states discarded
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API, EVT_UNDO_PURGE, wxCommandEvent);
+
+class AudacityProject;
 class Tags;
 class Track;
 class TrackList;
 
-struct UndoStackElem;
 struct UndoState {
    UndoState(std::shared_ptr<TrackList> &&tracks_,
       const std::shared_ptr<Tags> &tags_,
@@ -85,6 +94,24 @@ struct UndoState {
    SelectedRegion selectedRegion; // by value
 };
 
+struct UndoStackElem {
+
+   UndoStackElem(std::shared_ptr<TrackList> &&tracks_,
+      const TranslatableString &description_,
+      const TranslatableString &shortDescription_,
+      const SelectedRegion &selectedRegion_,
+      const std::shared_ptr<Tags> &tags_)
+      : state(std::move(tracks_), tags_, selectedRegion_)
+      , description(description_)
+      , shortDescription(shortDescription_)
+   {
+   }
+
+   UndoState state;
+   TranslatableString description;
+   TranslatableString shortDescription;
+};
+
 using UndoStack = std::vector <std::unique_ptr<UndoStackElem>>;
 
 using SpaceArray = std::vector <unsigned long long> ;
@@ -93,9 +120,9 @@ using SpaceArray = std::vector <unsigned long long> ;
 // Default is AUTOSAVE
 // Frequent/faster actions use CONSOLIDATE
 enum class UndoPush : unsigned char {
-   MINIMAL = 0,
+   NONE = 0,
    CONSOLIDATE = 1 << 0,
-   AUTOSAVE = 1 << 1
+   NOAUTOSAVE = 1 << 1
 };
 
 inline UndoPush operator | (UndoPush a, UndoPush b)
@@ -103,9 +130,17 @@ inline UndoPush operator | (UndoPush a, UndoPush b)
 inline UndoPush operator & (UndoPush a, UndoPush b)
 { return static_cast<UndoPush>(static_cast<int>(a) & static_cast<int>(b)); }
 
-class AUDACITY_DLL_API UndoManager : public wxEvtHandler {
+//! Maintain a non-persistent list of states of the project, to support undo and redo commands
+/*! The history should be cleared before destruction */
+class AUDACITY_DLL_API UndoManager final
+   : public ClientData::Base
+{
  public:
-   UndoManager();
+   static UndoManager &Get( AudacityProject &project );
+   static const UndoManager &Get( const AudacityProject &project );
+ 
+   explicit
+   UndoManager( AudacityProject &project );
    ~UndoManager();
 
    UndoManager( const UndoManager& ) = delete;
@@ -114,34 +149,51 @@ class AUDACITY_DLL_API UndoManager : public wxEvtHandler {
    void PushState(const TrackList * l,
                   const SelectedRegion &selectedRegion,
                   const std::shared_ptr<Tags> &tags,
-                  const wxString &longDescription, const wxString &shortDescription,
-                  UndoPush flags = UndoPush::AUTOSAVE);
+                  const TranslatableString &longDescription,
+                  const TranslatableString &shortDescription,
+                  UndoPush flags = UndoPush::NONE);
    void ModifyState(const TrackList * l,
                     const SelectedRegion &selectedRegion, const std::shared_ptr<Tags> &tags);
+   void RenameState( int state,
+      const TranslatableString &longDescription,
+      const TranslatableString &shortDescription);
+   void AbandonRedo();
    void ClearStates();
-   void RemoveStates(int num);  // removes the 'num' oldest states
-   void RemoveStateAt(int n);   // removes the n'th state (1 is oldest)
+   void RemoveStates(
+      size_t begin, //!< inclusive start of range
+      size_t end    //!< exclusive end of range
+   );
    unsigned int GetNumStates();
    unsigned int GetCurrentState();
 
    void StopConsolidating() { mayConsolidate = false; }
 
-   void GetShortDescription(unsigned int n, wxString *desc);
+   void GetShortDescription(unsigned int n, TranslatableString *desc);
    // Return value must first be calculated by CalculateSpaceUsage():
-   wxLongLong_t GetLongDescription(unsigned int n, wxString *desc, wxString *size);
-   void SetLongDescription(unsigned int n, const wxString &desc);
+   wxLongLong_t GetLongDescription(
+      unsigned int n, TranslatableString *desc, TranslatableString *size);
+   void SetLongDescription(unsigned int n, const TranslatableString &desc);
 
    // These functions accept a callback that uses the state,
-   // and then they emit EVT_UNDO_RESET when that has finished.
-   using Consumer = std::function< void( const UndoState & ) >;
+   // and then they send to the project EVT_UNDO_RESET or EVT_UNDO_OR_REDO when
+   // that has finished.
+   using Consumer = std::function< void( const UndoStackElem & ) >;
    void SetStateTo(unsigned int n, const Consumer &consumer);
    void Undo(const Consumer &consumer);
    void Redo(const Consumer &consumer);
 
+   //! Give read-only access to all states
+   void VisitStates( const Consumer &consumer, bool newestFirst );
+   //! Visit a specified range of states
+   /*! end is exclusive; visit newer states first if end < begin */
+   void VisitStates(
+      const Consumer &consumer, size_t begin, size_t end );
+
    bool UndoAvailable();
    bool RedoAvailable();
 
-   bool UnsavedChanges();
+   bool UnsavedChanges() const;
+   int GetSavedState() const;
    void StateSaved();
 
    // Return value must first be calculated by CalculateSpaceUsage():
@@ -154,25 +206,22 @@ class AUDACITY_DLL_API UndoManager : public wxEvtHandler {
 
    // void Debug(); // currently unused
 
-   ///to mark as unsaved changes without changing the state/tracks.
-   void SetODChangesFlag();
-   bool HasODChangesFlag();
-   void ResetODChangesFlag();
-
  private:
+   size_t EstimateRemovedBlocks(size_t begin, size_t end);
+
+   void RemoveStateAt(int n);
+
+   AudacityProject &mProject;
+ 
    int current;
    int saved;
    UndoStack stack;
 
-   wxString lastAction;
+   TranslatableString lastAction;
    bool mayConsolidate { false };
 
    SpaceArray space;
    unsigned long long mClipboardSpaceUsage {};
-
-   bool mODChanges;
-   ODLock mODChangesMutex;//mODChanges is accessed from many threads.
-
 };
 
 #endif

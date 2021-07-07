@@ -11,7 +11,6 @@ Paul Licameli split from TrackPanel.cpp
 #ifndef __AUDACITY_TRACK_PANEL_RESIZE_HANDLE__
 #define __AUDACITY_TRACK_PANEL_RESIZE_HANDLE__
 
-#include "MemoryX.h"
 #include "UIHandle.h"
 
 class Track;
@@ -38,7 +37,7 @@ public:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state,  const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release

@@ -37,6 +37,9 @@ and get deterministic behaviour.
 
 #include "Dither.h"
 
+#include "Internat.h"
+#include "Prefs.h"
+
 // Erik de Castro Lopo's header file that
 // makes sure that we have lrint and lrintf
 // (Note: this file should be included first)
@@ -234,7 +237,7 @@ void Dither::Reset()
 // stride number of samples.
 
 void Dither::Apply(enum DitherType ditherType,
-                   const samplePtr source, sampleFormat sourceFormat,
+                   constSamplePtr source, sampleFormat sourceFormat,
                    samplePtr dest, sampleFormat destFormat,
                    unsigned int len,
                    unsigned int sourceStride /* = 1 */,
@@ -266,24 +269,24 @@ void Dither::Apply(enum DitherType ditherType,
         {
             if (sourceFormat == floatSample)
             {
-                float* d = (float*)dest;
-                float* s = (float*)source;
+                auto d = (float*)dest;
+                auto s = (const float*)source;
 
                 for (i = 0; i < len; i++, d += destStride, s += sourceStride)
                     *d = *s;
             } else
             if (sourceFormat == int24Sample)
             {
-                int* d = (int*)dest;
-                int* s = (int*)source;
+                auto d = (int*)dest;
+                auto s = (const int*)source;
 
                 for (i = 0; i < len; i++, d += destStride, s += sourceStride)
                     *d = *s;
             } else
             if (sourceFormat == int16Sample)
             {
-                short* d = (short*)dest;
-                short* s = (short*)source;
+                auto d = (short*)dest;
+                auto s = (const short*)source;
 
                 for (i = 0; i < len; i++, d += destStride, s += sourceStride)
                     *d = *s;
@@ -296,17 +299,17 @@ void Dither::Apply(enum DitherType ditherType,
     {
         // No need to dither, just convert samples to float.
         // No clipping should be necessary.
-        float* d = (float*)dest;
+        auto d = (float*)dest;
 
         if (sourceFormat == int16Sample)
         {
-            short* s = (short*)source;
+            auto s = (const short*)source;
             for (i = 0; i < len; i++, d += destStride, s += sourceStride)
                 *d = FROM_INT16(s);
         } else
         if (sourceFormat == int24Sample)
         {
-            int* s = (int*)source;
+            auto s = (const int*)source;
             for (i = 0; i < len; i++, d += destStride, s += sourceStride)
                 *d = FROM_INT24(s);
         } else {
@@ -316,8 +319,8 @@ void Dither::Apply(enum DitherType ditherType,
     if (destFormat == int24Sample && sourceFormat == int16Sample)
     {
         // Special case when promoting 16 bit to 24 bit
-        int* d = (int*)dest;
-        short* s = (short*)source;
+        auto d = (int*)dest;
+        auto s = (const short*)source;
         for (i = 0; i < len; i++, d += destStride, s += sourceStride)
             *d = ((int)*s) << 8;
     } else
@@ -392,4 +395,47 @@ inline float Dither::ShapedDither(float sample)
     mBuffer[mPhase] = xe - lrintf(result);
 
     return result;
+}
+
+static const std::initializer_list<EnumValueSymbol> choicesDither{
+   { XO("None") },
+   { XO("Rectangle") },
+   { XO("Triangle") },
+   { XO("Shaped") },
+};
+static auto intChoicesDither = {
+   DitherType::none,
+   DitherType::rectangle,
+   DitherType::triangle,
+   DitherType::shaped,
+};
+
+EnumSetting< DitherType > Dither::FastSetting{
+   wxT("Quality/DitherAlgorithmChoice"),
+   choicesDither,
+   0, // none
+
+   // for migrating old preferences:
+   intChoicesDither,
+   wxT("Quality/DitherAlgorithm")
+};
+
+EnumSetting< DitherType > Dither::BestSetting{
+   wxT("Quality/HQDitherAlgorithmChoice"),
+   choicesDither,
+   3, // shaped
+
+   // for migrating old preferences:
+   intChoicesDither,
+   wxT("Quality/HQDitherAlgorithm")
+};
+
+DitherType Dither::FastDitherChoice()
+{
+   return (DitherType) FastSetting.ReadEnum();
+}
+
+DitherType Dither::BestDitherChoice()
+{
+   return (DitherType) BestSetting.ReadEnum();
 }

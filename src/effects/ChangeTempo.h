@@ -11,7 +11,7 @@
 
 **********************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
+
 #if USE_SOUNDTOUCH
 
 #ifndef __AUDACITY_EFFECT_CHANGETEMPO__
@@ -28,19 +28,19 @@ class wxCheckBox;
 class wxTextCtrl;
 class ShuttleGui;
 
-#define CHANGETEMPO_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Change Tempo") }
-
 class EffectChangeTempo final : public EffectSoundTouch
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectChangeTempo();
    virtual ~EffectChangeTempo();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

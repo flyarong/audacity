@@ -14,8 +14,9 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "Reverb.h"
+#include "LoadEffects.h"
 
 #include <wx/arrstr.h>
 #include <wx/checkbox.h>
@@ -60,7 +61,7 @@ Param( WetOnly,      bool,    wxT("WetOnly"),       false,   false,   true, 1  )
 
 static const struct
 {
-   const wxChar *name;
+   const TranslatableString name;
    EffectReverb::Params params;
 }
 FactoryPresets[] =
@@ -88,6 +89,11 @@ struct Reverb_priv_t
 //
 // EffectReverb
 //
+
+const ComponentInterfaceSymbol EffectReverb::Symbol
+{ XO("Reverb") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectReverb > reg; }
 
 BEGIN_EVENT_TABLE(EffectReverb, wxEvtHandler)
 
@@ -135,17 +141,17 @@ EffectReverb::~EffectReverb()
 
 ComponentInterfaceSymbol EffectReverb::GetSymbol()
 {
-   return REVERB_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectReverb::GetDescription()
+TranslatableString EffectReverb::GetDescription()
 {
-   return _("Adds ambience or a \"hall effect\"");
+   return XO("Adds ambience or a \"hall effect\"");
 }
 
-wxString EffectReverb::ManualPage()
+ManualPageID EffectReverb::ManualPage()
 {
-   return wxT("Reverb");
+   return L"Reverb";
 }
 
 // EffectDefinitionInterface implementation
@@ -335,7 +341,7 @@ RegistryPaths EffectReverb::GetFactoryPresets()
 
    for (size_t i = 0; i < WXSIZEOF(FactoryPresets); i++)
    {
-      names.push_back(wxGetTranslation(FactoryPresets[i].name));
+      names.push_back( FactoryPresets[i].name.Translation() );
    }
 
    return names;
@@ -439,19 +445,20 @@ void EffectReverb::PopulateOrExchange(ShuttleGui & S)
 #define SpinSlider(n, p) \
       m ## n ## T = S.Id(ID_ ## n). \
          AddSpinCtrl( p, DEF_ ## n, MAX_ ## n, MIN_ ## n); \
-      S.SetStyle(wxSL_HORIZONTAL); \
-      m ## n ## S = S.Id(ID_ ## n). \
-         AddSlider( {}, DEF_ ## n, MAX_ ## n, MIN_ ## n);
+      S; \
+      m ## n ## S = S.Id(ID_ ## n) \
+         .Style(wxSL_HORIZONTAL) \
+         .AddSlider( {}, DEF_ ## n, MAX_ ## n, MIN_ ## n);
 
-      SpinSlider(RoomSize,       _("&Room Size (%):"))
-      SpinSlider(PreDelay,       _("&Pre-delay (ms):"))
-      SpinSlider(Reverberance,   _("Rever&berance (%):"))
-      SpinSlider(HfDamping,      _("Da&mping (%):"))
-      SpinSlider(ToneLow,        _("Tone &Low (%):"))
-      SpinSlider(ToneHigh,       _("Tone &High (%):"))
-      SpinSlider(WetGain,        _("Wet &Gain (dB):"))
-      SpinSlider(DryGain,        _("Dr&y Gain (dB):"))
-      SpinSlider(StereoWidth,    _("Stereo Wid&th (%):"))
+      SpinSlider(RoomSize,       XXO("&Room Size (%):"))
+      SpinSlider(PreDelay,       XXO("&Pre-delay (ms):"))
+      SpinSlider(Reverberance,   XXO("Rever&berance (%):"))
+      SpinSlider(HfDamping,      XXO("Da&mping (%):"))
+      SpinSlider(ToneLow,        XXO("Tone &Low (%):"))
+      SpinSlider(ToneHigh,       XXO("Tone &High (%):"))
+      SpinSlider(WetGain,        XXO("Wet &Gain (dB):"))
+      SpinSlider(DryGain,        XXO("Dr&y Gain (dB):"))
+      SpinSlider(StereoWidth,    XXO("Stereo Wid&th (%):"))
 
 #undef SpinSlider
 
@@ -461,7 +468,7 @@ void EffectReverb::PopulateOrExchange(ShuttleGui & S)
    S.StartHorizontalLay(wxCENTER, false);
    {
       mWetOnlyC = S.Id(ID_WetOnly).
-         AddCheckBox(_("Wet O&nly"), DEF_WetOnly);
+         AddCheckBox(XXO("Wet O&nly"), DEF_WetOnly);
    }
    S.EndHorizontalLay();
 
@@ -542,12 +549,9 @@ SpinSliderHandlers(StereoWidth)
 
 void EffectReverb::SetTitle(const wxString & name)
 {
-   wxString title(_("Reverb"));
-
-   if (!name.empty())
-   {
-      title += wxT(": ") + name;
-   }
-
-   mUIDialog->SetTitle(title);
+   mUIDialog->SetTitle(
+      name.empty()
+         ? _("Reverb")
+         : wxString::Format( _("Reverb: %s"), name )
+   );
 }

@@ -15,16 +15,16 @@
 #ifndef __AUDACITY_TIME_TEXT_CTRL__
 #define __AUDACITY_TIME_TEXT_CTRL__
 
-#include "../Audacity.h"
 
-#include "../MemoryX.h"
+
+#include <memory>
 #include "../../include/audacity/ComponentInterface.h"
 #include <vector>
 #include <wx/setup.h> // for wxUSE_* macros
 #include <wx/defs.h>
 #include <wx/control.h> // to inherit
 
-#include "../Internat.h"
+#include "Internat.h"
 
 // One event type for each type of control.  Event is raised when a control
 // changes its format.  Owners of controls of the same type can listen and
@@ -34,7 +34,7 @@ DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_FREQUENCYTEXTCTRL_UPDATED, -1)
 DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_BANDWIDTHTEXTCTRL_UPDATED,
                             -1);
 
-/** \brief struct to hold a formatting control string and it's user facing name
+/** \brief struct to hold a formatting control string and its user facing name
  * Used in an array to hold the built-in time formats that are always available
  * to the user */
 struct BuiltinFormatString;
@@ -43,19 +43,39 @@ class NumericField;
 
 class DigitInfo;
 
-class NumericConverter /* not final */
+class AUDACITY_DLL_API NumericConverter /* not final */
 {
 public:
 
    enum Type {
       TIME,
+      ATIME, // for Audio time control.
       FREQUENCY,
       BANDWIDTH,
+   };
+
+   struct FormatStrings {
+      TranslatableString formatStr;
+      // How to name the fraction of the unit; not necessary for time formats
+      // or when the format string has no decimal point
+      TranslatableString fraction;
+
+      FormatStrings(
+         const TranslatableString &format = {},
+         const TranslatableString &fraction = {})
+         : formatStr{ format }, fraction{ fraction }
+      {}
+
+      friend bool operator == ( const FormatStrings &x, const FormatStrings &y )
+         { return x.formatStr == y.formatStr && x.fraction == y.fraction; }
+      friend bool operator != ( const FormatStrings &x, const FormatStrings &y )
+         { return !(x == y); }
    };
 
    static NumericFormatSymbol DefaultSelectionFormat();
    static NumericFormatSymbol TimeAndSampleFormat();
    static NumericFormatSymbol SecondsFormat();
+   static NumericFormatSymbol HoursMinsSecondsFormat();
    static NumericFormatSymbol HundredthsFormat();
    static NumericFormatSymbol HertzFormat();
    
@@ -65,6 +85,7 @@ public:
                     const NumericFormatSymbol & formatName = {},
                     double value = 0.0f,
                     double sampleRate = 1.0f /* to prevent div by 0 */);
+   NumericConverter(const NumericConverter&);
 
    virtual ~NumericConverter();
 
@@ -79,12 +100,17 @@ public:
    virtual void ControlsToValue();
 
 private:
-   void ParseFormatString(const wxString & untranslatedFormat);
+   void ParseFormatString(const TranslatableString & untranslatedFormat);
 
 public:
    void PrintDebugInfo();
-   void SetFormatName(const NumericFormatSymbol & formatName);
-   void SetFormatString(const wxString & formatString);
+
+   // returns true iff the format name really changed:
+   bool SetFormatName(const NumericFormatSymbol & formatName);
+
+   // returns true iff the format string really changed:
+   bool SetFormatString(const FormatStrings & formatString);
+
    void SetSampleRate(double sampleRate);
    void SetValue(double newValue);
    void SetMinValue(double minValue);
@@ -100,8 +126,8 @@ public:
 
    int GetNumBuiltins();
    NumericFormatSymbol GetBuiltinName(const int index);
-   wxString GetBuiltinFormat(const int index);
-   wxString GetBuiltinFormat(const NumericFormatSymbol & name);
+   FormatStrings GetBuiltinFormat(const int index);
+   FormatStrings GetBuiltinFormat(const NumericFormatSymbol & name);
 
    // Adjust the value by the number "steps" in the active format.
    // Increment if "dir" is 1, decrement if "dir" is -1.
@@ -119,7 +145,7 @@ protected:
    double         mMaxValue;
    double         mInvalidValue;
 
-   wxString       mFormatString;
+   FormatStrings mFormatString;
 
    std::vector<NumericField> mFields;
    wxString       mPrefix;
@@ -140,7 +166,8 @@ protected:
    int mDefaultNdx;
 };
 
-class NumericTextCtrl final : public wxControl, public NumericConverter
+class AUDACITY_DLL_API NumericTextCtrl final
+   : public wxControl, public NumericConverter
 {
    friend class NumericTextCtrlAx;
 
@@ -153,7 +180,7 @@ class NumericTextCtrl final : public wxControl, public NumericConverter
       bool menuEnabled { true };
       bool hasInvalidValue { false };
       double invalidValue { -1.0 };
-      wxString format {};
+      FormatStrings format {};
       bool hasValue { false };
       double value{ -1.0 };
 
@@ -165,7 +192,7 @@ class NumericTextCtrl final : public wxControl, public NumericConverter
       Options &InvalidValue (bool has, double v = -1.0)
          { hasInvalidValue = has, invalidValue = v; return *this; }
       // use a custom format not in the tables:
-      Options &Format (const wxString &f)
+      Options &Format (const FormatStrings &f)
          { format = f; return *this; }
       Options &Value (bool has, double v)
          { hasValue = has, value = v; return *this; }
@@ -182,16 +209,27 @@ class NumericTextCtrl final : public wxControl, public NumericConverter
 
    virtual ~NumericTextCtrl();
 
+   // Hide the inherited function that takes wxString
+   void SetName( const TranslatableString &name );
+
+   wxSize ComputeSizing(bool update = true, wxCoord digitW = 0, wxCoord digitH = 0);
    bool Layout() override;
    void Fit() override;
 
    void SetSampleRate(double sampleRate);
    void SetValue(double newValue);
-   void SetFormatString(const wxString & formatString);
-   void SetFormatName(const NumericFormatSymbol & formatName);
+
+   // returns true iff the format string really changed:
+   bool SetFormatString(const FormatStrings & formatString);
+
+   // returns true iff the format name really changed:
+   bool SetFormatName(const NumericFormatSymbol & formatName);
 
    void SetFieldFocus(int /* digit */);
 
+   wxSize GetDimensions() { return wxSize(mWidth + mButtonWidth, mHeight); }
+   wxSize GetDigitSize() { return wxSize(mDigitBoxW, mDigitBoxH); }
+   void SetDigitSize(int width, int height);
    void SetReadOnly(bool readOnly = true);
    void EnableMenu(bool enable = true);
 

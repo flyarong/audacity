@@ -18,12 +18,13 @@
 
 #include "../Project.h"
 #include "../Prefs.h"
+#include "../ViewInfo.h"
 #include "../WaveTrack.h"
+#include "../prefs/TracksBehaviorsPrefs.h"
 
 #include "TimeWarper.h"
 
-#include "../MemoryX.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
 bool Generator::Process()
 {
@@ -43,7 +44,7 @@ bool Generator::Process()
       [&](WaveTrack *track, const Track::Fallthrough &fallthrough) {
          if (!track->GetSelected())
             return fallthrough();
-         bool editClipCanMove = gPrefs->GetEditClipsCanMove();
+         bool editClipCanMove = GetEditClipsCanMove();
 
          //if we can't move clips, and we're generating into an empty space,
          //make sure there's room.
@@ -52,9 +53,9 @@ bool Generator::Process()
              !track->IsEmpty(mT0, mT0+GetDuration()-(mT1-mT0)-1.0/track->GetRate()))
          {
             Effect::MessageBox(
-                  _("There is not enough room available to generate the audio"),
-                  wxICON_STOP,
-                  _("Error"));
+               XO("There is not enough room available to generate the audio"),
+               wxICON_STOP,
+               XO("Error") );
             Failure();
             bGoodResult = false;
             return;
@@ -62,12 +63,9 @@ bool Generator::Process()
 
          if (GetDuration() > 0.0)
          {
-            AudacityProject *p = GetActiveProject();
+            auto pProject = FindProject();
             // Create a temporary track
-            WaveTrack::Holder tmp(
-               mFactory->NewWaveTrack(track->GetSampleFormat(),
-               track->GetRate())
-            );
+            auto tmp = track->EmptyCopy();
             BeforeTrack(*track);
             BeforeGenerate();
 
@@ -77,9 +75,9 @@ bool Generator::Process()
             else {
                // Transfer the data from the temporary track to the actual one
                tmp->Flush();
-               StepTimeWarper warper{
-                  mT0+GetDuration(), GetDuration()-(mT1-mT0) };
-               const auto &selectedRegion = p->GetViewInfo().selectedRegion;
+               PasteTimeWarper warper{ mT1, mT0+GetDuration() };
+               const auto &selectedRegion =
+                  ViewInfo::Get( *pProject ).selectedRegion;
                track->ClearAndPaste(
                   selectedRegion.t0(), selectedRegion.t1(),
                   &*tmp, true, false, &warper);

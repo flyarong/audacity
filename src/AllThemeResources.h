@@ -44,7 +44,8 @@ from there.  Audacity will look for a file called "Pause.png".
 // Note: No '#ifndef/#define' pair on this header file.
 // we want to include it multiple times in Theme.cpp.
 
-#include "Experimental.h"
+
+
 
 #include "MacroMagic.h"
 #define XPMS_RETIRED
@@ -228,7 +229,8 @@ from there.  Audacity will look for a file called "Pause.png".
    DEFINE_IMAGE( bmpBottomFrequencyCursor, wxImage( 32, 32 ), wxT("BottomFrequencyCursor"));
    DEFINE_IMAGE( bmpTopFrequencyCursor, wxImage( 32, 32 ), wxT("TopFrequencyCursor"));
    DEFINE_IMAGE( bmpBandWidthCursor, wxImage(32, 32), wxT("BandWidthCursor"));
-   
+   DEFINE_IMAGE( bmpSubViewsCursor, wxImage(32, 32), wxT("SubViewsCursor"));
+
    //SET_THEME_FLAGS(  resFlagNewLine  );
 
 // DA: The logo with name xpm has a different width.

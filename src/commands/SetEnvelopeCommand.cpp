@@ -16,18 +16,24 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "SetEnvelopeCommand.h"
 
-#include "../Project.h"
-#include "../Track.h"
-#include "../TrackPanel.h"
+#include "CommandContext.h"
+#include "LoadCommands.h"
+#include "../ProjectHistory.h"
+#include "../UndoManager.h"
 #include "../WaveClip.h"
 #include "../WaveTrack.h"
 #include "../Envelope.h"
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
-#include "CommandContext.h"
+
+const ComponentInterfaceSymbol SetEnvelopeCommand::Symbol
+{ XO("Set Envelope") };
+
+namespace{ BuiltinCommandsModule::Registration< SetEnvelopeCommand > reg; }
+
 
 SetEnvelopeCommand::SetEnvelopeCommand()
 {
@@ -47,16 +53,15 @@ void SetEnvelopeCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(3, wxALIGN_CENTER);
    {
-      S.Optional( bHasT           ).TieNumericTextBox(  _("Time:"),          mT );
-      S.Optional( bHasV           ).TieNumericTextBox(  _("Value:"),         mV );
-      S.Optional( bHasDelete      ).TieCheckBox(        _("Delete:"),        mbDelete );
+      S.Optional( bHasT           ).TieNumericTextBox(  XXO("Time:"),          mT );
+      S.Optional( bHasV           ).TieNumericTextBox(  XXO("Value:"),         mV );
+      S.Optional( bHasDelete      ).TieCheckBox(        XXO("Delete"),         mbDelete );
    }
    S.EndMultiColumn();
 }
 
-bool SetEnvelopeCommand::ApplyInner( const CommandContext & context, Track * t )
+bool SetEnvelopeCommand::ApplyInner( const CommandContext &context, Track * t )
 {
-   static_cast<void>(context);
    // if no time is specified, then
    //   - delete deletes any envelope in selected tracks.
    //   - value is not set for any clip
@@ -73,10 +78,19 @@ bool SetEnvelopeCommand::ApplyInner( const CommandContext & context, Track * t )
          {
             // Inside this IF is where we actually apply the command
             Envelope* pEnv = pClip->GetEnvelope();
+            bool didSomething = false;
             if( bHasDelete && mbDelete )
-               pEnv->mEnv.clear();
+               pEnv->Clear(), didSomething = true;
             if( bHasT && bHasV )
-               pEnv->InsertOrReplace( mT, pEnv->ClampValue( mV ) );
+               pEnv->InsertOrReplace( mT, pEnv->ClampValue( mV ) ),
+               didSomething = true;
+
+            if (didSomething)
+               // Consolidate, because this ApplyInner() function may be
+               // visited multiple times in one command invocation
+               ProjectHistory::Get(context.project).PushState(
+                  XO("Edited Envelope"), XO("Envelope"),
+                  UndoPush::CONSOLIDATE);
          }
       }
    } );

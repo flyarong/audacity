@@ -13,18 +13,18 @@
 
 #include "Effect.h"
 
-#define STEREOTOMONO_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Stereo To Mono") }
-
 class EffectStereoToMono final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectStereoToMono();
    virtual ~EffectStereoToMono();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 
@@ -44,13 +44,8 @@ public:
 private:
    // EffectStereoToMono implementation
 
-   bool ProcessOne(int count);
+   bool ProcessOne(sampleCount & curTime, sampleCount totalTime, WaveTrack *left, WaveTrack *right);
 
-private:
-   sampleCount mStart;
-   sampleCount mEnd;
-   WaveTrack *mLeftTrack;
-   WaveTrack *mRightTrack;
 };
 
 #endif

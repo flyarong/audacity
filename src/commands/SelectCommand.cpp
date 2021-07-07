@@ -29,19 +29,26 @@ explicitly code all three.
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "SelectCommand.h"
 
 #include <wx/string.h>
 #include <float.h>
 
-#include "../Project.h"
-#include "../Track.h"
+#include "LoadCommands.h"
+#include "../ProjectSelectionManager.h"
 #include "../TrackPanel.h"
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
+#include "../effects/Effect.h"
+#include "../ViewInfo.h"
 #include "CommandContext.h"
 
+
+const ComponentInterfaceSymbol SelectTimeCommand::Symbol
+{ XO("Select Time") };
+
+namespace{ BuiltinCommandsModule::Registration< SelectTimeCommand > reg; }
 
 // Relative to project and relative to selection cover MOST options, since you can already
 // set a selection to a clip.
@@ -72,12 +79,12 @@ void SelectTimeCommand::PopulateOrExchange(ShuttleGui & S)
    S.StartMultiColumn(3, wxEXPAND);
    {
       S.SetStretchyCol( 2 );
-      S.Optional( bHasT0 ).TieTextBox(_("Start Time:"), mT0);
-      S.Optional( bHasT1 ).TieTextBox(_("End Time:"),   mT1);
+      S.Optional( bHasT0 ).TieTextBox(XXO("Start Time:"), mT0);
+      S.Optional( bHasT1 ).TieTextBox(XXO("End Time:"),   mT1);
       // Chooses what time is relative to.
       S.Optional( bHasRelativeSpec ).TieChoice(
-         _("Relative To:"),
-         mRelativeTo, LocalizedStrings( kRelativeTo, nRelativeTos ));
+         XXO("Relative To:"),
+         mRelativeTo, Msgids( kRelativeTo, nRelativeTos ));
    }
    S.EndMultiColumn();
 }
@@ -85,7 +92,7 @@ void SelectTimeCommand::PopulateOrExchange(ShuttleGui & S)
 bool SelectTimeCommand::Apply(const CommandContext & context){
    // Many commands need focus on track panel.
    // No harm in setting it with a scripted select.
-   context.GetProject()->GetTrackPanel()->SetFocus();
+   TrackPanel::Get( context.project ).SetFocus();
    if( !bHasT0 && !bHasT1 )
       return true;
 
@@ -97,12 +104,12 @@ bool SelectTimeCommand::Apply(const CommandContext & context){
    if( !bHasRelativeSpec )
       mRelativeTo = 0;
 
-   AudacityProject * p = context.GetProject();
-   double end = p->GetTracks()->GetEndTime();
+   AudacityProject * p = &context.project;
+   double end = TrackList::Get( *p ).GetEndTime();
    double t0;
    double t1;
 
-   const auto &selectedRegion = p->GetViewInfo().selectedRegion;
+   auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
    switch( bHasRelativeSpec ? mRelativeTo : 0 ){
    default:
    case 0: //project start
@@ -131,9 +138,14 @@ bool SelectTimeCommand::Apply(const CommandContext & context){
       break;
    }
 
-   p->mViewInfo.selectedRegion.setTimes( t0, t1);
+   selectedRegion.setTimes( t0, t1 );
    return true;
 }
+
+const ComponentInterfaceSymbol SelectFrequenciesCommand::Symbol
+{ XO("Select Frequencies") };
+
+namespace{ BuiltinCommandsModule::Registration< SelectFrequenciesCommand > reg2; }
 
 bool SelectFrequenciesCommand::DefineParams( ShuttleParams & S ){
    S.OptionalN( bHasTop ).Define(    mTop,    wxT("High"), 0.0, 0.0, (double)FLT_MAX);
@@ -148,8 +160,8 @@ void SelectFrequenciesCommand::PopulateOrExchange(ShuttleGui & S)
    S.StartMultiColumn(3, wxEXPAND);
    {
       S.SetStretchyCol( 2 );
-      S.Optional( bHasTop    ).TieTextBox(_("High:"), mTop);
-      S.Optional( bHasBottom ).TieTextBox(_("Low:"),  mBottom);
+      S.Optional( bHasTop    ).TieTextBox(XXO("High:"), mTop);
+      S.Optional( bHasBottom ).TieTextBox(XXO("Low:"),  mBottom);
    }
    S.EndMultiColumn();
 }
@@ -164,10 +176,15 @@ bool SelectFrequenciesCommand::Apply(const CommandContext & context){
    if( !bHasBottom )
       mBottom = 0.0;
 
-   context.GetProject()->SSBL_ModifySpectralSelection(
+   ProjectSelectionManager::Get( context.project ).SSBL_ModifySpectralSelection(
       mBottom, mTop, false);// false for not done.
    return true;
 }
+
+const ComponentInterfaceSymbol SelectTracksCommand::Symbol
+{ XO("Select Tracks") };
+
+namespace{ BuiltinCommandsModule::Registration< SelectTracksCommand > reg3; }
 
 const int nModes =3;
 static const EnumValueSymbol kModes[nModes] =
@@ -195,14 +212,14 @@ void SelectTracksCommand::PopulateOrExchange(ShuttleGui & S)
    S.StartMultiColumn(3, wxEXPAND);
    {
       S.SetStretchyCol( 2 );
-      S.Optional( bHasFirstTrack).TieTextBox(_("First Track:"),mFirstTrack);
-      S.Optional( bHasNumTracks).TieTextBox(_("Track Count:"),mNumTracks);
+      S.Optional( bHasFirstTrack).TieTextBox(XXO("First Track:"),mFirstTrack);
+      S.Optional( bHasNumTracks).TieTextBox(XXO("Track Count:"),mNumTracks);
    }
    S.EndMultiColumn();
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
       // Always used, so no check box.
-      S.TieChoice( _("Mode:"), mMode, LocalizedStrings( kModes, nModes ));
+      S.TieChoice( XXO("Mode:"), mMode, Msgids( kModes, nModes ));
    }
    S.EndMultiColumn();
 }
@@ -214,7 +231,7 @@ bool SelectTracksCommand::Apply(const CommandContext &context)
    // Used to invalidate cached selection and tracks.
    Effect::IncEffectCounter();
    int index = 0;
-   TrackList *tracks = context.GetProject()->GetTracks();
+   auto &tracks = TrackList::Get( context.project );
 
    // Defaults if no value...
    if( !bHasNumTracks ) 
@@ -226,7 +243,7 @@ bool SelectTracksCommand::Apply(const CommandContext &context)
    double last = mFirstTrack+mNumTracks;
    double first = mFirstTrack;
 
-   for (auto t : tracks->Leaders()) {
+   for (auto t : tracks.Leaders()) {
       auto channels = TrackList::Channels(t);
       double term = 0.0;
       // Add 0.01 so we are free of rounding errors in comparisons.
@@ -250,3 +267,7 @@ bool SelectTracksCommand::Apply(const CommandContext &context)
    return true;
 }
 
+const ComponentInterfaceSymbol SelectCommand::Symbol
+{ XO("Select") };
+
+namespace{ BuiltinCommandsModule::Registration< SelectCommand > reg4; }

@@ -20,7 +20,7 @@ For example DEFINE_IMAGE will generate:
 
   - extern int name;
   - int name = -1;
-  - RegisterImage( name, initiialiser, textual_name);
+  - RegisterImage( name, initialiser, textual_name);
 
 On three different passes.  We control which by defining one of
 THEME_INITS or THEME_DECLARATIONS or neither of these.
@@ -28,7 +28,7 @@ THEME_INITS or THEME_DECLARATIONS or neither of these.
 
 *//*******************************************************************/
 
-#include "Theme.h"
+using teBmps = int; /// The index of a bitmap resource in Theme Resources.
 
 // undefine the macros.
 #undef DEFINE_IMAGE

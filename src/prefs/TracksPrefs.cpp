@@ -17,19 +17,15 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
-#include "TracksPrefs.h"
 
-#include "../Experimental.h"
+#include "TracksPrefs.h"
 
 //#include <algorithm>
 //#include <wx/defs.h>
 
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
-#include "../WaveTrack.h"
-
-#include "../Internat.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveTrackViewConstants.h"
 
 int TracksPrefs::iPreferencePinned = -1;
 
@@ -56,109 +52,154 @@ namespace {
 }
 
 
+namespace {
+   const auto waveformScaleKey = wxT("/GUI/DefaultWaveformScaleChoice");
+   const auto dbValueString = wxT("dB");
+}
+
+static EnumSetting< WaveformSettings::ScaleTypeValues > waveformScaleSetting{
+   waveformScaleKey,
+   {
+      { XO("Linear") },
+      { dbValueString, XO("Logarithmic (dB)") },
+   },
+
+   0, // linear
+   
+   {
+      WaveformSettings::stLinear,
+      WaveformSettings::stLogarithmic,
+   }
+};
+
 //////////
-static const EnumValueSymbol choicesView[] = {
-   { XO("Waveform") },
-   { wxT("WaveformDB"), XO("Waveform (dB)") },
-   { XO("Spectrogram") }
-};
-static const int intChoicesView[] = {
-   (int)(WaveTrack::Waveform),
-   (int)(WaveTrack::obsoleteWaveformDBDisplay),
-   (int)(WaveTrack::Spectrum)
-};
-static const size_t nChoicesView = WXSIZEOF(choicesView);
-static_assert( nChoicesView == WXSIZEOF(intChoicesView), "size mismatch" );
+// There is a complicated migration history here!
+namespace {
+   const auto key0 = wxT("/GUI/DefaultViewMode");
+   const auto key1 = wxT("/GUI/DefaultViewModeNew");
+   const auto key2 = wxT("/GUI/DefaultViewModeChoice");
+   const auto key3 = wxT("/GUI/DefaultViewModeChoiceNew");
 
-static const size_t defaultChoiceView = 0;
+   const wxString obsoleteValue{ wxT("WaveformDB") };
+};
 
-class TracksViewModeSetting : public EnumSetting {
+class TracksViewModeEnumSetting
+   : public EnumSetting< WaveTrackViewConstants::Display > {
 public:
-   TracksViewModeSetting(
-      const wxString &key,
-      const EnumValueSymbol symbols[], size_t nSymbols,
-      size_t defaultSymbol,
-
-      const int intValues[],
-      const wxString &oldKey
-   )
-      : EnumSetting{
-         key, symbols, nSymbols, defaultSymbol, intValues, oldKey }
-   {}
+   using EnumSetting< WaveTrackViewConstants::Display >::EnumSetting;
 
    void Migrate( wxString &value ) override
    {
-      // Special logic for this preference which was twice migrated!
-
-      // First test for the older but not oldest key:
-      EnumSetting::Migrate(value);
-      if (!value.empty())
-         return;
+      // Special logic for this preference which was three times migrated!
 
       // PRL:  Bugs 1043, 1044
       // 2.1.1 writes a NEW key for this preference, which got NEW values,
       // to avoid confusing version 2.1.0 if it reads the preference file afterwards.
       // Prefer the NEW preference key if it is present
 
+      static const EnumValueSymbol waveformSymbol{ XO("Waveform") };
+      static const EnumValueSymbol spectrumSymbol{ XO("Spectrogram") };
+
+      WaveTrackViewConstants::Display viewMode;
       int oldMode;
-      gPrefs->Read(wxT("/GUI/DefaultViewMode"), // The very old key
+      wxString newValue;
+      auto stringValue =
+         []( WaveTrackViewConstants::Display display ){
+         switch ( display ) {
+            case WaveTrackViewConstants::Spectrum:
+               return spectrumSymbol.Internal();
+            case WaveTrackViewConstants::obsoleteWaveformDBDisplay:
+               return obsoleteValue;
+            default:
+               return waveformSymbol.Internal();
+         }
+      };
+
+      if ( gPrefs->Read(key0, // The very old key
          &oldMode,
-         (int)(WaveTrack::Waveform));
-      auto viewMode = WaveTrack::ConvertLegacyDisplayValue(oldMode);
+         (int)(WaveTrackViewConstants::Waveform) ) ) {
+         viewMode = WaveTrackViewConstants::ConvertLegacyDisplayValue(oldMode);
+         newValue = stringValue( viewMode );
+      }
+      else if ( gPrefs->Read(key1,
+         &oldMode,
+         (int)(WaveTrackViewConstants::Waveform) ) ) {
+         viewMode = static_cast<WaveTrackViewConstants::Display>( oldMode );
+         newValue = stringValue( viewMode );
+      }
+      else
+         gPrefs->Read( key2, &newValue );
 
-      // Now future-proof 2.1.1 against a recurrence of this sort of bug!
-      viewMode = WaveTrack::ValidateWaveTrackDisplay(viewMode);
+      if ( !gPrefs->Read( key3, &value ) ) {
+         if (newValue == obsoleteValue) {
+            newValue = waveformSymbol.Internal();
+            gPrefs->Write(waveformScaleKey, dbValueString);
+         }
 
-      const_cast<TracksViewModeSetting*>(this)->WriteInt( viewMode );
-      gPrefs->Flush();
-
-      value = mSymbols[ FindInt(viewMode) ].Internal();
+         Write( value = newValue );
+         gPrefs->Flush();
+         return;
+      }
    }
 };
 
-static TracksViewModeSetting viewModeSetting{
-   wxT("/GUI/DefaultViewModeChoice"),
-   choicesView, nChoicesView, defaultChoiceView,
-
-   intChoicesView,
-   wxT("/GUI/DefaultViewModeNew")
-};
-
-WaveTrack::WaveTrackDisplay TracksPrefs::ViewModeChoice()
+static TracksViewModeEnumSetting viewModeSetting()
 {
-   return (WaveTrack::WaveTrackDisplay) viewModeSetting.ReadInt();
+   // Do a delayed computation, so that registration of sub-view types completes
+   // first
+   const auto &types = WaveTrackSubViewType::All();
+   auto symbols = transform_container< EnumValueSymbols >(
+      types, std::mem_fn( &WaveTrackSubViewType::name ) );
+   auto ids = transform_container< std::vector< WaveTrackSubViewType::Display > >(
+      types, std::mem_fn( &WaveTrackSubViewType::id ) );
+
+   // Special entry for multi
+   symbols.push_back( WaveTrackViewConstants::MultiViewSymbol );
+   ids.push_back( WaveTrackViewConstants::MultiView );
+
+   return {
+      key3,
+      symbols,
+      0, // Waveform
+      ids
+   };
+}
+
+WaveTrackViewConstants::Display TracksPrefs::ViewModeChoice()
+{
+   return viewModeSetting().ReadEnum();
+}
+
+WaveformSettings::ScaleTypeValues TracksPrefs::WaveformScaleChoice()
+{
+   return waveformScaleSetting.ReadEnum();
 }
 
 //////////
-static const EnumValueSymbol choicesSampleDisplay[] = {
-   { wxT("ConnectDots"), XO("Connect dots") },
-   { wxT("StemPlot"), XO("Stem plot") }
-};
-static const size_t nChoicesSampleDisplay = WXSIZEOF( choicesSampleDisplay );
-static const int intChoicesSampleDisplay[] = {
-   (int) WaveTrack::LinearInterpolate,
-   (int) WaveTrack::StemPlot
-};
-static_assert(
-   nChoicesSampleDisplay == WXSIZEOF(intChoicesSampleDisplay), "size mismatch" );
-
-static const size_t defaultChoiceSampleDisplay = 1;
-
-static EnumSetting sampleDisplaySetting{
+static EnumSetting< WaveTrackViewConstants::SampleDisplay >
+sampleDisplaySetting{
    wxT("/GUI/SampleViewChoice"),
-   choicesSampleDisplay, nChoicesSampleDisplay, defaultChoiceSampleDisplay,
+   {
+      { wxT("ConnectDots"), XO("Connect dots") },
+      { wxT("StemPlot"), XO("Stem plot") }
+   },
+   1, // StemPlot
 
-   intChoicesSampleDisplay,
+   // for migrating old preferences:
+   {
+      WaveTrackViewConstants::LinearInterpolate,
+      WaveTrackViewConstants::StemPlot
+   },
    wxT("/GUI/SampleView")
 };
 
-WaveTrack::SampleDisplay TracksPrefs::SampleViewChoice()
+WaveTrackViewConstants::SampleDisplay TracksPrefs::SampleViewChoice()
 {
-   return (WaveTrack::SampleDisplay) sampleDisplaySetting.ReadInt();
+   return sampleDisplaySetting.ReadEnum();
 }
 
 //////////
-static const EnumValueSymbol choicesZoom[] = {
+static const std::initializer_list<EnumValueSymbol> choicesZoom{
    { wxT("FitToWidth"), XO("Fit to Width") },
    { wxT("ZoomToSelection"), XO("Zoom to Selection") },
    { wxT("ZoomDefault"), XO("Zoom Default") },
@@ -175,54 +216,52 @@ static const EnumValueSymbol choicesZoom[] = {
    { wxT("FourPixelsPerSample"), XO("4 Pixels per Sample") },
    { wxT("MaxZoom"), XO("Max Zoom") },
 };
-static const size_t nChoicesZoom = WXSIZEOF( choicesZoom );
-static const int intChoicesZoom[] = {
-   WaveTrack::kZoomToFit,
-   WaveTrack::kZoomToSelection,
-   WaveTrack::kZoomDefault,
-   WaveTrack::kZoomMinutes,
-   WaveTrack::kZoomSeconds,
-   WaveTrack::kZoom5ths,
-   WaveTrack::kZoom10ths,
-   WaveTrack::kZoom20ths,
-   WaveTrack::kZoom50ths,
-   WaveTrack::kZoom100ths,
-   WaveTrack::kZoom500ths,
-   WaveTrack::kZoomMilliSeconds,
-   WaveTrack::kZoomSamples,
-   WaveTrack::kZoom4To1,
-   WaveTrack::kMaxZoom,
+static auto enumChoicesZoom = {
+   WaveTrackViewConstants::kZoomToFit,
+   WaveTrackViewConstants::kZoomToSelection,
+   WaveTrackViewConstants::kZoomDefault,
+   WaveTrackViewConstants::kZoomMinutes,
+   WaveTrackViewConstants::kZoomSeconds,
+   WaveTrackViewConstants::kZoom5ths,
+   WaveTrackViewConstants::kZoom10ths,
+   WaveTrackViewConstants::kZoom20ths,
+   WaveTrackViewConstants::kZoom50ths,
+   WaveTrackViewConstants::kZoom100ths,
+   WaveTrackViewConstants::kZoom500ths,
+   WaveTrackViewConstants::kZoomMilliSeconds,
+   WaveTrackViewConstants::kZoomSamples,
+   WaveTrackViewConstants::kZoom4To1,
+   WaveTrackViewConstants::kMaxZoom,
 };
-static_assert( nChoicesZoom == WXSIZEOF(intChoicesZoom), "size mismatch" );
 
-static const size_t defaultChoiceZoom1 = 2; // kZoomDefault
-
-static EnumSetting zoom1Setting{
+static EnumSetting< WaveTrackViewConstants::ZoomPresets > zoom1Setting{
    wxT("/GUI/ZoomPreset1Choice"),
-   choicesZoom, nChoicesZoom, defaultChoiceZoom1,
+   choicesZoom,
+   2, // kZoomDefault
 
-   intChoicesZoom,
+   // for migrating old preferences:
+   enumChoicesZoom,
    wxT("/GUI/ZoomPreset1")
 };
 
-static const size_t defaultChoiceZoom2 = 13; // kZoom4To1
-
-static EnumSetting zoom2Setting{
+static EnumSetting< WaveTrackViewConstants::ZoomPresets > zoom2Setting{
    wxT("/GUI/ZoomPreset2Choice"),
-   choicesZoom, nChoicesZoom, defaultChoiceZoom2,
+   choicesZoom,
+   13, // kZoom4To1
 
-   intChoicesZoom,
+   // for migrating old preferences:
+   enumChoicesZoom,
    wxT("/GUI/ZoomPreset2")
 };
 
-WaveTrack::ZoomPresets TracksPrefs::Zoom1Choice()
+WaveTrackViewConstants::ZoomPresets TracksPrefs::Zoom1Choice()
 {
-   return (WaveTrack::ZoomPresets) zoom1Setting.ReadInt();
+   return zoom1Setting.ReadEnum();
 }
 
-WaveTrack::ZoomPresets TracksPrefs::Zoom2Choice()
+WaveTrackViewConstants::ZoomPresets TracksPrefs::Zoom2Choice()
 {
-   return (WaveTrack::ZoomPresets) zoom2Setting.ReadInt();
+   return zoom2Setting.ReadEnum();
 }
 
 //////////
@@ -230,13 +269,28 @@ TracksPrefs::TracksPrefs(wxWindow * parent, wxWindowID winid)
 /* i18n-hint: "Tracks" include audio recordings but also other collections of
  * data associated with a time line, such as sequences of labels, and musical
  * notes */
-:  PrefsPanel(parent, winid, _("Tracks"))
+:  PrefsPanel(parent, winid, XO("Tracks"))
 {
    Populate();
 }
 
 TracksPrefs::~TracksPrefs()
 {
+}
+
+ComponentInterfaceSymbol TracksPrefs::GetSymbol()
+{
+   return TRACKS_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString TracksPrefs::GetDescription()
+{
+   return XO("Preferences for Tracks");
+}
+
+ManualPageID TracksPrefs::HelpPageName()
+{
+   return "Tracks_Preferences";
 }
 
 void TracksPrefs::Populate()
@@ -262,27 +316,27 @@ void TracksPrefs::PopulateOrExchange(ShuttleGui & S)
    S.SetBorder(2);
    S.StartScroller();
 
-   S.StartStatic(_("Display"));
+   S.StartStatic(XO("Display"));
    {
-      S.TieCheckBox(_("Auto-&fit track height"),
-                    wxT("/GUI/TracksFitVerticallyZoomed"),
-                    false);
-      S.TieCheckBox(_("Sho&w audio track name as overlay"),
-                  wxT("/GUI/ShowTrackNameInWaveform"),
-                  false);
+      S.TieCheckBox(XXO("Auto-&fit track height"),
+                    {wxT("/GUI/TracksFitVerticallyZoomed"),
+                     false});
+      S.TieCheckBox(XXO("Sho&w track name as overlay"),
+                  {wxT("/GUI/ShowTrackNameInWaveform"),
+                   false});
 #ifdef EXPERIMENTAL_HALF_WAVE
-      S.TieCheckBox(_("Use &half-wave display when collapsed"),
-                  wxT("/GUI/CollapseToHalfWave"),
-                  false);
+      S.TieCheckBox(XXO("Use &half-wave display when collapsed"),
+                  {wxT("/GUI/CollapseToHalfWave"),
+                   false});
 #endif
 #ifdef SHOW_PINNED_UNPINNED_IN_PREFS
-      S.TieCheckBox(_("&Pinned Recording/Playback head"),
-         PinnedHeadPreferenceKey(),
-         PinnedHeadPreferenceDefault());
+      S.TieCheckBox(XXO("&Pinned Recording/Playback head"),
+         {PinnedHeadPreferenceKey(),
+          PinnedHeadPreferenceDefault()});
 #endif
-      S.TieCheckBox(_("A&uto-scroll if head unpinned"),
-         wxT("/GUI/AutoScroll"),
-         true);
+      S.TieCheckBox(XXO("A&uto-scroll if head unpinned"),
+         {wxT("/GUI/AutoScroll"),
+          true});
 
       S.AddSpace(10);
 
@@ -290,35 +344,39 @@ void TracksPrefs::PopulateOrExchange(ShuttleGui & S)
       {
 #ifdef SHOW_PINNED_POSITION_IN_PREFS
          S.TieNumericTextBox(
-            _("Pinned &head position"),
-            PinnedHeadPositionPreferenceKey(),
-            PinnedHeadPositionPreferenceDefault(),
+            XXO("Pinned &head position"),
+            {PinnedHeadPositionPreferenceKey(),
+             PinnedHeadPositionPreferenceDefault()},
             30
          );
 #endif
-         S.TieChoice(_("Default &view mode:"),
-                     viewModeSetting );
 
-         S.TieChoice(_("Display &samples:"),
+         S.TieChoice(XXO("Default &view mode:"),
+                     viewModeSetting() );
+
+         S.TieChoice(XXO("Default Waveform scale:"),
+                     waveformScaleSetting );
+
+         S.TieChoice(XXO("Display &samples:"),
                      sampleDisplaySetting );
 
-         S.TieTextBox(_("Default audio track &name:"),
-                      wxT("/GUI/TrackNames/DefaultTrackName"),
-                      _("Audio Track"),
+         S.TieTextBox(XXO("Default audio track &name:"),
+                      {wxT("/GUI/TrackNames/DefaultTrackName"),
+                       _("Audio Track")},
                       30);
       }
       S.EndMultiColumn();
    }
    S.EndStatic();
 
-   S.StartStatic(_("Zoom Toggle"));
+   S.StartStatic(XO("Zoom Toggle"));
    {
       S.StartMultiColumn(4);
       {
-         S.TieChoice(_("Preset 1:"),
+         S.TieChoice(XXO("Preset 1:"),
                      zoom1Setting );
 
-         S.TieChoice(_("Preset 2:"),
+         S.TieChoice(XXO("Preset 2:"),
                      zoom2Setting );
       }
    }
@@ -392,13 +450,12 @@ bool TracksPrefs::Commit()
    return true;
 }
 
-wxString TracksPrefs::HelpPageName()
-{
-   return "Tracks_Preferences";
-}
-
-PrefsPanel *TracksPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew TracksPrefs(parent, winid);
+namespace{
+PrefsPanel::Registration sAttachment{ "Tracks",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew TracksPrefs(parent, winid);
+   }
+};
 }

@@ -10,10 +10,10 @@
 ******************************************************************/
 
 #include "../Audacity.h"   // needed before FFmpeg.h // for USE_* macros
+#include "../blockfile/ODDecodeBlockFile.h" // base class
 #include "ODDecodeFFmpegTask.h"
 
-#include "../Experimental.h"
-
+#include <wx/crt.h>
 #include <wx/wxprec.h>
 // For compilers that support precompilation, includes "wx/wx.h".
 #ifndef WX_PRECOMP
@@ -28,10 +28,6 @@
 #include <functional>
 
 #include "../FFmpeg.h"      // which brings in avcodec.h, avformat.h
-#include "../import/ImportFFmpeg.h"
-
-
-extern FFmpegLibs *FFmpegLibsInst();
 
 
 #define ODFFMPEG_SEEKING_TEST_UNKNOWN 0
@@ -427,7 +423,7 @@ int ODFFmpegDecoder::Decode(SampleBuffer & data, sampleFormat & format, sampleCo
       for (int i = 0; i < mChannels.size(); i++)
       {
          sc = scs[i].get();
-         sc->m_pkt.create();
+         sc->m_pkt.emplace();
          if (DecodeFrame(sc, true) == 0)
          {
             sc->m_pkt.reset();

@@ -9,16 +9,13 @@
 #include "../Audacity.h"
 #include "NotYetAvailableException.h"
 
-#include "../Internat.h"
-
 NotYetAvailableException::~NotYetAvailableException()
 {
 }
 
-wxString NotYetAvailableException::ErrorMessage() const
+TranslatableString NotYetAvailableException::ErrorMessage() const
 {
-   return wxString::Format(
-      _("This operation cannot be done until importation of %s completes."),
-      fileName.GetFullName()
-   );
+   return
+      XO("This operation cannot be done until importation of %s completes.")
+         .Format( fileName.GetFullName() );
 }

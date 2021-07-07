@@ -14,16 +14,17 @@
 #ifndef __AUDACITY_EFFECT_SBSMS__
 #define __AUDACITY_EFFECT_SBSMS__
 
-#include "../Audacity.h" // for USE_* macros
+
 
 #if USE_SBSMS
 
 #include "Effect.h"
-#include "../../../lib-src/header-substitutes/sbsms.h"
+#include <sbsms.h>
 
 using namespace _sbsms_;
 
 class LabelTrack;
+class TimeWarper;
 
 class EffectSBSMS /* not final */ : public Effect
 {
@@ -37,7 +38,7 @@ public:
    static double getRate(double rateStart, double rateEnd, SlideType slideType, double t);
 
 protected:
-   wxString mProxyEffectName { XO("SBSMS Time / Pitch Stretch") };
+   TranslatableString mProxyEffectName { XO("SBSMS Time / Pitch Stretch") };
    // This supplies the abstract virtual function, but in fact this symbol
    // does not get used:  this class is either a temporary helper, or else
    // GetSymbol() is overridden further in derived classes.
@@ -45,6 +46,8 @@ protected:
 
 private:
    bool ProcessLabelTrack(LabelTrack *track);
+   void Finalize(WaveTrack* orig, WaveTrack* out, const TimeWarper *warper);
+
    double rateStart, rateEnd, pitchStart, pitchEnd;
    bool bLinkRatePitch, bRateReferenceInput, bPitchReferenceInput;
    SlideType rateSlideType;

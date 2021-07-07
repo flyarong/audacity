@@ -15,8 +15,9 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "TruncSilence.h"
+#include "LoadEffects.h"
 
 #include <algorithm>
 #include <list>
@@ -29,11 +30,12 @@
 
 #include "../Prefs.h"
 #include "../Project.h"
+#include "../ProjectSettings.h"
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../WaveTrack.h"
 #include "../widgets/valnum.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
 class Enums {
 public:
@@ -118,6 +120,11 @@ static const double DEF_MinTruncMs = 0.001;
 // Typical fraction of total time taken by detection (better to guess low)
 const double detectFrac = 0.4;
 
+const ComponentInterfaceSymbol EffectTruncSilence::Symbol
+{ XO("Truncate Silence") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectTruncSilence > reg; }
+
 BEGIN_EVENT_TABLE(EffectTruncSilence, wxEvtHandler)
    EVT_CHOICE(wxID_ANY, EffectTruncSilence::OnControlChange)
    EVT_TEXT(wxID_ANY, EffectTruncSilence::OnControlChange)
@@ -134,7 +141,7 @@ EffectTruncSilence::EffectTruncSilence()
 
    SetLinearEffectFlag(false);
 
-   // This used to be changeable via the audacity.cfg/registery.  Doubtful that was
+   // This used to be changeable via the audacity.cfg/registry.  Doubtful that was
    // ever done.
    //
    // Original comment:
@@ -153,17 +160,17 @@ EffectTruncSilence::~EffectTruncSilence()
 
 ComponentInterfaceSymbol EffectTruncSilence::GetSymbol()
 {
-   return TRUNCATESILENCE_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectTruncSilence::GetDescription()
+TranslatableString EffectTruncSilence::GetDescription()
 {
-   return _("Automatically reduces the length of passages where the volume is below a specified level");
+   return XO("Automatically reduces the length of passages where the volume is below a specified level");
 }
 
-wxString EffectTruncSilence::ManualPage()
+ManualPageID EffectTruncSilence::ManualPage()
 {
-   return wxT("Truncate_Silence");
+   return L"Truncate_Silence";
 }
 
 // EffectDefinitionInterface implementation
@@ -328,7 +335,8 @@ bool EffectTruncSilence::ProcessIndependently()
 {
    unsigned nGroups = 0;
 
-   const bool syncLock = ::GetActiveProject()->IsSyncLocked();
+   const auto &settings = ProjectSettings::Get( *FindProject() );
+   const bool syncLock = settings.IsSyncLocked();
 
    // Check if it's permissible
    {
@@ -341,7 +349,9 @@ bool EffectTruncSilence::ProcessIndependently()
                   - [&](const Track *pTrack){
                         return channels.contains(pTrack); };
             if (otherTracks) {
-               ::Effect::MessageBox(_("When truncating independently, there may only be one selected audio track in each Sync-Locked Track Group."));
+               ::Effect::MessageBox(
+                  XO(
+"When truncating independently, there may only be one selected audio track in each Sync-Locked Track Group.") );
                return false;
             }
          }
@@ -558,8 +568,8 @@ bool EffectTruncSilence::DoRemoval
             auto t1 = wt->TimeToLongSamples(cutStart) - blendFrames / 2;
             auto t2 = wt->TimeToLongSamples(cutEnd) - blendFrames / 2;
 
-            wt->Get((samplePtr)buf1.get(), floatSample, t1, blendFrames);
-            wt->Get((samplePtr)buf2.get(), floatSample, t2, blendFrames);
+            wt->GetFloats(buf1.get(), t1, blendFrames);
+            wt->GetFloats(buf2.get(), t2, blendFrames);
 
             for (decltype(blendFrames) i = 0; i < blendFrames; ++i)
             {
@@ -679,7 +689,7 @@ bool EffectTruncSilence::Analyze(RegionList& silenceList,
       auto count = limitSampleBufferSize( blockLen, end - *index );
 
       // Fill buffer
-      wt->Get((samplePtr)(buffer.get()), floatSample, *index, count);
+      wt->GetFloats((buffer.get()), *index, count);
 
       // Look for silenceList in current block
       for (decltype(count) i = 0; i < count; ++i) {
@@ -747,61 +757,72 @@ void EffectTruncSilence::PopulateOrExchange(ShuttleGui & S)
 
    S.AddSpace(0, 5);
 
-   S.StartStatic(_("Detect Silence"));
+   S.StartStatic(XO("Detect Silence"));
    {
       S.StartMultiColumn(3, wxALIGN_CENTER_HORIZONTAL);
       {
          // Threshold
-         FloatingPointValidator<double> vldThreshold(3, &mThresholdDB,
-            NumValidatorStyle::NO_TRAILING_ZEROES);
-         vldThreshold.SetRange(MIN_Threshold, MAX_Threshold);
-         mThresholdText = S.AddTextBox(_("Threshold:"), wxT(""), 0);
-         mThresholdText->SetValidator(vldThreshold);
-         S.AddUnits(_("dB"));
+         mThresholdText = S
+            .Validator<FloatingPointValidator<double>>(
+               3, &mThresholdDB, NumValidatorStyle::NO_TRAILING_ZEROES,
+               MIN_Threshold, MAX_Threshold
+            )
+            .NameSuffix(XO("db"))
+            .AddTextBox(XXO("&Threshold:"), wxT(""), 0);
+         S.AddUnits(XO("dB"));
 
          // Ignored silence
-         FloatingPointValidator<double> vldDur(3, &mInitialAllowedSilence, NumValidatorStyle::NO_TRAILING_ZEROES);
-         vldDur.SetRange(MIN_Minimum, MAX_Minimum);
-         mInitialAllowedSilenceT = S.AddTextBox(_("Duration:"), wxT(""), 12);
-         mInitialAllowedSilenceT->SetValidator(vldDur);
-         S.AddUnits(_("seconds"));
+         mInitialAllowedSilenceT = S.Validator<FloatingPointValidator<double>>(
+               3, &mInitialAllowedSilence,
+               NumValidatorStyle::NO_TRAILING_ZEROES,
+               MIN_Minimum, MAX_Minimum)
+            .NameSuffix(XO("seconds"))
+            .AddTextBox(XXO("&Duration:"), wxT(""), 12);
+         S.AddUnits(XO("seconds"));
       }
       S.EndMultiColumn();
    }
    S.EndStatic();
 
-   S.StartStatic(_("Action"));
+   S.StartStatic(XO("Action"));
    {
       S.StartHorizontalLay();
       {
          // Action choices
-         auto actionChoices = LocalizedStrings(kActionStrings, nActions);
-         mActionChoice = S.AddChoice( {}, actionChoices );
-         mActionChoice->SetValidator(wxGenericValidator(&mActionIndex));
-         S.SetSizeHints(-1, -1);
+         auto actionChoices = Msgids( kActionStrings, nActions );
+         mActionChoice = S
+            .Validator<wxGenericValidator>(&mActionIndex)
+            .MinSize( { -1, -1 } )
+            .AddChoice( {}, actionChoices );
       }
       S.EndHorizontalLay();
       S.StartMultiColumn(3, wxALIGN_CENTER_HORIZONTAL);
       {
          // Truncation / Compression factor
 
-         FloatingPointValidator<double> vldTrunc(3, &mTruncLongestAllowedSilence, NumValidatorStyle::NO_TRAILING_ZEROES);
-         vldTrunc.SetRange(MIN_Truncate, MAX_Truncate);
-         mTruncLongestAllowedSilenceT = S.AddTextBox(_("Truncate to:"), wxT(""), 12);
-         mTruncLongestAllowedSilenceT->SetValidator(vldTrunc);
-         S.AddUnits(_("seconds"));
+         mTruncLongestAllowedSilenceT = S.Validator<FloatingPointValidator<double>>(
+               3, &mTruncLongestAllowedSilence,
+               NumValidatorStyle::NO_TRAILING_ZEROES,
+               MIN_Truncate, MAX_Truncate
+            )
+            .NameSuffix(XO("seconds"))
+            .AddTextBox(XXO("Tr&uncate to:"), wxT(""), 12);
+         S.AddUnits(XO("seconds"));
 
-         FloatingPointValidator<double> vldComp(3, &mSilenceCompressPercent, NumValidatorStyle::NO_TRAILING_ZEROES);
-         vldComp.SetRange(MIN_Compress, MAX_Compress);
-         mSilenceCompressPercentT = S.AddTextBox(_("Compress to:"), wxT(""), 12);
-         mSilenceCompressPercentT->SetValidator(vldComp);
-         S.AddUnits(_("%"));
+         mSilenceCompressPercentT = S.Validator<FloatingPointValidator<double>>(
+               3, &mSilenceCompressPercent,
+               NumValidatorStyle::NO_TRAILING_ZEROES,
+               MIN_Compress, MAX_Compress
+            )
+            .NameSuffix(XO("%"))
+            .AddTextBox(XXO("C&ompress to:"), wxT(""), 12);
+         S.AddUnits(XO("%"));
       }
       S.EndMultiColumn();
 
       S.StartMultiColumn(2, wxALIGN_CENTER_HORIZONTAL);
       {
-         mIndependent = S.AddCheckBox(_("Truncate tracks independently"),
+         mIndependent = S.AddCheckBox(XXO("Trunc&ate tracks independently"),
             mbIndependent);
       }
    S.EndMultiColumn();

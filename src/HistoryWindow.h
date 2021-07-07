@@ -11,6 +11,7 @@
 #ifndef __AUDACITY_HISTORY_WINDOW__
 #define __AUDACITY_HISTORY_WINDOW__
 
+#include "Prefs.h"
 #include "widgets/wxPanelWrapper.h" // to inherit
 
 class wxButton;
@@ -22,23 +23,36 @@ class AudacityProject;
 class ShuttleGui;
 class UndoManager;
 
-class HistoryWindow final : public wxDialogWrapper {
+class HistoryDialog final : public wxDialogWrapper,
+                            public PrefsListener
+{
 
  public:
-   HistoryWindow(AudacityProject * parent, UndoManager *manager);
+   HistoryDialog(AudacityProject * parent, UndoManager *manager);
 
    void UpdateDisplay(wxEvent &e);
+   
+   bool Show( bool show = true ) override;
 
  private:
+   void Populate(ShuttleGui & S);
+
    void OnAudioIO(wxCommandEvent & evt);
    void DoUpdate();
    void UpdateLevels();
 
+   void OnShow(wxShowEvent & event);
    void OnSize(wxSizeEvent & event);
-   void OnCloseWindow(wxCloseEvent & WXUNUSED(event));
+   void OnCloseWindow(wxCloseEvent & event);
+   void OnListKeyDown(wxKeyEvent & event);
    void OnItemSelected(wxListEvent & event);
    void OnDiscard(wxCommandEvent & event);
    void OnDiscardClipboard(wxCommandEvent & event);
+   void OnCompact(wxCommandEvent & event);
+   void OnGetURL(wxCommandEvent & event);
+
+   // PrefsListener implementation
+   void UpdatePrefs() override;
 
    AudacityProject   *mProject;
    UndoManager       *mManager;
@@ -48,6 +62,7 @@ class HistoryWindow final : public wxDialogWrapper {
    wxTextCtrl        *mAvail;
    wxSpinCtrl        *mLevels;
    wxButton          *mDiscard;
+   wxButton          *mCompact;
 
    int               mSelected;
    bool              mAudioIOBusy;

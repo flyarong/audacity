@@ -13,14 +13,14 @@ class wxStaticText;
 class wxTextCtrl;
 class wxCheckBox;
 
-#include "../../MemoryX.h"
+class NumericTextCtrl;
+
 #include <wx/dynlib.h> // member variable
+#include <wx/event.h> // to inherit
 
 #include "audacity/EffectInterface.h"
 #include "audacity/ModuleInterface.h"
 #include "audacity/PluginInterface.h"
-
-#include "../../widgets/NumericTextCtrl.h"
 
 #include "ladspa.h"
 #include "../../SampleFormat.h"
@@ -53,7 +53,7 @@ public:
    ComponentInterfaceSymbol GetSymbol() override;
    VendorSymbol GetVendor() override;
    wxString GetVersion() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 
@@ -77,6 +77,7 @@ public:
 
    void SetSampleRate(double rate) override;
    size_t SetBlockSize(size_t maxBlockSize) override;
+   size_t GetBlockSize() const override;
 
    sampleCount GetLatency() override;
    size_t GetTailSize() override;
@@ -98,7 +99,8 @@ public:
                                        size_t numSamples) override;
    bool RealtimeProcessEnd() override;
 
-   bool ShowInterface(wxWindow *parent, bool forceModal = false) override;
+   bool ShowInterface( wxWindow &parent,
+      const EffectDialogFactory &factory, bool forceModal = false) override;
 
    bool GetAutomationParameters(CommandParameters & parms) override;
    bool SetAutomationParameters(CommandParameters & parms) override;
@@ -113,7 +115,7 @@ public:
    // EffectUIClientInterface implementation
 
    void SetHostUI(EffectUIHostInterface *host) override;
-   bool PopulateUI(wxWindow *parent) override;
+   bool PopulateUI(ShuttleGui &S) override;
    bool IsGraphicalUI() override;
    bool ValidateUI() override;
    bool HideUI() override;
@@ -206,7 +208,7 @@ private:
 class LadspaEffectsModule final : public ModuleInterface
 {
 public:
-   LadspaEffectsModule(ModuleManagerInterface *moduleManager, const wxString *path);
+   LadspaEffectsModule();
    virtual ~LadspaEffectsModule();
 
    // ComponentInterface implementation
@@ -215,34 +217,31 @@ public:
    ComponentInterfaceSymbol GetSymbol() override;
    VendorSymbol GetVendor() override;
    wxString GetVersion() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // ModuleInterface implementation
 
    bool Initialize() override;
    void Terminate() override;
+   EffectFamilySymbol GetOptionalFamilySymbol() override;
 
-   FileExtensions GetFileExtensions() override;
+   const FileExtensions &GetFileExtensions() override;
    FilePath InstallPath() override;
 
    bool AutoRegisterPlugins(PluginManagerInterface & pm) override;
    PluginPaths FindPluginPaths(PluginManagerInterface & pm) override;
    unsigned DiscoverPluginsAtPath(
-      const PluginPath & path, wxString &errMsg,
+      const PluginPath & path, TranslatableString &errMsg,
       const RegistrationCallback &callback)
          override;
 
    bool IsPluginValid(const PluginPath & path, bool bFast) override;
 
-   ComponentInterface *CreateInstance(const PluginPath & path) override;
-   void DeleteInstance(ComponentInterface *instance) override;
+   std::unique_ptr<ComponentInterface>
+      CreateInstance(const PluginPath & path) override;
 
    // LadspaEffectModule implementation
 
    FilePaths GetSearchPaths();
-
-private:
-   ModuleManagerInterface *mModMan;
-   wxString mPath;
 };
 

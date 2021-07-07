@@ -1,35 +1,37 @@
-#directory cmake-proxies/soundtouch
-set( TARGET soundtouch )
-set( TARGET_SOURCE ${LIB_SRC_DIRECTORY}${TARGET} )
-project( ${TARGET} )
 
-set( SOURCES 
+add_library( ${TARGET} STATIC )
 
-#${LIB_SRC_DIRECTORY}soundtouch/source/Android-lib/jni/soundtouch-jni.cpp
-#${LIB_SRC_DIRECTORY}soundtouch/source/SoundStretch/main.cpp
-#${LIB_SRC_DIRECTORY}soundtouch/source/SoundStretch/RunParameters.cpp
-#${LIB_SRC_DIRECTORY}soundtouch/source/SoundStretch/WavFile.cpp
-${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouch/AAFilter.cpp
-#${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouch/BPMDetect.cpp
-${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouch/cpu_detect_x86.cpp
-${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouch/FIFOSampleBuffer.cpp
-${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouch/FIRFilter.cpp
-${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouch/mmx_optimized.cpp
-#${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouch/PeakFinder.cpp
-${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouch/RateTransposer.cpp
-${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouch/SoundTouch.cpp
-${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouch/sse_optimized.cpp
-${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouch/TDStretch.cpp
-#${LIB_SRC_DIRECTORY}soundtouch/source/SoundTouchDLL/SoundTouchDLL.cpp
-)
-# This defines the #define on both Windows and Linux.
-add_definitions( 
--D_LIB
- )
-add_library( ${TARGET} STATIC ${SOURCES})
+def_vars()
 
-target_include_directories( ${TARGET} PRIVATE 
-${TARGET_SOURCE}/include
+list( APPEND SOURCES 
+   PRIVATE
+      ${TARGET_ROOT}/source/SoundTouch/AAFilter.cpp
+      ${TARGET_ROOT}/source/SoundTouch/FIFOSampleBuffer.cpp
+      ${TARGET_ROOT}/source/SoundTouch/FIRFilter.cpp
+      ${TARGET_ROOT}/source/SoundTouch/mmx_optimized.cpp
+      ${TARGET_ROOT}/source/SoundTouch/RateTransposer.cpp
+      ${TARGET_ROOT}/source/SoundTouch/SoundTouch.cpp
+      ${TARGET_ROOT}/source/SoundTouch/TDStretch.cpp
+      ${TARGET_ROOT}/source/SoundTouch/cpu_detect_x86.cpp
+      ${TARGET_ROOT}/source/SoundTouch/sse_optimized.cpp
 )
 
-target_link_libraries( ${TARGET} )
+list( APPEND INCLUDES
+   PUBLIC
+      ${_PUBDIR}
+      ${TARGET_ROOT}/include
+)
+
+list( APPEND OPTIONS
+   PRIVATE
+      ${MMX_FLAG}
+      ${SSE_FLAG}
+)
+
+configure_file( soundtouch_config.h.in public/soundtouch_config.h )
+
+organize_source( "${TARGET_ROOT}" "" "${SOURCES}" )
+target_sources( ${TARGET} PRIVATE ${SOURCES} )
+target_compile_options( ${TARGET} PRIVATE ${OPTIONS} )
+target_include_directories( ${TARGET} PRIVATE ${INCLUDES} )
+

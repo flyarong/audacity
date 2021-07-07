@@ -11,41 +11,32 @@
 #ifndef _IMPORT_
 #define _IMPORT_
 
-#include "ImportRaw.h" // defines TrackHolders
 #include "ImportForwards.h"
-#include "audacity/Types.h"
+#include "Identifier.h"
 #include <vector>
 #include <wx/tokenzr.h> // for enum wxStringTokenizerMode
 
 #include "../widgets/wxPanelWrapper.h" // to inherit
+#include "../FileNames.h" // for FileType
+
+#include "../Registry.h"
 
 class wxArrayString;
 class wxListBox;
+class AudacityProject;
 class Tags;
-class TrackFactory;
+class WaveTrackFactory;
 class Track;
 class ImportPlugin;
 class ImportFileHandle;
 class UnusableImportPlugin;
 typedef bool (*progress_callback_t)( void *userData, float percent );
 
-class Format {
-public:
-   wxString formatName;
-   FileExtensions formatExtensions;
-
-   Format(const wxString &_formatName,
-      FileExtensions _formatExtensions):
-      formatName(_formatName),
-      formatExtensions( std::move( _formatExtensions ) )
-   {
-   }
-};
-
 class ExtImportItem;
+class WaveTrack;
 
-using FormatList = std::vector<Format> ;
 using ExtImportItems = std::vector< std::unique_ptr<ExtImportItem> >;
+using TrackHolders = std::vector< std::vector< std::shared_ptr<WaveTrack> > >;
 
 class ExtImportItem
 {
@@ -86,10 +77,29 @@ class ExtImportItem
   wxArrayString mime_types;
 };
 
-class Importer {
+class AUDACITY_DLL_API Importer {
 public:
+
+   // Objects of this type are statically constructed in files implementing
+   // subclasses of ImportPlugin
+   struct AUDACITY_DLL_API RegisteredImportPlugin{
+      RegisteredImportPlugin(
+         const Identifier &id, // an internal string naming the plug-in
+         std::unique_ptr<ImportPlugin>,
+         const Registry::Placement &placement = { wxEmptyString, {} } );
+   };
+
+   // Objects of this type are statically constructed in files, to identify
+   // unsupported import formats; typically in a conditional compilation
+   struct RegisteredUnusableImportPlugin{
+      RegisteredUnusableImportPlugin( std::unique_ptr<UnusableImportPlugin> );
+   };
+
    Importer();
    ~Importer();
+
+   Importer( const Importer& ) PROHIBITED;
+   Importer &operator=( Importer& ) PROHIBITED;
 
    /**
     * Return instance reference
@@ -103,9 +113,29 @@ public:
    bool Terminate();
 
    /**
-    * Fills @formatList with a list of supported import formats
+    * Constructs a list of types, for use by file opening dialogs, that includes
+    * all supported file types
     */
-   void GetSupportedImportFormats(FormatList *formatList);
+   FileNames::FileTypes
+   GetFileTypes( const FileNames::FileType &extraType = {} );
+
+   /**
+    * Remember a file type in preferences
+    */
+   static void
+   SetLastOpenType( const FileNames::FileType &type );
+
+   /**
+    * Remember a file type in preferences
+    */
+   static void
+   SetDefaultOpenType( const FileNames::FileType &type );
+
+   /**
+    * Choose index of preferred type
+    */
+   static size_t
+   SelectDefaultOpenType( const FileNames::FileTypes &fileTypes );
 
    /**
     * Reads extended import filters from gPrefs into internal
@@ -121,7 +151,7 @@ public:
    /**
     * Helper function - uses wxStringTokenizer to tokenize
     * @str string and appends string-tokens to a list @list.
-    * @mod deifines tokenizer's behaviour.
+    * @mod defines tokenizer's behaviour.
     */
    void StringToList(wxString &str, wxString &delims, wxArrayString &list, wxStringTokenizerMode mod = wxTOKEN_RET_EMPTY_ALL);
 
@@ -129,7 +159,7 @@ public:
     * Returns a pointer to internal items array.
     * External objects are allowed to change the array contents.
     */
-   ExtImportItems &GetImportItems() { return mExtImportItems; };
+   ExtImportItems &GetImportItems() { return mExtImportItems; }
 
    /**
     * Allocates NEW ExtImportItem, fills it with default data
@@ -137,21 +167,20 @@ public:
     */
     std::unique_ptr<ExtImportItem> CreateDefaultImportItem();
 
-   static bool IsMidi(const FilePath &fName);
-
    // if false, the import failed and errorMessage will be set.
-   bool Import(const FilePath &fName,
-              TrackFactory *trackFactory,
+   bool Import( AudacityProject &project,
+              const FilePath &fName,
+              WaveTrackFactory *trackFactory,
               TrackHolders &tracks,
               Tags *tags,
-              wxString &errorMessage);
+              TranslatableString &errorMessage);
 
 private:
    static Importer mInstance;
 
    ExtImportItems mExtImportItems;
-   ImportPluginList mImportPluginList;
-   UnusableImportPluginList mUnusableImportPluginList;
+   static ImportPluginList &sImportPluginList();
+   static UnusableImportPluginList &sUnusableImportPluginList();
 };
 
 //----------------------------------------------------------------------------
@@ -163,7 +192,7 @@ class ImportStreamDialog final : public wxDialogWrapper
 public:
    // constructors and destructors
    ImportStreamDialog( ImportFileHandle *_mFile,
-      wxWindow *parent, wxWindowID id, const wxString &title,
+      wxWindow *parent, wxWindowID id, const TranslatableString &title,
       const wxPoint& pos = wxDefaultPosition,
       const wxSize& size = wxDefaultSize,
       long style = wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER );

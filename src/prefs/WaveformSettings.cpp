@@ -13,18 +13,17 @@ Paul Licameli
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "WaveformSettings.h"
 
 #include "GUISettings.h"
 #include "GUIPrefs.h"
+#include "TracksPrefs.h"
 
 #include <algorithm>
 #include <wx/intl.h>
 
 #include "../Prefs.h"
-#include "../TranslatableStringArray.h"
-#include "../Internat.h"
 
 
 WaveformSettings::Globals::Globals()
@@ -87,10 +86,9 @@ bool WaveformSettings::Validate(bool /* quiet */)
 
 void WaveformSettings::LoadPrefs()
 {
-   scaleType = ScaleType(gPrefs->Read(wxT("/Waveform/ScaleType"), 0L));
-   bool newPrefFound = gPrefs->Read(wxT("/Waveform/dBRange"), &dBRange);
-   if (!newPrefFound)
-      dBRange = gPrefs->Read(ENV_DB_KEY, ENV_DB_RANGE);
+   scaleType = TracksPrefs::WaveformScaleChoice();
+
+   dBRange = gPrefs->Read(ENV_DB_KEY, ENV_DB_RANGE);
 
    // Enforce legal values
    Validate(true);
@@ -100,19 +98,32 @@ void WaveformSettings::LoadPrefs()
 
 void WaveformSettings::SavePrefs()
 {
-   gPrefs->Write(wxT("/Waveform/ScaleType"), long(scaleType));
-   gPrefs->Write(wxT("/Waveform/dBRange"), long(dBRange));
 }
 
 void WaveformSettings::Update()
 {
 }
 
+// This is a temporary hack until WaveformSettings gets fully integrated
+void WaveformSettings::UpdatePrefs()
+{
+   if (scaleType == defaults().scaleType) {
+      scaleType = TracksPrefs::WaveformScaleChoice();
+   }
+
+   if (dBRange == defaults().dBRange){
+      dBRange = gPrefs->Read(ENV_DB_KEY, ENV_DB_RANGE);
+   }
+
+   // Enforce legal values
+   Validate(true);
+}
+
 void WaveformSettings::ConvertToEnumeratedDBRange()
 {
    // Assumes the codes are in ascending sequence.
    wxArrayStringEx codes;
-   GUIPrefs::GetRangeChoices(NULL, &codes);
+   GUIPrefs::GetRangeChoices(nullptr, &codes);
    int ii = 0;
    for (int nn = codes.size(); ii < nn; ++ii) {
       long value = 0;
@@ -126,7 +137,7 @@ void WaveformSettings::ConvertToEnumeratedDBRange()
 void WaveformSettings::ConvertToActualDBRange()
 {
    wxArrayStringEx codes;
-   GUIPrefs::GetRangeChoices(NULL, &codes);
+   GUIPrefs::GetRangeChoices(nullptr, &codes);
    long value = 0;
    codes[std::max(0, std::min((int)(codes.size()) - 1, dBRange))]
       .ToLong(&value);
@@ -148,20 +159,14 @@ void WaveformSettings::NextHigherDBRange()
 }
 
 //static
-const wxArrayStringEx &WaveformSettings::GetScaleNames()
+const EnumValueSymbols &WaveformSettings::GetScaleNames()
 {
-   class ScaleNamesArray final : public TranslatableStringArray
-   {
-      void Populate() override
-      {
-         // Keep in correspondence with enum WaveTrack::WaveTrackDisplay:
-         mContents.push_back(_("Linear"));
-         mContents.push_back(_("Logarithmic"));
-      }
+   static const EnumValueSymbols result{
+      // Keep in correspondence with ScaleTypeValues:
+      XO("Linear"),
+      XO("dB"),
    };
-
-   static ScaleNamesArray theArray;
-   return theArray.Get();
+   return result;
 }
 
 WaveformSettings::~WaveformSettings()

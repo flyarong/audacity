@@ -1,61 +1,67 @@
-//
-//  FileException.cpp
-//  
-//
-//  Created by Paul Licameli on 11/22/16.
-//
-//
+/*!
+  @file FileException.cpp
+  @brief implements FileException
+  
 
-#include "Audacity.h"
+  Created by Paul Licameli on 11/22/16.
+
+*/
+
+
 #include "FileException.h"
+#include "FileNames.h"
 
-#include "Internat.h"
 #include "Prefs.h"
 
 FileException::~FileException()
 {
 }
 
-wxString FileException::ErrorMessage() const
+TranslatableString FileException::ErrorMessage() const
 {
-   wxString format;
+   TranslatableString format;
    switch (cause) {
       case Cause::Open:
-         format = _("Audacity failed to open a file in %s.");
+         format = XO("Audacity failed to open a file in %s.");
          break;
       case Cause::Read:
-         format = _("Audacity failed to read from a file in %s.");
+         format = XO("Audacity failed to read from a file in %s.");
          break;
       case Cause::Write:
-         format =
-_("Audacity failed to write to a file.\n"
-  "Perhaps %s is not writable or the disk is full.");
-         break;
+         return WriteFailureMessage(fileName);
       case Cause::Rename:
          format =
-_("Audacity successfully wrote a file in %s but failed to rename it as %s.");
+XO("Audacity successfully wrote a file in %s but failed to rename it as %s.");
       default:
          break;
    }
-   wxString target;
 
-#ifdef __WXMSW__
-
-   // Drive letter plus colon
-   target = fileName.GetVolume() + wxT(":");
-
-#else
-
-   // Shorten the path, arbitrarily to 3 components
-   auto path = fileName;
-   path.SetFullName(wxString{});
-   while(path.GetDirCount() > 3)
-      path.RemoveLastDir();
-   target = path.GetFullPath();
-
-#endif
-
-   return wxString::Format(
-      format, target, renameTarget.GetFullName() );
+   return format.Format(
+      FileNames::AbbreviatePath(fileName), renameTarget.GetFullName() );
 }
 
+wxString FileException::ErrorHelpUrl() const
+{
+   switch (cause) {
+   case Cause::Open:
+   case Cause::Read:
+      return "Error:_Opening_or_reading_file";
+      break;
+   case Cause::Write:
+   case Cause::Rename:
+      return "Error:_Disk_full_or_not_writable";
+   default:
+      break;
+   }
+
+   return "";
+}
+
+TranslatableString
+FileException::WriteFailureMessage(const wxFileName &fileName)
+{
+   return XO("Audacity failed to write to a file.\n"
+     "Perhaps %s is not writable or the disk is full.\n"
+     "For tips on freeing up space, click the help button."
+   ).Format(FileNames::AbbreviatePath(fileName));
+}

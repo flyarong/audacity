@@ -20,27 +20,26 @@ most commonly asked questions about Audacity.
 *//********************************************************************/
 
 
-#include "Audacity.h"
+
 #include "SplashDialog.h"
 
-#include "Experimental.h"
+
 
 #include <wx/dialog.h>
+#include <wx/frame.h>
 #include <wx/html/htmlwin.h>
 #include <wx/button.h>
-#include <wx/dcclient.h>
 #include <wx/sizer.h>
 #include <wx/statbmp.h>
 #include <wx/intl.h>
 #include <wx/image.h>
 
 #include "FileNames.h"
-#include "Internat.h"
+#include "Project.h"
 #include "ShuttleGui.h"
-#include "widgets/ErrorDialog.h"
-#include "widgets/LinkingHtmlWindow.h"
+#include "widgets/AudacityMessageBox.h"
+#include "widgets/HelpSystem.h"
 
-#include "Theme.h"
 #include "AllThemeResources.h"
 #include "Prefs.h"
 #include "HelpText.h"
@@ -66,12 +65,17 @@ END_EVENT_TABLE()
 
 IMPLEMENT_CLASS(SplashDialog, wxDialogWrapper)
 
+void SplashDialog::DoHelpWelcome( AudacityProject &project )
+{
+   Show2( &GetProjectFrame( project ) );
+}
+
 SplashDialog::SplashDialog(wxWindow * parent)
-   :  wxDialogWrapper(parent, -1, _("Welcome to Audacity!"),
+   :  wxDialogWrapper(parent, -1, XO("Welcome to Audacity!"),
       wxPoint( -1, 60 ), // default x position, y position 60 pixels from top of screen.
       wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
 {
-   SetName(GetTitle());
+   SetName();
    m_pLogo = NULL; //v
    ShuttleGui S( this, eIsCreating );
    Populate( S );
@@ -80,6 +84,12 @@ SplashDialog::SplashDialog(wxWindow * parent)
    int x,y;
    GetPosition( &x, &y );
    Move( x, 60 );
+}
+
+void SplashDialog::OnChar(wxMouseEvent &event)
+{
+   if ( event.ShiftDown() && event.ControlDown() )
+      wxLaunchDefaultBrowser("https://www.audacityteam.org");
 }
 
 void SplashDialog::Populate( ShuttleGui & S )
@@ -113,32 +123,30 @@ void SplashDialog::Populate( ShuttleGui & S )
                           wxDefaultPosition,
                           wxSize((int)(LOGOWITHNAME_WIDTH*fScale), (int)(LOGOWITHNAME_HEIGHT*fScale)));
 
-   S.Prop(0).AddWindow( icon );
-
+   S.Prop(0)
 #if  (0)
-   icon->Bind(wxEVT_LEFT_DOWN,
-              [this]( wxMouseEvent const & event ) ->void {
-                 if ( event.ShiftDown() && event.ControlDown())
-                    wxLaunchDefaultBrowser("https://www.audacityteam.org");
-              }
-         );
+      .ConnectRoot( wxEVT_LEFT_DOWN, &SplashDialog::OnChar)
 #endif
+      .AddWindow( icon );
 
    mpHtml = safenew LinkingHtmlWindow(S.GetParent(), -1,
                                          wxDefaultPosition,
                                          wxSize(506, 280),
                                          wxHW_SCROLLBAR_AUTO | wxSUNKEN_BORDER );
    mpHtml->SetPage(HelpText( wxT("welcome") ));
-   S.Prop(1).AddWindow( mpHtml, wxEXPAND );
+   S.Prop(1)
+      .Position( wxEXPAND )
+      .AddWindow( mpHtml );
    S.Prop(0).StartMultiColumn(2, wxEXPAND);
    S.SetStretchyCol( 1 );// Column 1 is stretchy...
    {
       S.SetBorder( 5 );
-      S.Id( DontShowID).AddCheckBox( _("Don't show this again at start up"), !bShow );
-      wxButton *ok = safenew wxButton(S.GetParent(), wxID_OK);
-      ok->SetDefault();
+      S.Id( DontShowID).AddCheckBox( XXO("Don't show this again at start up"), !bShow );
       S.SetBorder( 5 );
-      S.Prop(0).AddWindow( ok, wxALIGN_RIGHT| wxALL );
+
+      S.Id(wxID_OK)
+         .Prop(0)
+         .AddButton(XXO("OK"), wxALIGN_RIGHT| wxALL, true);
    }
    S.EndVerticalLay();
 }

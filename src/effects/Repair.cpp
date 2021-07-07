@@ -21,7 +21,7 @@ the audio, rather than actually finding the clicks.
 *//*******************************************************************/
 
 
-#include "../Audacity.h"
+
 #include "Repair.h"
 
 #include <math.h>
@@ -30,7 +30,14 @@ the audio, rather than actually finding the clicks.
 
 #include "../InterpolateAudio.h"
 #include "../WaveTrack.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
+
+#include "LoadEffects.h"
+
+const ComponentInterfaceSymbol EffectRepair::Symbol
+{ XO("Repair") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectRepair > reg; }
 
 EffectRepair::EffectRepair()
 {
@@ -44,12 +51,12 @@ EffectRepair::~EffectRepair()
 
 ComponentInterfaceSymbol EffectRepair::GetSymbol()
 {
-   return REPAIR_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectRepair::GetDescription()
+TranslatableString EffectRepair::GetDescription()
 {
-   return _("Sets the peak amplitude of a one or more tracks");
+   return XO("Sets the peak amplitude of a one or more tracks");
 }
 
 // EffectDefinitionInterface implementation
@@ -88,7 +95,9 @@ bool EffectRepair::Process()
          const auto repair1 = track->TimeToLongSamples(repair_t1);
          const auto repairLen = repair1 - repair0;
          if (repairLen > 128) {
-            ::Effect::MessageBox(_("The Repair effect is intended to be used on very short sections of damaged audio (up to 128 samples).\n\nZoom in and select a tiny fraction of a second to repair."));
+            ::Effect::MessageBox(
+               XO(
+"The Repair effect is intended to be used on very short sections of damaged audio (up to 128 samples).\n\nZoom in and select a tiny fraction of a second to repair.") );
             bGoodResult = false;
             break;
          }
@@ -105,8 +114,10 @@ bool EffectRepair::Process()
          const auto len = s1 - s0;
 
          if (s0 == repair0 && s1 == repair1) {
-            ::Effect::MessageBox(_("Repair works by using audio data outside the selection region.\n\nPlease select a region that has audio touching at least one side of it.\n\nThe more surrounding audio, the better it performs."));
-   ///            The Repair effect needs some data to go on.\n\nPlease select an area to repair with some audio on at least one side (the more the better)."));
+            ::Effect::MessageBox(
+               XO(
+"Repair works by using audio data outside the selection region.\n\nPlease select a region that has audio touching at least one side of it.\n\nThe more surrounding audio, the better it performs.") );
+   ///            The Repair effect needs some data to go on.\n\nPlease select an area to repair with some audio on at least one side (the more the better).") );
             bGoodResult = false;
             break;
          }
@@ -135,7 +146,7 @@ bool EffectRepair::ProcessOne(int count, WaveTrack * track,
                               size_t repairStart, size_t repairLen)
 {
    Floats buffer{ len };
-   track->Get((samplePtr) buffer.get(), floatSample, start, len);
+   track->GetFloats(buffer.get(), start, len);
    InterpolateAudio(buffer.get(), len, repairStart, repairLen);
    track->Set((samplePtr)&buffer[repairStart], floatSample,
               start + repairStart, repairLen);

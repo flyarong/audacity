@@ -12,17 +12,17 @@
 #ifndef __AUDACITY_BUTTON__
 #define __AUDACITY_BUTTON__
 
-#include "../MemoryX.h"
 #include <vector>
 
 #include <wx/setup.h> // for wxUSE_* macros
 #include <wx/window.h> // to inherit
 
-#include "ImageRoll.h"
+#include "ImageRoll.h" // member variable
 
 class wxImage;
+class TranslatableString;
 
-class AButton final : public wxWindow {
+class AUDACITY_DLL_API AButton final : public wxWindow {
    friend class AButtonAx;
    class Listener;
 
@@ -41,20 +41,13 @@ class AButton final : public wxWindow {
            ImageRoll dis,
            bool toggle);
 
-    // Construct button, specifying images (button up, highlight, button down,
-    // and disabled) for the default state
-   AButton(wxWindow * parent,
-           wxWindowID id,
-           const wxPoint & pos,
-           const wxSize & size,
-           wxImage up,
-           wxImage over,
-           wxImage down,
-           wxImage overDown,
-           wxImage dis,
-           bool toggle);
-
    virtual ~ AButton();
+
+   // hide the inherited function that takes naked wxString:
+   void SetToolTip(const TranslatableString &toolTip);
+   
+   // hide the inherited function that takes naked wxString:
+   void SetLabel(const TranslatableString &label);
 
    bool AcceptsFocus() const override { return s_AcceptsFocus; }
    bool AcceptsFocusFromKeyboard() const override { return mEnabled; }

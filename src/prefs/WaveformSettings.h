@@ -11,14 +11,16 @@ Paul Licameli
 #ifndef __AUDACITY_WAVEFORM_SETTINGS__
 #define __AUDACITY_WAVEFORM_SETTINGS__
 
-class wxArrayStringEx;
+#include "../Prefs.h"
 
-class WaveformSettings
+class EnumValueSymbols;
+
+class AUDACITY_DLL_API WaveformSettings : public PrefsListener
 {
 public:
 
    // Singleton for settings that are not per-track
-   class Globals
+   class AUDACITY_DLL_API Globals
    {
    public:
       static Globals &Get();
@@ -45,6 +47,8 @@ public:
    void SavePrefs();
    void Update();
 
+   void UpdatePrefs() override;
+
    void ConvertToEnumeratedDBRange();
    void ConvertToActualDBRange();
    void NextLowerDBRange();
@@ -58,7 +62,7 @@ public:
       stNumScaleTypes,
    };
 
-   static const wxArrayStringEx &GetScaleNames();
+   static const EnumValueSymbols &GetScaleNames();
 
    ScaleType scaleType;
    int dBRange;

@@ -1,81 +1,45 @@
-#include "../Audacity.h"
-#include "../Experimental.h"
+
 
 #include "../AdornedRulerPanel.h"
 #include "../AudioIO.h"
-#include "../FreqWindow.h"
-#include "../Menus.h" // for PrefsListener
+#include "../CommonCommandFlags.h"
+#include "../SpectrumAnalyst.h"
 #include "../Prefs.h"
 #include "../Project.h"
+#include "../ProjectAudioIO.h"
+#include "../ProjectAudioManager.h"
+#include "../ProjectHistory.h"
+#include "../ProjectSelectionManager.h"
+#include "../ProjectSettings.h"
+#include "../ProjectWindow.h"
+#include "../SelectUtilities.h"
 #include "../TimeDialog.h"
 #include "../TrackPanel.h"
 #include "../WaveTrack.h"
-#include "../NoteTrack.h"
 #include "../commands/CommandContext.h"
 #include "../commands/CommandManager.h"
 #include "../toolbars/ControlToolBar.h"
 #include "../tracks/ui/SelectHandle.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveTrackView.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveTrackViewConstants.h"
 
 // private helper classes and functions
 namespace {
 
-void DoSelectTimeAndTracks
-(AudacityProject &project, bool bAllTime, bool bAllTracks)
-{
-   auto tracks = project.GetTracks();
-   auto trackPanel = project.GetTrackPanel();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
-
-   if( bAllTime )
-      selectedRegion.setTimes(
-         tracks->GetMinOffset(), tracks->GetEndTime());
-
-   if( bAllTracks ) {
-      for (auto t : tracks->Any()){
-         t->SetSelected(true);
-      }
-
-      project.ModifyState(false);
-      trackPanel->Refresh(false);
-   }
-}
-
-// Temporal selection (not TimeTrack selection)
-// potentially for all wave tracks.
-void DoSelectTimeAndAudioTracks
-(AudacityProject &project, bool bAllTime, bool bAllTracks)
-{
-   auto tracks = project.GetTracks();
-   auto trackPanel = project.GetTrackPanel();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
-
-   if( bAllTime )
-      selectedRegion.setTimes(
-         tracks->GetMinOffset(), tracks->GetEndTime());
-
-   if( bAllTracks ) {
-      // Unselect all tracks before selecting audio.
-      for (auto t : tracks->Any())
-         t->SetSelected(false);
-      for (auto t : tracks->Any<WaveTrack>())
-         t->SetSelected(true);
-
-      project.ModifyState(false);
-      trackPanel->Refresh(false);
-   }
-}
-
 void DoNextPeakFrequency(AudacityProject &project, bool up)
 {
-   auto tracks = project.GetTracks();
-   auto &viewInfo = project.GetViewInfo();
-   auto trackPanel = project.GetTrackPanel();
+   auto &tracks = TrackList::Get( project );
+   auto &viewInfo = ViewInfo::Get( project );
 
    // Find the first selected wave track that is in a spectrogram view.
    const WaveTrack *pTrack {};
-   for ( auto wt : tracks->Selected< const WaveTrack >() ) {
-      const int display = wt->GetDisplay();
-      if (display == WaveTrack::Spectrum) {
+   for ( auto wt : tracks.Selected< const WaveTrack >() ) {
+      const auto displays = WaveTrackView::Get( *wt ).GetDisplays();
+      bool hasSpectrum = (displays.end() != std::find(
+         displays.begin(), displays.end(),
+         WaveTrackSubView::Type{ WaveTrackViewConstants::Spectrum, {} }
+      ) );
+      if ( hasSpectrum ) {
          pTrack = wt;
          break;
       }
@@ -84,29 +48,29 @@ void DoNextPeakFrequency(AudacityProject &project, bool up)
    if (pTrack) {
       SpectrumAnalyst analyst;
       SelectHandle::SnapCenterOnce(analyst, viewInfo, pTrack, up);
-      trackPanel->Refresh(false);
-      project.ModifyState(false);
+      ProjectHistory::Get( project ).ModifyState(false);
    }
 }
 
 double NearestZeroCrossing
 (AudacityProject &project, double t0)
 {
-   auto rate = project.GetRate();
-   auto tracks = project.GetTracks();
+   const auto &settings = ProjectSettings::Get( project );
+   auto rate = settings.GetRate();
+   auto &tracks = TrackList::Get( project );
 
    // Window is 1/100th of a second.
    auto windowSize = size_t(std::max(1.0, rate / 100));
    Floats dist{ windowSize, true };
 
    int nTracks = 0;
-   for (auto one : tracks->Selected< const WaveTrack >()) {
+   for (auto one : tracks.Selected< const WaveTrack >()) {
       auto oneWindowSize = size_t(std::max(1.0, one->GetRate() / 100));
       Floats oneDist{ oneWindowSize };
       auto s = one->TimeToLongSamples(t0);
       // fillTwo to ensure that missing values are treated as 2, and hence do
       // not get used as zero crossings.
-      one->Get((samplePtr)oneDist.get(), floatSample,
+      one->GetFloats(oneDist.get(),
                s - (int)oneWindowSize/2, oneWindowSize, fillTwo);
 
 
@@ -170,12 +134,12 @@ bool OnlyHandleKeyUp( const CommandContext &context )
    auto evt = context.pEvt;
    bool bKeyUp = (evt) && evt->GetEventType() == wxEVT_KEY_UP;
 
-   if( project.IsAudioActive() )
+   if( ProjectAudioIO::Get( project ).IsAudioActive() )
       return bKeyUp;
    if( !bKeyUp )
       return false;
 
-   project.ModifyState(false);
+   ProjectHistory::Get( project ).ModifyState(false);
    return true;
 }
 
@@ -204,6 +168,7 @@ struct SeekInfo
 
 void SeekWhenAudioActive(double seekStep, wxLongLong &lastSelectionAdjustment)
 {
+   auto gAudioIO = AudioIO::Get();
 #ifdef EXPERIMENTAL_IMPROVED_SEEKING
    if (gAudioIO->GetLastPlaybackTime() < lastSelectionAdjustment) {
       // Allow time for the last seek to output a buffer before
@@ -225,9 +190,10 @@ void SeekWhenAudioActive(double seekStep, wxLongLong &lastSelectionAdjustment)
 double GridMove
 (AudacityProject &project, double t, int minPix)
 {
-   auto rate = project.GetRate();
-   auto &viewInfo = project.GetViewInfo();
-   auto format = project.GetSelectionFormat();
+   const auto &settings = ProjectSettings::Get( project );
+   auto rate = settings.GetRate();
+   auto &viewInfo = ViewInfo::Get( project );
+   auto format = settings.GetSelectionFormat();
 
    NumericConverter nc(NumericConverter::TIME, format, t, rate);
 
@@ -251,7 +217,7 @@ double OffsetTime
 (AudacityProject &project,
  double t, double offset, TimeUnit timeUnit, int snapToTime)
 {
-   auto &viewInfo = project.GetViewInfo();
+   auto &viewInfo = ViewInfo::Get( project );
 
     if (timeUnit == TIME_UNIT_SECONDS)
         return t + offset; // snapping is currently ignored for non-pixel moves
@@ -266,17 +232,19 @@ double OffsetTime
 void MoveWhenAudioInactive
 (AudacityProject &project, double seekStep, TimeUnit timeUnit)
 {
-   auto &viewInfo = project.GetViewInfo();
-   auto trackPanel = project.GetTrackPanel();
-   auto tracks = project.GetTracks();
-   auto ruler = project.GetRulerPanel();
+   auto &viewInfo = ViewInfo::Get( project );
+   auto &trackPanel = TrackPanel::Get( project );
+   auto &tracks = TrackList::Get( project );
+   auto &ruler = AdornedRulerPanel::Get( project );
+   const auto &settings = ProjectSettings::Get( project );
+   auto &window = ProjectWindow::Get( project );
 
    // If TIME_UNIT_SECONDS, snap-to will be off.
-   int snapToTime = project.GetSnapTo();
+   int snapToTime = settings.GetSnapTo();
    const double t0 = viewInfo.selectedRegion.t0();
    const double end = std::max( 
-      tracks->GetEndTime(),
-      trackPanel->GetScreenEndTime());
+      tracks.GetEndTime(),
+      viewInfo.GetScreenEndTime());
 
    // Move the cursor
    // Already in cursor mode?
@@ -294,24 +262,21 @@ void MoveWhenAudioInactive
       viewInfo.selectedRegion.collapseToT0();
 
       // Move the visual cursor, avoiding an unnecessary complete redraw
-      trackPanel->DrawOverlays(false);
-      ruler->DrawOverlays(false);
-
-      // This updates the selection shown on the selection bar, and the play
-      // region
-      project.TP_DisplaySelection();
-   } else
+      trackPanel.DrawOverlays(false);
+      ruler.DrawOverlays(false);
+   }
+   else
    {
       // Transition to cursor mode.
       if( seekStep < 0 )
          viewInfo.selectedRegion.collapseToT0();
       else
          viewInfo.selectedRegion.collapseToT1();
-      trackPanel->Refresh(false);
+      trackPanel.Refresh(false);
    }
 
    // Make sure NEW position is in view
-   trackPanel->ScrollIntoView(viewInfo.selectedRegion.t1());
+   window.ScrollIntoView(viewInfo.selectedRegion.t1());
    return;
 }
 
@@ -319,9 +284,10 @@ void SeekWhenAudioInactive
 (AudacityProject &project, double seekStep, TimeUnit timeUnit,
 SelectionOperation operation)
 {
-   auto &viewInfo = project.GetViewInfo();
-   auto trackPanel = project.GetTrackPanel();
-   auto tracks = project.GetTracks();
+   auto &viewInfo = ViewInfo::Get( project );
+   auto &tracks = TrackList::Get( project );
+   const auto &settings = ProjectSettings::Get( project );
+   auto &window = ProjectWindow::Get( project );
 
    if( operation == CURSOR_MOVE )
    {
@@ -329,12 +295,12 @@ SelectionOperation operation)
       return;
    }
 
-   int snapToTime = project.GetSnapTo();
+   int snapToTime = settings.GetSnapTo();
    const double t0 = viewInfo.selectedRegion.t0();
    const double t1 = viewInfo.selectedRegion.t1();
    const double end = std::max( 
-      tracks->GetEndTime(),
-      trackPanel->GetScreenEndTime());
+      tracks.GetEndTime(),
+      viewInfo.GetScreenEndTime());
 
    // Is it t0 or t1 moving?
    bool bMoveT0 = (operation == SELECTION_CONTRACT && seekStep > 0) ||
@@ -355,9 +321,8 @@ SelectionOperation operation)
    else 
       viewInfo.selectedRegion.setT1( newT );
 
-   // Ensure it is visible, and refresh.
-   trackPanel->ScrollIntoView(newT);
-   trackPanel->Refresh(false);
+   // Ensure it is visible
+   window.ScrollIntoView(newT);
 }
 
 // Handle small cursor and play head movements
@@ -370,7 +335,7 @@ void SeekLeftOrRight
    // zoom and does not vary if the key is held
    // Else: jump depends on the zoom and gets bigger if the key is held
 
-   if( project.IsAudioActive() )
+   if( ProjectAudioIO::Get( project ).IsAudioActive() )
    {
       if( operation == CURSOR_MOVE )
          SeekWhenAudioActive( info.mSeekShort * direction,
@@ -403,7 +368,7 @@ void DoCursorMove(
    AudacityProject &project, double seekStep,
    wxLongLong &lastSelectionAdjustment)
 {
-   if (project.IsAudioActive()) {
+   if (ProjectAudioIO::Get( project ).IsAudioActive()) {
       SeekWhenAudioActive(seekStep, lastSelectionAdjustment);
    }
    else
@@ -412,14 +377,14 @@ void DoCursorMove(
       MoveWhenAudioInactive(project, seekStep, TIME_UNIT_SECONDS);
    }
 
-   project.ModifyState(false);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 void DoBoundaryMove(AudacityProject &project, int step, SeekInfo &info)
 {
-   auto &viewInfo = project.GetViewInfo();
-   auto trackPanel = project.GetTrackPanel();
-   auto tracks = project.GetTracks();
+   auto &viewInfo = ViewInfo::Get( project );
+   auto &tracks = TrackList::Get( project );
+   auto &window = ProjectWindow::Get( project );
 
    // step is negative, then is moving left.  step positive, moving right.
    // Move the left/right selection boundary, to expand the selection
@@ -438,24 +403,24 @@ void DoBoundaryMove(AudacityProject &project, int step, SeekInfo &info)
    // contracting.  it is no longer needed.
    bool bMoveT0 = (step < 0 );// ^ boundaryContract ;
 
-   if( project.IsAudioActive() )
+   if( ProjectAudioIO::Get( project ).IsAudioActive() )
    {
+      auto gAudioIO = AudioIO::Get();
       double indicator = gAudioIO->GetStreamTime();
       if( bMoveT0 )
          viewInfo.selectedRegion.setT0(indicator, false);
       else
          viewInfo.selectedRegion.setT1(indicator);
 
-      project.ModifyState(false);
-      trackPanel->Refresh(false);
+      ProjectHistory::Get( project ).ModifyState(false);
       return;
    }
 
    const double t0 = viewInfo.selectedRegion.t0();
    const double t1 = viewInfo.selectedRegion.t1();
    const double end = std::max( 
-      tracks->GetEndTime(),
-      trackPanel->GetScreenEndTime());
+      tracks.GetEndTime(),
+      viewInfo.GetScreenEndTime());
 
    double newT = viewInfo.OffsetTimeByPixels( bMoveT0 ? t0 : t1, pixels);
    // constrain to be in the track/screen limits.
@@ -471,111 +436,60 @@ void DoBoundaryMove(AudacityProject &project, int step, SeekInfo &info)
    else 
       viewInfo.selectedRegion.setT1( newT );
 
-   // Ensure it is visible, and refresh.
-   trackPanel->ScrollIntoView(newT);
-   trackPanel->Refresh(false);
+   // Ensure it is visible
+   window.ScrollIntoView(newT);
 
-   project.ModifyState(false);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 }
 
 namespace SelectActions {
 
-// exported helper functions
-
-void DoListSelection
-(AudacityProject &project, Track *t, bool shift, bool ctrl, bool modifyState)
-{
-   auto tracks = project.GetTracks();
-   auto trackPanel = project.GetTrackPanel();
-   auto &selectionState = project.GetSelectionState();
-   auto &viewInfo = project.GetViewInfo();
-   auto isSyncLocked = project.IsSyncLocked();
-
-   selectionState.HandleListSelection
-      ( *tracks, viewInfo, *t,
-        shift, ctrl, isSyncLocked );
-
-   if (! ctrl )
-      trackPanel->SetFocusedTrack(t);
-   project.Refresh(false);
-   if (modifyState)
-      project.ModifyState(true);
-}
-
-void DoSelectAll(AudacityProject &project)
-{
-   DoSelectTimeAndTracks( project, true, true );
-}
-
-void DoSelectAllAudio(AudacityProject &project)
-{
-   DoSelectTimeAndAudioTracks( project, true, true );
-}
-
-// This function selects all tracks if no tracks selected,
-// and all time if no time selected.
-// There is an argument for making it just count wave tracks,
-// However you could then not select a label and cut it,
-// without this function selecting all tracks.
-void DoSelectSomething(AudacityProject &project)
-{
-   auto tracks = project.GetTracks();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
-
-   bool bTime = selectedRegion.isPoint();
-   bool bTracks = tracks->Selected().empty();
-
-   if( bTime || bTracks )
-      DoSelectTimeAndTracks( project, bTime, bTracks );
-}
 
 // Menu handler functions
 
 struct Handler
    : CommandHandlerObject // MUST be the first base class!
+   , ClientData::Base
    , PrefsListener
 {
 
 void OnSelectAll(const CommandContext &context)
 {
-   DoSelectAll( context.project );
+   SelectUtilities::DoSelectAll( context.project );
 }
 
 void OnSelectNone(const CommandContext &context)
 {
    auto &project = context.project;
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
 
    selectedRegion.collapseToT0();
-   project.SelectNone();
-   project.ModifyState(false);
+   SelectUtilities::SelectNone( project );
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 void OnSelectAllTracks(const CommandContext &context)
 {
    auto &project = context.project;
-   DoSelectTimeAndTracks( project, false, true );
+   SelectUtilities::DoSelectTimeAndTracks( project, false, true );
 }
 
 void OnSelectSyncLockSel(const CommandContext &context)
 {
    auto &project = context.project;
-   auto tracks = project.GetTracks();
-   auto trackPanel = project.GetTrackPanel();
+   auto &tracks = TrackList::Get( project );
 
    bool selected = false;
-   for (auto t : tracks->Any()
+   for (auto t : tracks.Any() + &Track::SupportsBasicEditing
          + &Track::IsSyncLockSelected - &Track::IsSelected) {
       t->SetSelected(true);
       selected = true;
    }
 
    if (selected)
-      project.ModifyState(false);
-
-   trackPanel->Refresh(false);
+      ProjectHistory::Get( project ).ModifyState(false);
 }
 
 //this pops up a dialog which allows the left selection to be set.
@@ -584,11 +498,13 @@ void OnSelectSyncLockSel(const CommandContext &context)
 void OnSetLeftSelection(const CommandContext &context)
 {
    auto &project = context.project;
-   auto token = project.GetAudioIOToken();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
-   auto trackPanel = project.GetTrackPanel();
+   auto token = ProjectAudioIO::Get( project ).GetAudioIOToken();
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   const auto &settings = ProjectSettings::Get( project );
+   auto &window = GetProjectFrame( project );
 
    bool bSelChanged = false;
+   auto gAudioIO = AudioIO::Get();
    if ((token > 0) && gAudioIO->IsStreamActive(token))
    {
       double indicator = gAudioIO->GetStreamTime();
@@ -597,11 +513,11 @@ void OnSetLeftSelection(const CommandContext &context)
    }
    else
    {
-      auto fmt = project.GetSelectionFormat();
-      auto rate = project.GetRate();
+      auto fmt = settings.GetSelectionFormat();
+      auto rate = settings.GetRate();
 
-      TimeDialog dlg(&project, _("Set Left Selection Boundary"),
-         fmt, rate, selectedRegion.t0(), _("Position"));
+      TimeDialog dlg(&window, XO("Set Left Selection Boundary"),
+         fmt, rate, selectedRegion.t0(), XO("Position"));
 
       if (wxID_OK == dlg.ShowModal())
       {
@@ -614,19 +530,20 @@ void OnSetLeftSelection(const CommandContext &context)
 
    if (bSelChanged)
    {
-      project.ModifyState(false);
-      trackPanel->Refresh(false);
+      ProjectHistory::Get( project ).ModifyState(false);
    }
 }
 
 void OnSetRightSelection(const CommandContext &context)
 {
    auto &project = context.project;
-   auto token = project.GetAudioIOToken();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
-   auto trackPanel = project.GetTrackPanel();
+   auto token = ProjectAudioIO::Get( project ).GetAudioIOToken();
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   const auto &settings = ProjectSettings::Get( project );
+   auto &window = GetProjectFrame( project );
 
    bool bSelChanged = false;
+   auto gAudioIO = AudioIO::Get();
    if ((token > 0) && gAudioIO->IsStreamActive(token))
    {
       double indicator = gAudioIO->GetStreamTime();
@@ -635,11 +552,11 @@ void OnSetRightSelection(const CommandContext &context)
    }
    else
    {
-      auto fmt = project.GetSelectionFormat();
-      auto rate = project.GetRate();
+      auto fmt = settings.GetSelectionFormat();
+      auto rate = settings.GetRate();
 
-      TimeDialog dlg(&project, _("Set Right Selection Boundary"),
-         fmt, rate, selectedRegion.t1(), _("Position"));
+      TimeDialog dlg(&window, XO("Set Right Selection Boundary"),
+         fmt, rate, selectedRegion.t1(), XO("Position"));
 
       if (wxID_OK == dlg.ShowModal())
       {
@@ -652,21 +569,19 @@ void OnSetRightSelection(const CommandContext &context)
 
    if (bSelChanged)
    {
-      project.ModifyState(false);
-      trackPanel->Refresh(false);
+      ProjectHistory::Get( project ).ModifyState(false);
    }
 }
 
 void OnSelectStartCursor(const CommandContext &context)
 {
    auto &project = context.project;
-   auto tracks = project.GetTracks();
-   auto trackPanel = project.GetTrackPanel();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
+   auto &tracks = TrackList::Get( project );
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
 
    double kWayOverToRight = std::numeric_limits<double>::max();
 
-   auto range = tracks->Selected();
+   auto range = tracks.Selected();
    if ( ! range )
       return;
 
@@ -678,21 +593,18 @@ void OnSelectStartCursor(const CommandContext &context)
 
    selectedRegion.setT0(minOffset);
 
-   project.ModifyState(false);
-
-   trackPanel->Refresh(false);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 void OnSelectCursorEnd(const CommandContext &context)
 {
    auto &project = context.project;
-   auto tracks = project.GetTracks();
-   auto trackPanel = project.GetTrackPanel();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
+   auto &tracks = TrackList::Get( project );
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
 
    double kWayOverToLeft = std::numeric_limits<double>::lowest();
 
-   auto range = tracks->Selected();
+   auto range = tracks.Selected();
    if ( ! range )
       return;
 
@@ -704,19 +616,16 @@ void OnSelectCursorEnd(const CommandContext &context)
 
    selectedRegion.setT1(maxEndOffset);
 
-   project.ModifyState(false);
-
-   trackPanel->Refresh(false);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 void OnSelectTrackStartToEnd(const CommandContext &context)
 {
    auto &project = context.project;
-   auto &viewInfo = project.GetViewInfo();
-   auto tracks = project.GetTracks();
-   auto trackPanel = project.GetTrackPanel();
+   auto &viewInfo = ViewInfo::Get( project );
+   auto &tracks = TrackList::Get( project );
 
-   auto range = tracks->Selected();
+   auto range = tracks.Selected();
    double maxEndOffset = range.max( &Track::GetEndTime );
    double minOffset = range.min( &Track::GetStartTime );
 
@@ -724,9 +633,7 @@ void OnSelectTrackStartToEnd(const CommandContext &context)
       return;
 
    viewInfo.selectedRegion.setTimes( minOffset, maxEndOffset );
-   project.ModifyState(false);
-
-   trackPanel->Refresh(false);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 // Handler state:
@@ -735,7 +642,7 @@ SelectedRegion mRegionSave{};
 void OnSelectionSave(const CommandContext &context)
 {
    auto &project = context.project;
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
 
    mRegionSave = selectedRegion;
 }
@@ -743,18 +650,17 @@ void OnSelectionSave(const CommandContext &context)
 void OnSelectionRestore(const CommandContext &context)
 {
    auto &project = context.project;
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
-   auto trackPanel = project.GetTrackPanel();
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   auto &window = ProjectWindow::Get(project);
 
    if ((mRegionSave.t0() == 0.0) &&
        (mRegionSave.t1() == 0.0))
       return;
 
    selectedRegion = mRegionSave;
+   window.ScrollIntoView(selectedRegion.t0());
 
-   project.ModifyState(false);
-
-   trackPanel->Refresh(false);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
@@ -766,8 +672,7 @@ double mLastF1{ SelectedRegion::UndefinedFrequency };
 void OnToggleSpectralSelection(const CommandContext &context)
 {
    auto &project = context.project;
-   auto trackPanel = project.GetTrackPanel();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
 
    const double f0 = selectedRegion.f0();
    const double f1 = selectedRegion.f1();
@@ -784,8 +689,7 @@ void OnToggleSpectralSelection(const CommandContext &context)
    else
       selectedRegion.setFrequencies(mLastF0, mLastF1);
 
-   trackPanel->Refresh(false);
-   project.ModifyState(false);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 void OnNextHigherPeakFrequency(const CommandContext &context)
@@ -808,11 +712,11 @@ double mCursorPositionStored{ 0.0 };
 void OnSelectCursorStoredCursor(const CommandContext &context)
 {
    auto &project = context.project;
-   auto trackPanel = project.GetTrackPanel();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
-   auto isAudioActive = project.IsAudioActive();
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   auto isAudioActive = ProjectAudioIO::Get( project ).IsAudioActive();
 
    if (mCursorPositionHasBeenStored) {
+      auto gAudioIO = AudioIO::Get();
       double cursorPositionCurrent = isAudioActive
          ? gAudioIO->GetStreamTime()
          : selectedRegion.t0();
@@ -820,17 +724,17 @@ void OnSelectCursorStoredCursor(const CommandContext &context)
          std::min(cursorPositionCurrent, mCursorPositionStored),
          std::max(cursorPositionCurrent, mCursorPositionStored));
 
-      project.ModifyState(false);
-      trackPanel->Refresh(false);
+      ProjectHistory::Get( project ).ModifyState(false);
    }
 }
 
 void OnCursorPositionStore(const CommandContext &context)
 {
    auto &project = context.project;
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
-   auto isAudioActive = project.IsAudioActive();
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   auto isAudioActive = ProjectAudioIO::Get( project ).IsAudioActive();
 
+   auto gAudioIO = AudioIO::Get();
    mCursorPositionStored =
       isAudioActive ? gAudioIO->GetStreamTime() : selectedRegion.t0();
    mCursorPositionHasBeenStored = true;
@@ -839,8 +743,8 @@ void OnCursorPositionStore(const CommandContext &context)
 void OnZeroCrossing(const CommandContext &context)
 {
    auto &project = context.project;
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
-   auto trackPanel = project.GetTrackPanel();
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   const auto &settings = ProjectSettings::Get( project );
 
    const double t0 = NearestZeroCrossing(project, selectedRegion.t0());
    if (selectedRegion.isPoint())
@@ -848,45 +752,45 @@ void OnZeroCrossing(const CommandContext &context)
    else {
       const double t1 = NearestZeroCrossing(project, selectedRegion.t1());
       // Empty selection is generally not much use, so do not make it if empty.
-      if( fabs( t1 - t0 ) * project.GetRate() > 1.5 )
+      if( fabs( t1 - t0 ) * settings.GetRate() > 1.5 )
          selectedRegion.setTimes(t0, t1);
    }
 
-   project.ModifyState(false);
-
-   trackPanel->Refresh(false);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 void OnSnapToOff(const CommandContext &context)
 {
    auto &project = context.project;
-   project.SetSnapTo(SNAP_OFF);
+   ProjectSelectionManager::Get( project ).AS_SetSnapTo(SNAP_OFF);
 }
 
 void OnSnapToNearest(const CommandContext &context)
 {
    auto &project = context.project;
-   project.SetSnapTo(SNAP_NEAREST);
+   ProjectSelectionManager::Get( project ).AS_SetSnapTo(SNAP_NEAREST);
 }
 
 void OnSnapToPrior(const CommandContext &context)
 {
    auto &project = context.project;
-   project.SetSnapTo(SNAP_PRIOR);
+   ProjectSelectionManager::Get( project ).AS_SetSnapTo(SNAP_PRIOR);
 }
 
 void OnSelToStart(const CommandContext &context)
 {
    auto &project = context.project;
-   project.Rewind(true);
-   project.ModifyState(false);
+   auto &window = ProjectWindow::Get( project );
+   window.Rewind(true);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 void OnSelToEnd(const CommandContext &context)
 {
    auto &project = context.project;
-   project.SkipEnd(true);
-   project.ModifyState(false);
+   auto &window = ProjectWindow::Get( project );
+   window.SkipEnd(true);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 // Handler state:
@@ -933,37 +837,35 @@ void OnSelContractRight(const CommandContext &context)
 void OnCursorSelStart(const CommandContext &context)
 {
    auto &project = context.project;
-   auto trackPanel = project.GetTrackPanel();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   auto &window = ProjectWindow::Get( project );
 
    selectedRegion.collapseToT0();
-   project.ModifyState(false);
-   trackPanel->ScrollIntoView(selectedRegion.t0());
-   trackPanel->Refresh(false);
+   ProjectHistory::Get( project ).ModifyState(false);
+   window.ScrollIntoView(selectedRegion.t0());
 }
 
 void OnCursorSelEnd(const CommandContext &context)
 {
    auto &project = context.project;
-   auto trackPanel = project.GetTrackPanel();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   auto &window = ProjectWindow::Get( project );
 
    selectedRegion.collapseToT1();
-   project.ModifyState(false);
-   trackPanel->ScrollIntoView(selectedRegion.t1());
-   trackPanel->Refresh(false);
+   ProjectHistory::Get( project ).ModifyState(false);
+   window.ScrollIntoView(selectedRegion.t1());
 }
 
 void OnCursorTrackStart(const CommandContext &context)
 {
    auto &project = context.project;
-   auto tracks = project.GetTracks();
-   auto trackPanel = project.GetTrackPanel();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
+   auto &tracks = TrackList::Get( project );
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   auto &window = ProjectWindow::Get( project );
 
    double kWayOverToRight = std::numeric_limits<double>::max();
 
-   auto trackRange = tracks->Selected();
+   auto trackRange = tracks.Selected() + &Track::SupportsBasicEditing;
    if (trackRange.empty())
       // This should have been prevented by command manager
       return;
@@ -976,21 +878,20 @@ void OnCursorTrackStart(const CommandContext &context)
       return;
 
    selectedRegion.setTimes(minOffset, minOffset);
-   project.ModifyState(false);
-   trackPanel->ScrollIntoView(selectedRegion.t0());
-   trackPanel->Refresh(false);
+   ProjectHistory::Get( project ).ModifyState(false);
+   window.ScrollIntoView(selectedRegion.t0());
 }
 
 void OnCursorTrackEnd(const CommandContext &context)
 {
    auto &project = context.project;
-   auto tracks = project.GetTracks();
-   auto trackPanel = project.GetTrackPanel();
-   auto &selectedRegion = project.GetViewInfo().selectedRegion;
+   auto &tracks = TrackList::Get( project );
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   auto &window = ProjectWindow::Get( project );
 
    double kWayOverToLeft = std::numeric_limits<double>::lowest();
 
-   auto trackRange = tracks->Selected();
+   auto trackRange = tracks.Selected() + &Track::SupportsBasicEditing;
    if (trackRange.empty())
       // This should have been prevented by command manager
       return;
@@ -1003,9 +904,8 @@ void OnCursorTrackEnd(const CommandContext &context)
       return;
 
    selectedRegion.setTimes(maxEndOffset, maxEndOffset);
-   project.ModifyState(false);
-   trackPanel->ScrollIntoView(selectedRegion.t1());
-   trackPanel->Refresh(false);
+   ProjectHistory::Get( project ).ModifyState(false);
+   window.ScrollIntoView(selectedRegion.t1());
 }
 
 void OnSkipStart(const CommandContext &context)
@@ -1013,9 +913,9 @@ void OnSkipStart(const CommandContext &context)
    auto &project = context.project;
    wxCommandEvent evt;
 
-   auto controlToolBar = project.GetControlToolBar();
-   controlToolBar->OnRewind(evt);
-   project.ModifyState(false);
+   auto &controlToolBar = ControlToolBar::Get( project );
+   controlToolBar.OnRewind(evt);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 void OnSkipEnd(const CommandContext &context)
@@ -1023,9 +923,9 @@ void OnSkipEnd(const CommandContext &context)
    auto &project = context.project;
    wxCommandEvent evt;
 
-   auto controlToolBar = project.GetControlToolBar();
-   controlToolBar->OnFF(evt);
-   project.ModifyState(false);
+   auto &controlToolBar = ControlToolBar::Get( project );
+   controlToolBar.OnFF(evt);
+   ProjectHistory::Get( project ).ModifyState(false);
 }
 
 void OnCursorLeft(const CommandContext &context)
@@ -1095,7 +995,7 @@ void OnSeekRightLong(const CommandContext &context)
 void OnSelectAllTime(const CommandContext &context)
 {
    auto &project = context.project;
-   DoSelectTimeAndTracks( project, true, false );
+   SelectUtilities::DoSelectTimeAndTracks( project, true, false );
 }
 #endif
 
@@ -1108,6 +1008,8 @@ Handler()
 {
    UpdatePrefs();
 }
+Handler( const Handler & ) PROHIBITED;
+Handler &operator=( const Handler & ) PROHIBITED;
 
 }; // struct Handler
 
@@ -1115,133 +1017,137 @@ Handler()
 
 // Handler is stateful.  Needs a factory registered with
 // AudacityProject.
-static const AudacityProject::RegisteredAttachedObjectFactory factory{ []{
-   return std::make_unique< SelectActions::Handler >();
-} };
+static const AudacityProject::AttachedObjects::RegisteredFactory key{
+   [](AudacityProject&) {
+      return std::make_unique< SelectActions::Handler >(); } };
+
 static CommandHandlerObject &findCommandHandler(AudacityProject &project) {
-   return static_cast<SelectActions::Handler&>(
-      project.GetAttachedObject(factory));
+   return project.AttachedObjects::Get< SelectActions::Handler >( key );
 };
 
 // Menu definitions
 
-#define FN(X) findCommandHandler, \
-   static_cast<CommandFunctorPointer>(& SelectActions::Handler :: X)
-#define XXO(X) _(X), wxString{X}.Contains("...")
+#define FN(X) (& SelectActions::Handler :: X)
 
-MenuTable::BaseItemPtr ClipSelectMenu( AudacityProject& );
-
-MenuTable::BaseItemPtr SelectMenu( AudacityProject& )
+namespace {
+using namespace MenuTable;
+BaseItemSharedPtr SelectMenu()
 {
-   using namespace MenuTable;
    using Options = CommandManager::Options;
-   
+   static BaseItemSharedPtr menu{
+   ( FinderScope{ findCommandHandler },
    /* i18n-hint: (verb) It's an item on a menu. */
-   return Menu( _("&Select"),
-      Command( wxT("SelectAll"), XXO("&All"), FN(OnSelectAll),
-         TracksExistFlag,
-         Options{ wxT("Ctrl+A"), _("Select All") } ),
-      Command( wxT("SelectNone"), XXO("&None"), FN(OnSelectNone),
-         TracksExistFlag,
-         Options{ wxT("Ctrl+Shift+A"), _("Select None") } ),
+   Menu( wxT("Select"), XXO("&Select"),
+      Section( "Basic",
+         Command( wxT("SelectAll"), XXO("&All"), FN(OnSelectAll),
+            TracksExistFlag(),
+            Options{ wxT("Ctrl+A"), XO("Select All") } ),
+         Command( wxT("SelectNone"), XXO("&None"), FN(OnSelectNone),
+            TracksExistFlag(),
+            Options{ wxT("Ctrl+Shift+A"), XO("Select None") } ),
 
-      //////////////////////////////////////////////////////////////////////////
+         //////////////////////////////////////////////////////////////////////////
 
-      Menu( _("&Tracks"),
-         Command( wxT("SelAllTracks"), XXO("In All &Tracks"),
-            FN(OnSelectAllTracks),
-            TracksExistFlag,
-            wxT("Ctrl+Shift+K") )
+         Menu( wxT("Tracks"), XXO("&Tracks"),
+            Command( wxT("SelAllTracks"), XXO("In All &Tracks"),
+               FN(OnSelectAllTracks),
+               TracksExistFlag(),
+               wxT("Ctrl+Shift+K") )
 
-#ifdef EXPERIMENTAL_SYNC_LOCK
-         ,
-         Command( wxT("SelSyncLockTracks"), XXO("In All &Sync-Locked Tracks"),
-            FN(OnSelectSyncLockSel),
-            TracksSelectedFlag | IsSyncLockedFlag,
-            Options{ wxT("Ctrl+Shift+Y"), _("Select Sync-Locked") } )
-#endif
+   #ifdef EXPERIMENTAL_SYNC_LOCK
+            ,
+            Command( wxT("SelSyncLockTracks"), XXO("In All &Sync-Locked Tracks"),
+               FN(OnSelectSyncLockSel),
+               EditableTracksSelectedFlag() | IsSyncLockedFlag(),
+               Options{ wxT("Ctrl+Shift+Y"), XO("Select Sync-Locked") } )
+   #endif
+         ),
+
+         //////////////////////////////////////////////////////////////////////////
+
+         Menu( wxT("Region"), XXO("R&egion"),
+            Section( "",
+               Command( wxT("SetLeftSelection"), XXO("&Left at Playback Position"),
+                  FN(OnSetLeftSelection), TracksExistFlag(),
+                  Options{ wxT("["), XO("Set Selection Left at Play Position") } ),
+               Command( wxT("SetRightSelection"), XXO("&Right at Playback Position"),
+                  FN(OnSetRightSelection), TracksExistFlag(),
+                  Options{ wxT("]"), XO("Set Selection Right at Play Position") } ),
+               Command( wxT("SelTrackStartToCursor"), XXO("Track &Start to Cursor"),
+                  FN(OnSelectStartCursor), AlwaysEnabledFlag,
+                  Options{ wxT("Shift+J"), XO("Select Track Start to Cursor") } ),
+               Command( wxT("SelCursorToTrackEnd"), XXO("Cursor to Track &End"),
+                  FN(OnSelectCursorEnd), AlwaysEnabledFlag,
+                  Options{ wxT("Shift+K"), XO("Select Cursor to Track End") } ),
+               Command( wxT("SelTrackStartToEnd"), XXO("Track Start to En&d"),
+                  FN(OnSelectTrackStartToEnd), AlwaysEnabledFlag,
+                  Options{}.LongName( XO("Select Track Start to End") ) )
+            ),
+
+            Section( "",
+               // GA: Audacity had 'Store Re&gion' here previously. There is no
+               // one-step way to restore the 'Saved Cursor Position' in Select Menu,
+               // so arguably using the word 'Selection' to do duty for both saving
+               // the region or the cursor is better. But it does not belong in a
+               // 'Region' submenu.
+               Command( wxT("SelSave"), XXO("S&tore Selection"), FN(OnSelectionSave),
+                  WaveTracksSelectedFlag() ),
+               // Audacity had 'Retrieve Regio&n' here previously.
+               Command( wxT("SelRestore"), XXO("Retrieve Selectio&n"),
+                  FN(OnSelectionRestore), TracksExistFlag() )
+            )
+         ),
+
+         //////////////////////////////////////////////////////////////////////////
+
+   #ifdef EXPERIMENTAL_SPECTRAL_EDITING
+         Menu( wxT("Spectral"), XXO("S&pectral"),
+            Command( wxT("ToggleSpectralSelection"),
+               XXO("To&ggle Spectral Selection"), FN(OnToggleSpectralSelection),
+               TracksExistFlag(), wxT("Q") ),
+            Command( wxT("NextHigherPeakFrequency"),
+               XXO("Next &Higher Peak Frequency"), FN(OnNextHigherPeakFrequency),
+               TracksExistFlag() ),
+            Command( wxT("NextLowerPeakFrequency"),
+               XXO("Next &Lower Peak Frequency"), FN(OnNextLowerPeakFrequency),
+               TracksExistFlag() )
+         )
+   #endif
       ),
 
-      //////////////////////////////////////////////////////////////////////////
+      Section( "",
+         Command( wxT("SelCursorStoredCursor"),
+            XXO("Cursor to Stored &Cursor Position"),
+            FN(OnSelectCursorStoredCursor), TracksExistFlag(),
+            Options{}.LongName( XO("Select Cursor to Stored") ) ),
 
-      Menu( _("R&egion"),
-         Command( wxT("SetLeftSelection"), XXO("&Left at Playback Position"),
-            FN(OnSetLeftSelection), TracksExistFlag,
-            Options{ wxT("["), _("Set Selection Left at Play Position") } ),
-         Command( wxT("SetRightSelection"), XXO("&Right at Playback Position"),
-            FN(OnSetRightSelection), TracksExistFlag,
-            Options{ wxT("]"), _("Set Selection Right at Play Position") } ),
-         Command( wxT("SelTrackStartToCursor"), XXO("Track &Start to Cursor"),
-            FN(OnSelectStartCursor), AlwaysEnabledFlag,
-            Options{ wxT("Shift+J"), _("Select Track Start to Cursor") } ),
-         Command( wxT("SelCursorToTrackEnd"), XXO("Cursor to Track &End"),
-            FN(OnSelectCursorEnd), AlwaysEnabledFlag,
-            Options{ wxT("Shift+K"), _("Select Cursor to Track End") } ),
-         Command( wxT("SelTrackStartToEnd"), XXO("Track Start to En&d"),
-            FN(OnSelectTrackStartToEnd), AlwaysEnabledFlag,
-            Options{}.LongName( _("Select Track Start to End") ) ),
-
-         Separator(),
-
-         // GA: Audacity had 'Store Re&gion' here previously. There is no
-         // one-step way to restore the 'Saved Cursor Position' in Select Menu,
-         // so arguably using the word 'Selection' to do duty for both saving
-         // the region or the cursor is better. But it does not belong in a
-         // 'Region' submenu.
-         Command( wxT("SelSave"), XXO("S&tore Selection"), FN(OnSelectionSave),
-            WaveTracksSelectedFlag ),
-         // Audacity had 'Retrieve Regio&n' here previously.
-         Command( wxT("SelRestore"), XXO("Retrieve Selectio&n"),
-            FN(OnSelectionRestore), TracksExistFlag )
+         Command( wxT("StoreCursorPosition"), XXO("Store Cursor Pos&ition"),
+            FN(OnCursorPositionStore),
+            WaveTracksExistFlag() )
+         // Save cursor position is used in some selections.
+         // Maybe there should be a restore for it?
       ),
 
-      //////////////////////////////////////////////////////////////////////////
-
-#ifdef EXPERIMENTAL_SPECTRAL_EDITING
-      Menu( _("S&pectral"),
-         Command( wxT("ToggleSpectralSelection"),
-            XXO("To&ggle Spectral Selection"), FN(OnToggleSpectralSelection),
-            TracksExistFlag, wxT("Q") ),
-         Command( wxT("NextHigherPeakFrequency"),
-            XXO("Next &Higher Peak Frequency"), FN(OnNextHigherPeakFrequency),
-            TracksExistFlag ),
-         Command( wxT("NextLowerPeakFrequency"),
-            XXO("Next &Lower Peak Frequency"), FN(OnNextLowerPeakFrequency),
-            TracksExistFlag )
-      ),
-#endif
-
-      //////////////////////////////////////////////////////////////////////////
-
-      ClipSelectMenu,
-
-      //////////////////////////////////////////////////////////////////////////
-
-      Separator(),
-
-      Command( wxT("SelCursorStoredCursor"),
-         XXO("Cursor to Stored &Cursor Position"),
-         FN(OnSelectCursorStoredCursor), TracksExistFlag,
-         Options{}.LongName( _("Select Cursor to Stored") ) ),
-
-      Command( wxT("StoreCursorPosition"), XXO("Store Cursor Pos&ition"),
-         FN(OnCursorPositionStore),
-         WaveTracksExistFlag ),
-      // Save cursor position is used in some selections.
-      // Maybe there should be a restore for it?
-
-      Separator(),
-
-      Command( wxT("ZeroCross"), XXO("At &Zero Crossings"),
-         FN(OnZeroCrossing), TracksSelectedFlag,
-         Options{ wxT("Z"), _("Select Zero Crossing") } )
-   );
+      Section( "",
+         Command( wxT("ZeroCross"), XXO("At &Zero Crossings"),
+            FN(OnZeroCrossing), EditableTracksSelectedFlag(),
+            Options{ wxT("Z"), XO("Select Zero Crossing") } )
+      )
+   ) ) };
+   return menu;
 }
 
-MenuTable::BaseItemPtr ExtraSelectionMenu( AudacityProject & )
+AttachedItem sAttachment1{
+   wxT(""),
+   Shared( SelectMenu() )
+};
+
+BaseItemSharedPtr ExtraSelectionMenu()
 {
-   using namespace MenuTable;
-   return Menu( _("&Selection"),
+   using Options = CommandManager::Options;
+   static BaseItemSharedPtr menu{
+   ( FinderScope{ findCommandHandler },
+   Menu( wxT("Select"), XXO("&Selection"),
       Command( wxT("SnapToOff"), XXO("Snap-To &Off"), FN(OnSnapToOff),
          AlwaysEnabledFlag ),
       Command( wxT("SnapToNearest"), XXO("Snap-To &Nearest"),
@@ -1254,118 +1160,145 @@ MenuTable::BaseItemPtr ExtraSelectionMenu( AudacityProject & )
          AlwaysEnabledFlag, wxT("Shift+End") ),
       Command( wxT("SelExtLeft"), XXO("Selection Extend &Left"),
          FN(OnSelExtendLeft),
-         TracksExistFlag | TrackPanelHasFocus,
-         wxT("Shift+Left\twantKeyup\tallowDup") ),
+         TracksExistFlag() | TrackPanelHasFocus(),
+         Options{ wxT("Shift+Left") }.WantKeyUp().AllowDup() ),
       Command( wxT("SelExtRight"), XXO("Selection Extend &Right"),
          FN(OnSelExtendRight),
-         TracksExistFlag | TrackPanelHasFocus,
-         wxT("Shift+Right\twantKeyup\tallowDup") ),
+         TracksExistFlag() | TrackPanelHasFocus(),
+         Options{ wxT("Shift+Right") }.WantKeyUp().AllowDup() ),
       Command( wxT("SelSetExtLeft"), XXO("Set (or Extend) Le&ft Selection"),
          FN(OnSelSetExtendLeft),
-         TracksExistFlag | TrackPanelHasFocus ),
+         TracksExistFlag() | TrackPanelHasFocus() ),
       Command( wxT("SelSetExtRight"), XXO("Set (or Extend) Rig&ht Selection"),
          FN(OnSelSetExtendRight),
-         TracksExistFlag | TrackPanelHasFocus ),
+         TracksExistFlag() | TrackPanelHasFocus() ),
       Command( wxT("SelCntrLeft"), XXO("Selection Contract L&eft"),
          FN(OnSelContractLeft),
-         TracksExistFlag | TrackPanelHasFocus,
-         wxT("Ctrl+Shift+Right\twantKeyup") ),
+         TracksExistFlag() | TrackPanelHasFocus(),
+         Options{ wxT("Ctrl+Shift+Right") }.WantKeyUp() ),
       Command( wxT("SelCntrRight"), XXO("Selection Contract R&ight"),
          FN(OnSelContractRight),
-         TracksExistFlag | TrackPanelHasFocus,
-         wxT("Ctrl+Shift+Left\twantKeyup") )
-   );
+         TracksExistFlag() | TrackPanelHasFocus(),
+         Options{ wxT("Ctrl+Shift+Left") }.WantKeyUp() )
+   ) ) };
+   return menu;
 }
 
-MenuTable::BaseItemPtr ClipCursorItems( AudacityProject & );
+AttachedItem sAttachment2{
+   wxT("Optional/Extra/Part1"),
+   Shared( ExtraSelectionMenu() )
+};
+}
 
-MenuTable::BaseItemPtr CursorMenu( AudacityProject & )
+namespace {
+BaseItemSharedPtr CursorMenu()
 {
-   using namespace MenuTable;
    using Options = CommandManager::Options;
-   constexpr auto CanStopFlags = AudioIONotBusyFlag | CanStopAudioStreamFlag;
+   static const auto CanStopFlags = AudioIONotBusyFlag() | CanStopAudioStreamFlag();
 
    // JKC: ANSWER-ME: How is 'cursor to' different to 'Skip To' and how is it
    // useful?
    // GA: 'Skip to' moves the viewpoint to center of the track and preserves the
    // selection. 'Cursor to' does neither. 'Center at' might describe it better
    // than 'Skip'.
-   return Menu( _("&Cursor to"),
+   static BaseItemSharedPtr menu{
+   ( FinderScope{ findCommandHandler },
+   Menu( wxT("Cursor"), XXO("&Cursor to"),
       Command( wxT("CursSelStart"), XXO("Selection Star&t"),
          FN(OnCursorSelStart),
-         TimeSelectedFlag,
-         Options{}.LongName( _("Cursor to Selection Start") ) ),
+         TimeSelectedFlag(),
+         Options{}.LongName( XO("Cursor to Selection Start") ) ),
       Command( wxT("CursSelEnd"), XXO("Selection En&d"),
          FN(OnCursorSelEnd),
-         TimeSelectedFlag,
-         Options{}.LongName( _("Cursor to Selection End") ) ),
+         TimeSelectedFlag(),
+         Options{}.LongName( XO("Cursor to Selection End") ) ),
 
       Command( wxT("CursTrackStart"), XXO("Track &Start"),
          FN(OnCursorTrackStart),
-         TracksSelectedFlag,
-         Options{ wxT("J"), _("Cursor to Track Start") } ),
+         EditableTracksSelectedFlag(),
+         Options{ wxT("J"), XO("Cursor to Track Start") } ),
       Command( wxT("CursTrackEnd"), XXO("Track &End"),
          FN(OnCursorTrackEnd),
-         TracksSelectedFlag,
-         Options{ wxT("K"), _("Cursor to Track End") } ),
-
-      ClipCursorItems,
+         EditableTracksSelectedFlag(),
+         Options{ wxT("K"), XO("Cursor to Track End") } ),
 
       Command( wxT("CursProjectStart"), XXO("&Project Start"),
          FN(OnSkipStart),
          CanStopFlags,
-         Options{ wxT("Home"), _("Cursor to Project Start") } ),
+         Options{ wxT("Home"), XO("Cursor to Project Start") } ),
       Command( wxT("CursProjectEnd"), XXO("Project E&nd"), FN(OnSkipEnd),
          CanStopFlags,
-         Options{ wxT("End"), _("Cursor to Project End") } )
-   );
+         Options{ wxT("End"), XO("Cursor to Project End") } )
+   ) ) };
+   return menu;
 }
 
-MenuTable::BaseItemPtr ExtraClipCursorItems( AudacityProject & );
+AttachedItem sAttachment0{
+   wxT("Transport/Basic"),
+   Shared( CursorMenu() )
+};
 
-MenuTable::BaseItemPtr ExtraCursorMenu( AudacityProject & )
+BaseItemSharedPtr ExtraCursorMenu()
 {
-   using namespace MenuTable;
-
-   return Menu( _("&Cursor"),
+   using Options = CommandManager::Options;
+   static BaseItemSharedPtr menu{
+   ( FinderScope{ findCommandHandler },
+   Menu( wxT("Cursor"), XXO("&Cursor"),
       Command( wxT("CursorLeft"), XXO("Cursor &Left"), FN(OnCursorLeft),
-         TracksExistFlag | TrackPanelHasFocus,
-         wxT("Left\twantKeyup\tallowDup") ),
+         TracksExistFlag() | TrackPanelHasFocus(),
+         Options{ wxT("Left") }.WantKeyUp().AllowDup() ),
       Command( wxT("CursorRight"), XXO("Cursor &Right"), FN(OnCursorRight),
-         TracksExistFlag | TrackPanelHasFocus,
-         wxT("Right\twantKeyup\tallowDup") ),
+         TracksExistFlag() | TrackPanelHasFocus(),
+         Options{ wxT("Right") }.WantKeyUp().AllowDup() ),
       Command( wxT("CursorShortJumpLeft"), XXO("Cursor Sh&ort Jump Left"),
          FN(OnCursorShortJumpLeft),
-         TracksExistFlag | TrackPanelHasFocus, wxT(",") ),
+         TracksExistFlag() | TrackPanelHasFocus(), wxT(",") ),
       Command( wxT("CursorShortJumpRight"), XXO("Cursor Shor&t Jump Right"),
          FN(OnCursorShortJumpRight),
-         TracksExistFlag | TrackPanelHasFocus, wxT(".") ),
+         TracksExistFlag() | TrackPanelHasFocus(), wxT(".") ),
       Command( wxT("CursorLongJumpLeft"), XXO("Cursor Long J&ump Left"),
          FN(OnCursorLongJumpLeft),
-         TracksExistFlag | TrackPanelHasFocus, wxT("Shift+,") ),
+         TracksExistFlag() | TrackPanelHasFocus(), wxT("Shift+,") ),
       Command( wxT("CursorLongJumpRight"), XXO("Cursor Long Ju&mp Right"),
          FN(OnCursorLongJumpRight),
-         TracksExistFlag | TrackPanelHasFocus, wxT("Shift+.") ),
-
-      ExtraClipCursorItems
-   );
+         TracksExistFlag() | TrackPanelHasFocus(), wxT("Shift+.") )
+   ) ) };
+   return menu;
 }
 
-MenuTable::BaseItemPtr ExtraSeekMenu( AudacityProject & )
+AttachedItem sAttachment4{
+   wxT("Optional/Extra/Part2"),
+   Shared( ExtraCursorMenu() )
+};
+
+BaseItemSharedPtr ExtraSeekMenu()
 {
-   using namespace MenuTable;
-   return Menu( _("See&k"),
+   using Options = CommandManager::Options;
+   static BaseItemSharedPtr menu{
+   ( FinderScope{ findCommandHandler },
+   Menu( wxT("Seek"), XXO("See&k"),
       Command( wxT("SeekLeftShort"), XXO("Short Seek &Left During Playback"),
-         FN(OnSeekLeftShort), AudioIOBusyFlag, wxT("Left\tallowDup") ),
+         FN(OnSeekLeftShort), AudioIOBusyFlag(),
+         Options{ wxT("Left") }.AllowDup() ),
       Command( wxT("SeekRightShort"),
          XXO("Short Seek &Right During Playback"), FN(OnSeekRightShort),
-         AudioIOBusyFlag, wxT("Right\tallowDup") ),
+         AudioIOBusyFlag(),
+         Options{ wxT("Right") }.AllowDup() ),
       Command( wxT("SeekLeftLong"), XXO("Long Seek Le&ft During Playback"),
-         FN(OnSeekLeftLong), AudioIOBusyFlag, wxT("Shift+Left\tallowDup") ),
+         FN(OnSeekLeftLong), AudioIOBusyFlag(),
+         Options{ wxT("Shift+Left") }.AllowDup() ),
       Command( wxT("SeekRightLong"), XXO("Long Seek Rig&ht During Playback"),
-         FN(OnSeekRightLong), AudioIOBusyFlag, wxT("Shift+Right\tallowDup") )
-   );
+         FN(OnSeekRightLong), AudioIOBusyFlag(),
+         Options{ wxT("Shift+Right") }.AllowDup() )
+   ) ) };
+   return menu;
 }
 
-#undef XXO
+AttachedItem sAttachment5{
+   wxT("Optional/Extra/Part1"),
+   Shared( ExtraSeekMenu() )
+};
+
+}
+
 #undef FN

@@ -23,19 +23,19 @@ class wxTextCtrl;
 class Envelope;
 class ShuttleGui;
 
-#define CLICKREMOVAL_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Click Removal") }
-
 class EffectClickRemoval final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectClickRemoval();
    virtual ~EffectClickRemoval();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

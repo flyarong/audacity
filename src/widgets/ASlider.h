@@ -13,20 +13,18 @@
 #ifndef __AUDACITY_SLIDER__
 #define __AUDACITY_SLIDER__
 
-#include "../MemoryX.h"
 #include <wx/setup.h> // for wxUSE_* macros
 #include <wx/defs.h>
 #include <wx/timer.h> // member variable
 #include "wxPanelWrapper.h" // to inherit
 
-class wxArrayString;
 class wxBitmap;
 class wxSize;
 class wxPoint;
 class wxTextCtrl;
 
 class Ruler;
-class TipPanel;
+class TipWindow;
 
 //
 // Predefined slider types (mStyle)
@@ -60,7 +58,7 @@ class TipPanel;
 // which uses this class, is below.
 //
 
-class LWSlider
+class AUDACITY_DLL_API LWSlider
 {
    friend class ASlider;
    friend class ASliderAx;
@@ -69,7 +67,7 @@ class LWSlider
 
    // MM: Construct customizable slider
    LWSlider(wxWindow * parent,
-            const wxString &name,
+            const TranslatableString &name,
             const wxPoint &pos,
             const wxSize &size,
             float minValue,
@@ -83,7 +81,7 @@ class LWSlider
 
    // Construct predefined slider
    LWSlider(wxWindow * parent,
-            const wxString &name,
+            const TranslatableString &name,
             const wxPoint &pos,
             const wxSize &size,
             int style,
@@ -92,7 +90,7 @@ class LWSlider
             int orientation = wxHORIZONTAL); // wxHORIZONTAL or wxVERTICAL. wxVERTICAL is currently only for DB_SLIDER.
 
    void Init(wxWindow * parent,
-             const wxString &name,
+             const TranslatableString &name,
              const wxPoint &pos,
              const wxSize &size,
              float minValue,
@@ -117,7 +115,7 @@ class LWSlider
    void SetScroll(float line, float page);
 
    void ShowTip(bool show);
-   void SetToolTipTemplate(const wxString & tip);
+   void SetToolTipTemplate(const TranslatableString & tip);
 
    float Get(bool convert = true);
    void Set(float value);
@@ -138,22 +136,24 @@ class LWSlider
    void OnMouseEvent(wxMouseEvent & event);
    void OnKeyDown(wxKeyEvent & event);
    void Refresh();
+   void Redraw();
 
    bool ShowDialog();
    bool ShowDialog(wxPoint pos);
 
    void SetEnabled(bool enabled);
-   bool GetEnabled();
+   bool GetEnabled() const;
 
-   static void DeleteSharedTipPanel();
+   float GetMinValue() const;
+   float GetMaxValue() const;
 
    void SetParent(wxWindow *parent) { mParent = parent; }
    void SendUpdate(float newValue);
 
  private:
 
-   wxString GetTip(float value) const;
-   wxArrayString GetWidestTips() const;
+   TranslatableString GetTip(float value) const;
+   TranslatableStrings GetWidestTips() const;
    void FormatPopWin();
    void SetPopWinPosition();
    void CreatePopWin();
@@ -218,19 +218,19 @@ class LWSlider
 
    wxWindowID mID;
 
-   std::unique_ptr<TipPanel> mTipPanel;
-   wxString mTipTemplate;
+   std::unique_ptr<TipWindow> mTipPanel;
+   TranslatableString mTipTemplate;
 
    bool mIsDragging;
 
    std::unique_ptr<wxBitmap> mBitmap, mThumbBitmap, mThumbBitmapHilited;
 
-   wxString mName;
+   TranslatableString mName;
 
    bool mEnabled;
 };
 
-class ASlider /* not final */ : public wxPanel
+class AUDACITY_DLL_API ASlider /* not final */ : public wxPanel
 {
    friend class ASliderAx;
 
@@ -260,7 +260,7 @@ class ASlider /* not final */ : public wxPanel
 
    ASlider( wxWindow * parent,
             wxWindowID id,
-            const wxString &name,
+            const TranslatableString &name,
             const wxPoint & pos,
             const wxSize & size,
             const Options &options = Options{});
@@ -271,10 +271,12 @@ class ASlider /* not final */ : public wxPanel
 
    void SetFocusFromKbd() override;
 
+   bool SetBackgroundColour(const wxColour& colour) override;
+
    void GetScroll(float & line, float & page);
    void SetScroll(float line, float page);
 
-   void SetToolTipTemplate(const wxString & tip);
+   void SetToolTipTemplate(const TranslatableString & tip);
 
    float Get( bool convert = true );
    void Set(float value);
@@ -332,7 +334,7 @@ class SliderDialog final : public wxDialogWrapper
 {
  public:
    SliderDialog(wxWindow * parent, wxWindowID id,
-                const wxString & title,
+                const TranslatableString & title,
                 wxPoint position,
                 wxSize size,
                 int style,
@@ -355,6 +357,7 @@ class SliderDialog final : public wxDialogWrapper
    wxTextCtrl * mTextCtrl;
    int mStyle;
    LWSlider * mpOrigin;
+   float mValue;
 
  public:
    DECLARE_EVENT_TABLE()

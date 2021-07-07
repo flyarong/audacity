@@ -40,39 +40,29 @@ been compiled or are not available in this version of Audacity.  Has
 enough information to identify the file extensions that would be used,
 but little else.
 
-*//****************************************************************//**
-
-\class ImportPluginList
-\brief An ImportPlugin list.
-
-*//****************************************************************//**
-
-\class UnusableImportPluginList
-\brief An UnusableImportPlugin list.
-
 *//*******************************************************************/
 
 #ifndef __AUDACITY_IMPORTER__
 #define __AUDACITY_IMPORTER__
 
-#include "../Audacity.h"
 
+
+#include <memory>
 #include "audacity/Types.h"
-#include "../Internat.h"
-#include "../MemoryX.h"
+#include "Identifier.h"
+#include "Internat.h"
+#include "wxArrayStringEx.h"
 
-#include "ImportRaw.h" // defines TrackHolders
-
-class wxArrayString;
+class AudacityProject;
 class ProgressDialog;
 enum class ProgressResult : unsigned;
-class TrackFactory;
+class WaveTrackFactory;
 class Track;
 class Tags;
 
 class ImportFileHandle;
 
-class ImportPlugin /* not final */
+class AUDACITY_DLL_API ImportPlugin /* not final */
 {
 public:
 
@@ -84,41 +74,35 @@ public:
 
    // Get a description of the file type this importer can import.
    // Examples: "Ogg Vorbis", "MP3", "Uncompressed PCM"
-   virtual wxString GetPluginFormatDescription() = 0;
+   virtual TranslatableString GetPluginFormatDescription() = 0;
 
    // Get a list of extensions this plugin expects to be able to
    // import.  If a filename matches any of these extensions,
    // this importer will get first dibs on importing it.
-   virtual FileExtensions GetSupportedExtensions()
-   {
-      return mExtensions;
-   }
+   virtual FileExtensions GetSupportedExtensions();
 
-   bool SupportsExtension(const FileExtension &extension)
-   {
-      // Case-insensitive check if extension is supported
-      return mExtensions.Index(extension, false) != wxNOT_FOUND;
-   }
+   bool SupportsExtension(const FileExtension &extension);
 
    // Open the given file, returning true if it is in a recognized
    // format, false otherwise.  This puts the importer into the open
    // state.
-   virtual std::unique_ptr<ImportFileHandle> Open(const FilePath &Filename) = 0;
+   virtual std::unique_ptr<ImportFileHandle> Open(
+      const FilePath &Filename, AudacityProject*) = 0;
 
-   virtual ~ImportPlugin() { }
+   virtual ~ImportPlugin();
 
 protected:
 
-   ImportPlugin(FileExtensions supportedExtensions):
-      mExtensions( std::move( supportedExtensions ) )
-   {
-   }
+   ImportPlugin(FileExtensions supportedExtensions);
 
    const FileExtensions mExtensions;
 };
 
 
-class ImportFileHandle /* not final */
+class WaveTrack;
+using TrackHolders = std::vector< std::vector< std::shared_ptr<WaveTrack> > >;
+
+class AUDACITY_DLL_API ImportFileHandle /* not final */
 {
 public:
    ImportFileHandle(const FilePath & filename);
@@ -129,10 +113,10 @@ public:
    // identify the filename being imported.
    void CreateProgress();
 
-   // This is similar to GetImporterDescription, but if possible the
+   // This is similar to GetPluginFormatDescription, but if possible the
    // importer will return a more specific description of the
    // specific file that is open.
-   virtual wxString GetFileDescription() = 0;
+   virtual TranslatableString GetFileDescription() = 0;
 
    // Return an estimate of how many bytes the file will occupy once
    // imported.  In principle this may exceed main memory, so don't use
@@ -141,24 +125,31 @@ public:
    virtual ByteCount GetFileUncompressedBytes() = 0;
 
    // do the actual import, creating whatever tracks are necessary with
-   // the TrackFactory and calling the progress callback every iteration
+   // the WaveTrackFactory and calling the progress callback every iteration
    // through the importing loop
    // The given Tags structure may also be modified.
    // In case of errors or exceptions, it is not necessary to leave outTracks
    // or tags unmodified.
    // If resulting outTracks is not empty,
    // then each member of it must be a nonempty vector.
-   virtual ProgressResult Import(TrackFactory *trackFactory, TrackHolders &outTracks,
+   virtual ProgressResult Import(WaveTrackFactory *trackFactory, TrackHolders &outTracks,
                       Tags *tags) = 0;
 
    // Return number of elements in stream list
    virtual wxInt32 GetStreamCount() = 0;
 
    // Return stream descriptions list
-   virtual const wxArrayString &GetStreamInfo() = 0;
+   virtual const TranslatableStrings &GetStreamInfo() = 0;
 
    // Set stream "import/don't import" flag
    virtual void SetStreamUsage(wxInt32 StreamID, bool Use) = 0;
+
+   //! Choose appropriate format, which will not be narrower than the specified one
+   static sampleFormat ChooseFormat(sampleFormat effectiveFormat);
+
+   //! Build a wave track with appropriate format, which will not be narrower than the specified one
+   std::shared_ptr<WaveTrack> NewWaveTrack( WaveTrackFactory &trackFactory,
+      sampleFormat effectiveFormat, double rate);
 
 protected:
    FilePath mFilename;
@@ -171,24 +162,24 @@ class UnusableImportPlugin
 {
 public:
    UnusableImportPlugin(
-      const wxString &formatName, FileExtensions extensions):
+      const TranslatableString &formatName, FileExtensions extensions):
       mFormatName(formatName),
       mExtensions( std::move( extensions ) )
    {
    }
 
-   wxString GetPluginFormatDescription()
+   TranslatableString GetPluginFormatDescription()
    {
       return mFormatName;
    }
 
-   bool SupportsExtension(const wxString &extension)
+   bool SupportsExtension(const FileExtension &extension)
    {
       return mExtensions.Index(extension, false) != wxNOT_FOUND;
    }
 
 private:
-   wxString mFormatName;
+   TranslatableString mFormatName;
    const FileExtensions mExtensions;
 };
 

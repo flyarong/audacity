@@ -11,44 +11,52 @@
 #ifndef __AUDACITY_SEQUENCE__
 #define __AUDACITY_SEQUENCE__
 
-#include "MemoryX.h"
+
 #include <vector>
+#include <functional>
 
 #include "SampleFormat.h"
 #include "xml/XMLTagHandler.h"
-#include "xml/XMLWriter.h"
-#include "ondemand/ODTaskThread.h"
 
-#include "audacity/Types.h"
+#include "Identifier.h"
 
-class BlockFile;
-using BlockFilePtr = std::shared_ptr<BlockFile>;
-
-class DirManager;
+class SampleBlock;
+class SampleBlockFactory;
+using SampleBlockFactoryPtr = std::shared_ptr<SampleBlockFactory>;
 
 // This is an internal data structure!  For advanced use only.
 class SeqBlock {
  public:
-   BlockFilePtr f;
+   using SampleBlockPtr = std::shared_ptr<SampleBlock>;
+   SampleBlockPtr sb;
    ///the sample in the global wavetrack that this block starts at.
    sampleCount start;
 
    SeqBlock()
-      : f{}, start(0)
+      : sb{}, start(0)
    {}
 
-   SeqBlock(const BlockFilePtr &f_, sampleCount start_)
-      : f(f_), start(start_)
+   SeqBlock(const SampleBlockPtr &sb_, sampleCount start_)
+      : sb(sb_), start(start_)
    {}
 
    // Construct a SeqBlock with changed start, same file
    SeqBlock Plus(sampleCount delta) const
    {
-      return SeqBlock(f, start + delta);
+      return SeqBlock(sb, start + delta);
    }
 };
 class BlockArray : public std::vector<SeqBlock> {};
 using BlockPtrArray = std::vector<SeqBlock*>; // non-owning pointers
+
+// Put extra symbol information in the release build, for the purpose of gathering
+// profiling information (as from Windows Process Monitor), when there otherwise
+// isn't a need for AUDACITY_DLL_API.
+#ifdef IS_ALPHA
+   #define PROFILE_DLL_API AUDACITY_DLL_API
+#else
+   #define PROFILE_DLL_API
+#endif
 
 class PROFILE_DLL_API Sequence final : public XMLTagHandler{
  public:
@@ -64,15 +72,11 @@ class PROFILE_DLL_API Sequence final : public XMLTagHandler{
    // Constructor / Destructor / Duplicator
    //
 
-   Sequence(const std::shared_ptr<DirManager> &projDirManager, sampleFormat format);
+   Sequence(const SampleBlockFactoryPtr &pFactory, sampleFormat format);
 
-   // The copy constructor and duplicate operators take a
-   // DirManager as a parameter, because you might be copying
-   // from one project to another...
-   Sequence(const Sequence &orig, const std::shared_ptr<DirManager> &projDirManager);
+   Sequence(const Sequence &orig, const SampleBlockFactoryPtr &pFactory);
 
-   // Sequence cannot be copied without specifying a DirManager
-   Sequence(const Sequence&) PROHIBITED;
+   Sequence( const Sequence& ) = delete;
    Sequence& operator= (const Sequence&) PROHIBITED;
 
    ~Sequence();
@@ -88,8 +92,8 @@ class PROFILE_DLL_API Sequence final : public XMLTagHandler{
 
    // Note that len is not size_t, because nullptr may be passed for buffer, in
    // which case, silence is inserted, possibly a large amount.
-   void SetSamples(samplePtr buffer, sampleFormat format,
-            sampleCount start, sampleCount len);
+   void SetSamples(constSamplePtr buffer, sampleFormat format,
+                   sampleCount start, sampleCount len);
 
    // where is input, assumed to be nondecreasing, and its size is len + 1.
    // min, max, rms, bl are outputs, and their lengths are len.
@@ -102,35 +106,26 @@ class PROFILE_DLL_API Sequence final : public XMLTagHandler{
                        size_t len, const sampleCount *where) const;
 
    // Return non-null, or else throw!
-   std::unique_ptr<Sequence> Copy(sampleCount s0, sampleCount s1) const;
+   // Must pass in the correct factory for the result.  If it's not the same
+   // as in this, then block contents must be copied.
+   std::unique_ptr<Sequence> Copy( const SampleBlockFactoryPtr &pFactory,
+      sampleCount s0, sampleCount s1) const;
    void Paste(sampleCount s0, const Sequence *src);
 
    size_t GetIdealAppendLen() const;
-   void Append(samplePtr buffer, sampleFormat format, size_t len,
-               XMLWriter* blockFileLog=NULL);
+   void Append(constSamplePtr buffer, sampleFormat format, size_t len);
+
+   //! Append data, not coalescing blocks, returning a pointer to the new block.
+   SeqBlock::SampleBlockPtr AppendNewBlock(
+      constSamplePtr buffer, sampleFormat format, size_t len);
+   //! Append a complete block, not coalescing
+   void AppendSharedBlock(const SeqBlock::SampleBlockPtr &pBlock);
    void Delete(sampleCount start, sampleCount len);
-   void AppendAlias(const FilePath &fullPath,
-                    sampleCount start,
-                    size_t len, int channel, bool useOD);
-
-   void AppendCoded(const FilePath &fName, sampleCount start,
-                            size_t len, int channel, int decodeType);
-
-   ///gets an int with OD flags so that we can determine which ODTasks should be run on this track after save/open, etc.
-   unsigned int GetODFlags();
-
-   // Append a blockfile. The blockfile pointer is then "owned" by the
-   // sequence. This function is used by the recording log crash recovery
-   // code, but may be useful for other purposes. The blockfile must already
-   // be registered within the dir manager hash. This is the case
-   // when the blockfile is created using DirManager::NewSimpleBlockFile or
-   // loaded from an XML file via DirManager::HandleXMLTag
-   void AppendBlockFile(const BlockFilePtr &blockFile);
 
    void SetSilence(sampleCount s0, sampleCount len);
    void InsertSilence(sampleCount s0, sampleCount len);
 
-   const std::shared_ptr<DirManager> &GetDirManager() { return mDirManager; }
+   const SampleBlockFactoryPtr &GetFactory() { return mpFactory; }
 
    //
    // XMLTagHandler callback methods for loading and saving
@@ -144,16 +139,10 @@ class PROFILE_DLL_API Sequence final : public XMLTagHandler{
    bool GetErrorOpening() { return mErrorOpening; }
 
    //
-   // Lock/Unlock all of this sequence's BlockFiles, keeping them
-   // from being moved.  Call this if you want to copy a
-   // track to a different DirManager.  See BlockFile.h
-   // for details.
-   //
+   // Lock all of this sequence's sample blocks, keeping them
+   // from being destroyed when closing.
 
-   bool Lock();
-   bool Unlock();
-
-   bool CloseLock();//similar to Lock but should be called upon project close.
+   bool CloseLock();//should be called upon project close.
    // not balanced by unlocking calls.
 
    //
@@ -163,7 +152,8 @@ class PROFILE_DLL_API Sequence final : public XMLTagHandler{
    sampleFormat GetSampleFormat() const;
 
    // Return true iff there is a change
-   bool ConvertToSampleFormat(sampleFormat format);
+   bool ConvertToSampleFormat(sampleFormat format, 
+      const std::function<void(size_t)> & progressReport = {});
 
    //
    // Retrieving summary info
@@ -190,26 +180,8 @@ class PROFILE_DLL_API Sequence final : public XMLTagHandler{
    // you're doing!
    //
 
-   BlockArray &GetBlockArray() {return mBlock;}
-
-   ///
-   void LockDeleteUpdateMutex(){mDeleteUpdateMutex.Lock();}
-   void UnlockDeleteUpdateMutex(){mDeleteUpdateMutex.Unlock();}
-
-   // RAII idiom wrapping the functions above
-   struct DeleteUpdateMutexLocker {
-      DeleteUpdateMutexLocker(Sequence &sequence)
-         : mSequence(sequence)
-      {
-         mSequence.LockDeleteUpdateMutex();
-      }
-      ~DeleteUpdateMutexLocker()
-      {
-         mSequence.UnlockDeleteUpdateMutex();
-      }
-   private:
-      Sequence &mSequence;
-   };
+   BlockArray &GetBlockArray() { return mBlock; }
+   const BlockArray &GetBlockArray() const { return mBlock; }
 
  private:
 
@@ -223,7 +195,7 @@ class PROFILE_DLL_API Sequence final : public XMLTagHandler{
    // Private variables
    //
 
-   std::shared_ptr<DirManager> mDirManager;
+   SampleBlockFactoryPtr mpFactory;
 
    BlockArray    mBlock;
    sampleFormat  mSampleFormat;
@@ -236,32 +208,44 @@ class PROFILE_DLL_API Sequence final : public XMLTagHandler{
 
    bool          mErrorOpening{ false };
 
-   ///To block the Delete() method against the ODCalcSummaryTask::Update() method
-   ODLock   mDeleteUpdateMutex;
-
    //
    // Private methods
    //
 
    int FindBlock(sampleCount pos) const;
 
-   static void AppendBlock
-      (DirManager &dirManager,
-       BlockArray &blocks, sampleCount &numSamples, const SeqBlock &b);
+   SeqBlock::SampleBlockPtr DoAppend(
+      constSamplePtr buffer, sampleFormat format, size_t len, bool coalesce);
 
-   static bool Read(samplePtr buffer, sampleFormat format,
-             const SeqBlock &b,
-             size_t blockRelativeStart, size_t len, bool mayThrow);
+   static void AppendBlock(SampleBlockFactory *pFactory, sampleFormat format,
+                           BlockArray &blocks,
+                           sampleCount &numSamples,
+                           const SeqBlock &b);
+
+   static bool Read(samplePtr buffer,
+                    sampleFormat format,
+                    const SeqBlock &b,
+                    size_t blockRelativeStart,
+                    size_t len,
+                    bool mayThrow);
 
    // Accumulate NEW block files onto the end of a block array.
    // Does not change this sequence.  The intent is to use
    // CommitChangesIfConsistent later.
-   static void Blockify
-      (DirManager &dirManager, size_t maxSamples, sampleFormat format,
-       BlockArray &list, sampleCount start, samplePtr buffer, size_t len);
+   static void Blockify(SampleBlockFactory &factory,
+                        size_t maxSamples,
+                        sampleFormat format,
+                        BlockArray &list,
+                        sampleCount start,
+                        constSamplePtr buffer,
+                        size_t len);
 
-   bool Get(int b, samplePtr buffer, sampleFormat format,
-      sampleCount start, size_t len, bool mayThrow) const;
+   bool Get(int b,
+            samplePtr buffer,
+            sampleFormat format,
+            sampleCount start,
+            size_t len,
+            bool mayThrow) const;
 
 public:
 

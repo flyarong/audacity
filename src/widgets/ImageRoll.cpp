@@ -94,13 +94,17 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "ImageRoll.h"
 
-#include <wx/wx.h>
 #include <wx/bitmap.h>
 #include <wx/dcmemory.h>
+#include <wx/dcclient.h>
 #include <wx/image.h>
+
+ImageRoll::ImageRoll(const ImageRoll&) = default;
+ImageRoll &ImageRoll::operator =(const ImageRoll&) = default;
+ImageRoll::~ImageRoll() = default;
 
 // static
 ImageArray ImageRoll::SplitH(const wxImage &src, wxColour magicColor)
@@ -266,7 +270,7 @@ void ImageRoll::Init(RollType type, const wxImage &src, wxColour magicColor)
       break;
 
    /* Adding these shuts up some GCC warnings. It is functionally what was
-    * implict here before - Richard */
+    * implicit here before - Richard */
    case Uninitialized:
    break;
 
@@ -435,8 +439,8 @@ ImageRollPanel::ImageRollPanel(wxWindow *parent,
    //mImageRoll(imgRoll),
    mLogicalFunction(wxCOPY)
 {
-//   SetSizeHints(mImageRoll.GetMinSize(),
-//                mImageRoll.GetMaxSize());
+//   SetMinSize(mImageRoll.GetMinSize());
+//   SetMaxSize(mImageRoll.GetMaxSize());
 }
 
 void ImageRollPanel::SetLogicalFunction(int /*wxRasterOperationMode*/ func)

@@ -29,16 +29,18 @@
 #ifndef __AUDACITY_TAGS__
 #define __AUDACITY_TAGS__
 
-#include "Audacity.h"
+
 
 #include "xml/XMLTagHandler.h"
 
-#include "MemoryX.h"
+#include "ClientData.h"
 #include <utility>
 
 #include "widgets/wxPanelWrapper.h" // to inherit
 
+#include <memory>
 #include <unordered_map>
+#include "Identifier.h"
 
 class wxArrayString;
 class wxComboBox;
@@ -47,9 +49,10 @@ class wxGridCellStringRenderer;
 class wxGridEvent;
 class wxTextCtrl;
 
+class AudacityProject;
 class Grid;
 class ShuttleGui;
-class TagsEditor;
+class TagsEditorDialog;
 class ComboEditor;
 
 using TagMap = std::unordered_map< wxString, wxString >;
@@ -64,9 +67,20 @@ using TagMap = std::unordered_map< wxString, wxString >;
 #define TAG_SOFTWARE wxT("Software")
 #define TAG_COPYRIGHT wxT("Copyright")
 
-class AUDACITY_DLL_API Tags final : public XMLTagHandler {
+class AUDACITY_DLL_API Tags final
+   : public XMLTagHandler
+   , public std::enable_shared_from_this< Tags >
+   , public ClientData::Base
+{
 
  public:
+
+   static Tags &Get( AudacityProject &project );
+   static const Tags &Get( const AudacityProject &project );
+   // Returns reference to *tags
+   static Tags &Set(
+      AudacityProject &project, const std::shared_ptr<Tags> &tags );
+
    Tags();  // constructor
    Tags( const Tags& ) = default;
    //Tags( Tags && ) = default;
@@ -74,9 +88,12 @@ class AUDACITY_DLL_API Tags final : public XMLTagHandler {
 
    std::shared_ptr<Tags> Duplicate() const;
 
+   void Merge( const Tags &other );
+
    Tags & operator= (const Tags & src );
 
-   bool ShowEditDialog(wxWindow *parent, const wxString &title, bool force = false);
+   bool ShowEditDialog(
+      wxWindow *parent, const TranslatableString &title, bool force = false);
 
    bool HandleXMLTag(const wxChar *tag, const wxChar **attrs) override;
    XMLTagHandler *HandleXMLChild(const wxChar *tag) override;
@@ -87,6 +104,8 @@ class AUDACITY_DLL_API Tags final : public XMLTagHandler {
 
    void LoadDefaultGenres();
    void LoadGenres();
+
+   void LoadDefaults();
 
    int GetNumUserGenres();
    wxString GetUserGenre(int value);
@@ -100,7 +119,7 @@ class AUDACITY_DLL_API Tags final : public XMLTagHandler {
    using Iterators = IteratorRange<TagMap::const_iterator>;
    Iterators GetRange() const;
 
-   void SetTag(const wxString & name, const wxString & value);
+   void SetTag(const wxString & name, const wxString & value, const bool bSpecialTag=false);
    void SetTag(const wxString & name, const int & value);
 
    bool IsEmpty();
@@ -109,8 +128,6 @@ class AUDACITY_DLL_API Tags final : public XMLTagHandler {
    friend bool operator == (const Tags &lhs, const Tags &rhs);
 
  private:
-   void LoadDefaults();
-
    TagMap mXref;
    TagMap mMap;
 
@@ -123,17 +140,17 @@ class AUDACITY_DLL_API Tags final : public XMLTagHandler {
 inline bool operator != (const Tags &lhs, const Tags &rhs)
 { return !(lhs == rhs); }
 
-class TagsEditor final : public wxDialogWrapper
+class TagsEditorDialog final : public wxDialogWrapper
 {
  public:
    // constructors and destructors
-   TagsEditor(wxWindow * parent,
-              const wxString &title,
+   TagsEditorDialog(wxWindow * parent,
+              const TranslatableString &title,
               Tags * tags,
               bool editTitle,
-              bool editTrackNumber);
+              bool editTrack);
 
-   virtual ~TagsEditor();
+   virtual ~TagsEditorDialog();
 
 #if !defined(__WXMSW__)
    bool IsEscapeKey(const wxKeyEvent& /*event*/) override { return false; }
@@ -141,6 +158,8 @@ class TagsEditor final : public wxDialogWrapper
 
    void PopulateOrExchange(ShuttleGui & S);
 
+   void OnDontShow( wxCommandEvent & Evt);
+   void OnHelp(wxCommandEvent & Evt);
    bool TransferDataToWindow() override;
    bool TransferDataFromWindow() override;
 

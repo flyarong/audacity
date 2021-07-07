@@ -14,7 +14,7 @@
 #ifndef __AUDACITY_THEME__
 #define __AUDACITY_THEME__
 
-#include "Audacity.h"
+
 
 #include <vector>
 #include <wx/defs.h>
@@ -27,8 +27,10 @@ class wxFont;
 class wxImage;
 class wxPen;
 
+class ChoiceSetting;
+
 // JKC: will probably change name from 'teBmps' to 'tIndexBmp';
-typedef int teBmps; /// The index of a bitmap resource in Theme Resources.
+using teBmps = int; /// The index of a bitmap resource in Theme Resources.
 
 enum teResourceType
 {
@@ -97,12 +99,13 @@ class AUDACITY_DLL_API ThemeBase /* not final */
 {
 public:
    ThemeBase(void);
+   ThemeBase ( const ThemeBase & ) = delete;
+   ThemeBase &operator =( const ThemeBase & ) = delete;
 public:
    virtual ~ThemeBase(void);
 
 public:
    virtual void EnsureInitialised()=0;
-   virtual void ApplyUpdatedImages()=0;
    void LoadTheme( teThemeType Theme );
    void RegisterImage( int &iIndex,char const** pXpm, const wxString & Name);
    void RegisterImage( int &iIndex, const wxImage &Image, const wxString & Name );
@@ -141,7 +144,7 @@ public:
 
    // Utility function that combines a bitmap and a mask, both in XPM format.
    wxImage MaskedImage( char const ** pXpm, char const ** pMask );
-   // Utility functiuon that takes a 32 bit bitmap and makes it into an image.
+   // Utility function that takes a 32 bit bitmap and makes it into an image.
    wxImage MakeImageWithAlpha( wxBitmap & Bmp );
 
 protected:
@@ -165,7 +168,6 @@ public:
    ~Theme(void);
 public:
    void EnsureInitialised() override;
-   void ApplyUpdatedImages() override;
    void RegisterImages();
    void RegisterColours();
    bool mbInitialised;
@@ -177,7 +179,7 @@ class wxWindow;
 class wxString;
 class wxPaintEvent;
 
-class auStaticText : public wxWindow
+class AUDACITY_DLL_API auStaticText : public wxWindow
 {
 public:
    auStaticText(wxWindow* parent, wxString text);
@@ -190,5 +192,9 @@ public:
 };
 
 extern AUDACITY_DLL_API Theme theTheme;
+
+extern AUDACITY_DLL_API ChoiceSetting
+     GUITheme
+;
 
 #endif // __AUDACITY_THEME__

@@ -17,26 +17,25 @@ License: GPL v2.  See License.txt.
 // Store function pointers here when including FFmpeg.h
 #define DEFINE_FFMPEG_POINTERS
 
-#include "Audacity.h"   // for config*.h // for USE_* macros
+
 #include "FFmpeg.h"
 
 #include "FileNames.h"
-#include "Internat.h"
 #include "widgets/HelpSystem.h"
-#include "widgets/ErrorDialog.h"
+#include "widgets/AudacityMessageBox.h"
 
 #include <wx/checkbox.h>
 #include <wx/dynlib.h>
 #include <wx/file.h>
-#include <wx/filedlg.h>
 #include <wx/log.h>
+#include <wx/textctrl.h>
 
 #if !defined(USE_FFMPEG)
 /// FFmpeg support may or may not be compiled in,
 /// but Preferences dialog requires this function nevertheless
-wxString GetFFmpegVersion(wxWindow *parent)
+TranslatableString GetFFmpegVersion()
 {
-   return wxString(_("FFmpeg support not compiled in"));
+   return XO("FFmpeg support not compiled in");
 }
 
 #else
@@ -102,22 +101,23 @@ void FFmpegStartup()
    {
       if (enabled)
       {
-         AudacityMessageBox(_("FFmpeg was configured in Preferences and successfully loaded before, \
-                        \nbut this time Audacity failed to load it at startup. \
-                        \n\nYou may want to go back to Preferences > Libraries and re-configure it."),
-                      _("FFmpeg startup failed"));
+         AudacityMessageBox(XO(
+"FFmpeg was configured in Preferences and successfully loaded before, \
+\nbut this time Audacity failed to load it at startup. \
+\n\nYou may want to go back to Preferences > Libraries and re-configure it."),
+            XO("FFmpeg startup failed"));
       }
    }
 }
 
-wxString GetFFmpegVersion(wxWindow * WXUNUSED(parent))
+TranslatableString GetFFmpegVersion()
 {
    PickFFmpegLibs();
 
-   wxString versionString = _("FFmpeg library not found");
+   auto versionString = XO("FFmpeg library not found");
 
    if (FFmpegLibsInst()->ValidLibsLoaded()) {
-      versionString = FFmpegLibsInst()->GetLibraryVersion();
+      versionString = Verbatim( FFmpegLibsInst()->GetLibraryVersion() );
    }
 
    DropFFmpegLibs();
@@ -201,7 +201,12 @@ int ufile_close(AVIOContext *pb)
 
    bool success = true;
    if (f) {
-      success = f->Flush() && f->Close();
+      if (pb->write_flag) {
+         success = f->Flush();
+      }
+      if (success) {
+         success = f->Close();
+      }
       pb->opaque = nullptr;
    }
 
@@ -334,7 +339,7 @@ streamContext *import_ffmpeg_read_next_frame(AVFormatContext* formatContext,
    }
 
    // Copy the frame to the stream context
-   sc->m_pkt.create(std::move(pkt));
+   sc->m_pkt.emplace(std::move(pkt));
 
    sc->m_pktDataPtr = sc->m_pkt->data;
    sc->m_pktRemainingSiz = sc->m_pkt->size;
@@ -448,15 +453,16 @@ class FindFFmpegDialog final : public wxDialogWrapper
 {
 public:
 
-   FindFFmpegDialog(wxWindow *parent, const wxString &path, const wxString &name, const wxString &type)
-      :  wxDialogWrapper(parent, wxID_ANY, wxString(_("Locate FFmpeg")))
+   FindFFmpegDialog(wxWindow *parent, const wxString &path, const wxString &name,
+      FileNames::FileTypes types)
+      :  wxDialogWrapper(parent, wxID_ANY, XO("Locate FFmpeg"))
    {
-      SetName(GetTitle());
+      SetName();
       ShuttleGui S(this, eIsCreating);
 
       mPath = path;
       mName = name;
-      mType = type;
+      mTypes = std::move( types );
 
       mLibPath.Assign(mPath, mName);
 
@@ -465,19 +471,18 @@ public:
 
    void PopulateOrExchange(ShuttleGui & S)
    {
-      wxString text;
-
       S.SetBorder(10);
       S.StartVerticalLay(true);
       {
-         text.Printf(_("Audacity needs the file '%s' to import and export audio via FFmpeg."), mName);
-         S.AddTitle(text);
+         S.AddTitle(
+            XO(
+"Audacity needs the file '%s' to import and export audio via FFmpeg.")
+               .Format( mName ) );
 
          S.SetBorder(3);
          S.StartHorizontalLay(wxALIGN_LEFT, true);
          {
-            text.Printf(_("Location of '%s':"), mName);
-            S.AddTitle(text);
+            S.AddTitle( XO("Location of '%s':").Format( mName ) );
          }
          S.EndHorizontalLay();
 
@@ -485,15 +490,16 @@ public:
          S.SetStretchyCol(0);
          {
             if (mLibPath.GetFullPath().empty()) {
-               text.Printf(_("To find '%s', click here -->"), mName);
-               mPathText = S.AddTextBox( {}, text, 0);
+               mPathText = S.AddTextBox( {},
+                  wxString::Format(_("To find '%s', click here -->"), mName), 0);
             }
             else {
                mPathText = S.AddTextBox( {}, mLibPath.GetFullPath(), 0);
             }
-            S.Id(ID_FFMPEG_BROWSE).AddButton(_("Browse..."), wxALIGN_RIGHT);
-            S.AddVariableText(_("To get a free copy of FFmpeg, click here -->"), true);
-            S.Id(ID_FFMPEG_DLOAD).AddButton(_("Download"), wxALIGN_RIGHT);
+            S.Id(ID_FFMPEG_BROWSE).AddButton(XXO("Browse..."), wxALIGN_RIGHT);
+            S.AddVariableText(
+               XO("To get a free copy of FFmpeg, click here -->"), true);
+            S.Id(ID_FFMPEG_DLOAD).AddButton(XXO("Download"), wxALIGN_RIGHT);
          }
          S.EndMultiColumn();
 
@@ -511,18 +517,17 @@ public:
 
    void OnBrowse(wxCommandEvent & WXUNUSED(event))
    {
-      wxString question;
       /* i18n-hint: It's asking for the location of a file, for
       example, "Where is lame_enc.dll?" - you could translate
       "Where would I find the file '%s'?" instead if you want. */
-      question.Printf(_("Where is '%s'?"), mName);
+      auto question = XO("Where is '%s'?").Format( mName );
 
       wxString path = FileNames::SelectFile(FileNames::Operation::_None,
          question,
          mLibPath.GetPath(),
-         mLibPath.GetName(),
+         mLibPath.GetFullName(),
          wxT(""),
-         mType,
+         mTypes,
          wxFD_OPEN | wxRESIZE_BORDER,
          this);
       if (!path.empty()) {
@@ -533,7 +538,7 @@ public:
 
    void OnDownload(wxCommandEvent & WXUNUSED(event))
    {
-      HelpSystem::ShowHelp(this, wxT("FAQ:Installing_the_FFmpeg_Import_Export_Library"));
+      HelpSystem::ShowHelp(this, L"FAQ:Installing_the_FFmpeg_Import_Export_Library");
    }
 
    wxString GetLibPath()
@@ -547,7 +552,7 @@ private:
 
    wxString mPath;
    wxString mName;
-   wxString mType;
+   FileNames::FileTypes mTypes;
 
    wxTextCtrl *mPathText;
 
@@ -565,9 +570,9 @@ END_EVENT_TABLE()
 //----------------------------------------------------------------------------
 
 FFmpegNotFoundDialog::FFmpegNotFoundDialog(wxWindow *parent)
-   :  wxDialogWrapper(parent, wxID_ANY, wxString(_("FFmpeg not found")))
+   :  wxDialogWrapper(parent, wxID_ANY, XO("FFmpeg not found"))
 {
-   SetName(GetTitle());
+   SetName();
    ShuttleGui S(this, eIsCreating);
    PopulateOrExchange(S);
 }
@@ -579,16 +584,16 @@ void FFmpegNotFoundDialog::PopulateOrExchange(ShuttleGui & S)
    S.SetBorder(10);
    S.StartVerticalLay(true);
    {
-      S.AddFixedText(_(
+      S.AddFixedText(XO(
 "Audacity attempted to use FFmpeg to import an audio file,\n\
 but the libraries were not found.\n\n\
-To use FFmpeg import, go to Preferences > Libraries\n\
+To use FFmpeg import, go to Edit > Preferences > Libraries\n\
 to download or locate the FFmpeg libraries."
       ));
 
-      int dontShowDlg = 0;
-      gPrefs->Read(wxT("/FFmpeg/NotFoundDontShow"),&dontShowDlg,0);
-      mDontShow = S.AddCheckBox(_("Do not show this warning again"),dontShowDlg);
+      mDontShow = S
+         .AddCheckBox(XXO("Do not show this warning again"),
+            gPrefs->ReadBool(wxT("/FFmpeg/NotFoundDontShow"), false) );
 
       S.AddStandardButtons(eOkButton);
    }
@@ -659,7 +664,7 @@ bool FFmpegLibs::FindLibs(wxWindow *parent)
    FindFFmpegDialog fd(parent,
                         path,
                         name,
-                        GetLibraryTypeString());
+                        GetLibraryTypes());
 
    if (fd.ShowModal() == wxID_CANCEL) {
       wxLogMessage(wxT("User canceled the dialog. Failed to find FFmpeg libraries."));
@@ -747,10 +752,10 @@ bool FFmpegLibs::LoadLibs(wxWindow * WXUNUSED(parent), bool showerr)
    */
    // Oh well, just give up
    if (!ValidLibsLoaded()) {
-      wxString msg = _("Failed to find compatible FFmpeg libraries.");
+      auto msg = XO("Failed to find compatible FFmpeg libraries.");
       if (showerr)
-         AudacityMessageBox(msg);
-      wxLogError(msg);
+         AudacityMessageBox( msg );
+      wxLogError(msg.Debug());
       return false;
    }
 
@@ -769,47 +774,53 @@ bool FFmpegLibs::InitLibs(const wxString &libpath_format, bool WXUNUSED(showerr)
    FreeLibs();
 
 #if defined(__WXMSW__)
+   wxString oldpath;
    wxString syspath;
-   bool pathfix = false;
+   bool pathExisted = false;
+
+   // Return PATH to normal
+   auto restorePath = finally([&]()
+   {
+      if (oldpath != syspath)
+      {
+         if (pathExisted)
+         {
+            wxLogMessage(wxT("Returning PATH to previous setting: %s"), oldpath);
+            wxSetEnv(wxT("PATH"), oldpath);
+         }
+         else
+         {
+            wxLogMessage(wxT("Removing PATH environment variable"));
+            wxUnsetEnv(wxT("PATH"));
+         }
+      }
+   });
 
    wxLogMessage(wxT("Looking up PATH environment variable..."));
    // First take PATH environment variable and store its content.
-   if (wxGetEnv(wxT("PATH"),&syspath))
-   {
-      wxLogMessage(wxT("PATH = '%s'"), syspath);
-      const wxString &fmtdir{ wxPathOnly(libpath_format) };
-      wxString fmtdirsc = fmtdir + wxT(";");
-      wxString scfmtdir = wxT(";") + fmtdir;
-      wxLogMessage(wxT("Checking that '%s' is in PATH..."), fmtdir);
-      // If the directory, where libavformat is, is not in PATH - add it
-      if (!syspath.Contains(fmtdirsc) && !syspath.Contains(scfmtdir) && !syspath.Contains(fmtdir))
-      {
-         wxLogWarning(wxT("FFmpeg directory '%s' is not in PATH."), fmtdir);
-         if (syspath.Left(1) == wxT(';'))
-         {
-            wxLogMessage(wxT("Temporarily prepending '%s' to PATH..."), fmtdir);
-            syspath.Prepend(scfmtdir);
-         }
-         else
-         {
-            wxLogMessage(wxT("Temporarily prepending '%s' to PATH..."), scfmtdir);
-            syspath.Prepend(fmtdirsc);
-         }
+   pathExisted = wxGetEnv(wxT("PATH"),&syspath);
+   oldpath = syspath;
 
-         if (wxSetEnv(wxT("PATH"),syspath))
-            // Remember to change PATH back to normal after we're done
-            pathfix = true;
-         else
-            wxLogSysError(wxT("Setting PATH via wxSetEnv('%s') failed."),syspath);
-      }
-      else
-      {
-         wxLogMessage(wxT("FFmpeg directory is in PATH."));
-      }
+   wxLogMessage(wxT("PATH = '%s'"), syspath);
+
+   const wxString &fmtdir{ wxPathOnly(libpath_format) };
+   wxString fmtdirsc = fmtdir + wxT(";");
+   wxString scfmtdir = wxT(";") + fmtdir;
+
+   if (syspath.Left(1) == wxT(';'))
+   {
+      wxLogMessage(wxT("Temporarily prepending '%s' to PATH..."), fmtdir);
+      syspath.Prepend(scfmtdir);
    }
    else
    {
-      wxLogSysError(wxT("PATH does not exist."));
+      wxLogMessage(wxT("Temporarily prepending '%s' to PATH..."), scfmtdir);
+      syspath.Prepend(fmtdirsc);
+   }
+
+   if (!wxSetEnv(wxT("PATH"),syspath))
+   {
+      wxLogSysError(wxT("Setting PATH via wxSetEnv('%s') failed."), syspath);
    }
 #endif
 
@@ -878,16 +889,6 @@ bool FFmpegLibs::InitLibs(const wxString &libpath_format, bool WXUNUSED(showerr)
       wxLogMessage(wxT("Loading avformat from '%s'."), nameFull);
       gotError = !avformat->Load(nameFull, wxDL_LAZY);
    }
-
-#if defined(__WXMSW__)
-   //Return PATH to normal
-   if ( pathfix )
-   {
-      wxString oldpath = syspath.BeforeLast(wxT(';'));
-      wxLogMessage(wxT("Returning PATH to previous setting..."));
-      wxSetEnv(wxT("PATH"),oldpath);
-   }
-#endif
 
    if (gotError) {
       wxLogError(wxT("Failed to load FFmpeg libraries."));
@@ -966,6 +967,7 @@ bool FFmpegLibs::InitLibs(const wxString &libpath_format, bool WXUNUSED(showerr)
    FFMPEG_INITALT(avutil, av_frame_free, avcodec, avcodec_free_frame);
    FFMPEG_INITDYN(avutil, av_samples_get_buffer_size);
    FFMPEG_INITDYN(avutil, av_get_default_channel_layout);
+   FFMPEG_INITDYN(avutil, av_strerror);
 
    wxLogMessage(wxT("All symbols loaded successfully. Initializing the library."));
 #endif

@@ -14,7 +14,7 @@
 #ifndef __AUDACITY_COLOR__
 #define __AUDACITY_COLOR__
 
-#include "MemoryX.h"
+#include <memory>
 #include <wx/brush.h> // member variable
 #include <wx/pen.h> // member variable
 
@@ -22,33 +22,7 @@ class wxDC;
 class wxGraphicsContext;
 class wxRect;
 
-/// Used to restore pen, brush and logical-op in a DC back to what they were.
-struct DCUnchanger {
-public:
-   DCUnchanger() {}
-
-   DCUnchanger(const wxBrush &brush_, const wxPen &pen_, long logicalOperation_)
-   : brush(brush_), pen(pen_), logicalOperation(logicalOperation_)
-   {}
-
-   void operator () (wxDC *pDC) const;
-
-   wxBrush brush {};
-   wxPen pen {};
-   long logicalOperation {};
-};
-
-/// Makes temporary drawing context changes that you back out of, RAII style
-//  It's like wxDCPenChanger, etc., but simple and general
-class ADCChanger : public std::unique_ptr<wxDC, ::DCUnchanger>
-{
-   using Base = std::unique_ptr<wxDC, ::DCUnchanger>;
-public:
-   ADCChanger() : Base{} {}
-   ADCChanger(wxDC *pDC);
-};
-
-class AColor {
+class AUDACITY_DLL_API AColor {
  public:
 
     enum ColorGradientChoice {
@@ -149,8 +123,9 @@ class AColor {
    static wxBrush tooltipBrush;
 
    static bool gradient_inited;
-   static const int gradientSteps = 512;
-   static unsigned char gradient_pre[ColorGradientTotal][2][gradientSteps][3];
+   static const int colorSchemes = 4;
+   static const int gradientSteps = 256;
+   static unsigned char gradient_pre[ColorGradientTotal][colorSchemes][gradientSteps][3];
 
    // For experiments in mouse-over highlighting only
    static wxPen uglyPen;
@@ -165,16 +140,16 @@ class AColor {
 
 inline void GetColorGradient(float value,
                              AColor::ColorGradientChoice selected,
-                             bool grayscale,
+                             int colorScheme,
                              unsigned char * __restrict red,
                              unsigned char * __restrict green,
                              unsigned char * __restrict blue) {
 
    int idx = value * (AColor::gradientSteps - 1);
 
-   *red = AColor::gradient_pre[selected][grayscale][idx][0];
-   *green = AColor::gradient_pre[selected][grayscale][idx][1];
-   *blue = AColor::gradient_pre[selected][grayscale][idx][2];
+   *red = AColor::gradient_pre[selected][colorScheme][idx][0];
+   *green = AColor::gradient_pre[selected][colorScheme][idx][1];
+   *blue = AColor::gradient_pre[selected][colorScheme][idx][2];
 }
 
 #endif

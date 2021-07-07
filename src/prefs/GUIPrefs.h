@@ -17,41 +17,51 @@
 
 #include "PrefsPanel.h"
 
+class ChoiceSetting;
 class ShuttleGui;
-class wxArrayStringEx;
 
-class GUIPrefs final : public PrefsPanel
+#define GUI_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("GUI") }
+
+class AUDACITY_DLL_API GUIPrefs final : public PrefsPanel
 {
  public:
    GUIPrefs(wxWindow * parent, wxWindowID winid);
    ~GUIPrefs();
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
+
    bool Commit() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    static void GetRangeChoices(
-      wxArrayStringEx *pChoices, wxArrayStringEx *pCodes);
+      TranslatableStrings *pChoices,
+      wxArrayStringEx *pCodes,
+      int *pDefaultRangeIndex = nullptr
+   );
+
+   // If no input language given, defaults to system language.
+   // Returns the language actually used which is not lang if lang cannot be found.
+   static wxString SetLang( const wxString & lang );
 
  private:
    void Populate();
 
    wxArrayStringEx mLangCodes;
-   wxArrayStringEx mLangNames;
-
-   wxArrayStringEx mHtmlHelpCodes;
-   wxArrayStringEx mHtmlHelpChoices;
-
-   wxArrayStringEx mThemeCodes;
-   wxArrayStringEx mThemeChoices;
+   TranslatableStrings mLangNames;
 
    wxArrayStringEx mRangeCodes;
-   wxArrayStringEx mRangeChoices;
+   TranslatableStrings mRangeChoices;
+   int mDefaultRangeIndex;
 };
 
-/// A PrefsPanelFactory that creates one GUIPrefs panel.
-class GUIPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
+AUDACITY_DLL_API
+int ShowClippingPrefsID();
+AUDACITY_DLL_API
+int ShowTrackNameInWaveformPrefsID();
+
+extern AUDACITY_DLL_API ChoiceSetting
+     GUIManualLocation
+;
+
 #endif

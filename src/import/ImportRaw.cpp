@@ -21,20 +21,18 @@ and sample size to help you importing data of an unknown format.
 *//*******************************************************************/
 
 
-#include "../Audacity.h"
+
 #include "ImportRaw.h"
 
-#include "Import.h"
+#include "ImportPlugin.h"
 
-#include "../DirManager.h"
-#include "../FileException.h"
+#include "../AudioIOBase.h"
 #include "../FileFormats.h"
-#include "../Internat.h"
 #include "../Prefs.h"
+#include "../ProjectSettings.h"
 #include "../ShuttleGui.h"
 #include "../UserException.h"
 #include "../WaveTrack.h"
-#include "../prefs/QualityPrefs.h"
 #include "../widgets/ProgressDialog.h"
 
 #include <cmath>
@@ -46,16 +44,15 @@ and sample size to help you importing data of an unknown format.
 #include <wx/defs.h>
 #include <wx/button.h>
 #include <wx/choice.h>
+#include <wx/combobox.h>
 #include <wx/intl.h>
 #include <wx/panel.h>
-#include <wx/progdlg.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 #include <wx/timer.h>
 
 // #include "RawAudioGuess.h"
-#include "MultiFormatReader.h"
 #include "FormatClassifier.h"
 
 #include "sndfile.h"
@@ -88,7 +85,7 @@ class ImportRawDialog final : public wxDialogWrapper {
    wxChoice   *mChannelChoice;
    wxTextCtrl *mOffsetText;
    wxTextCtrl *mPercentText;
-   wxTextCtrl *mRateText;
+   wxComboBox *mRateText;
 
    int         mNumEncodings;
    ArrayOf<int> mEncodingSubtype;
@@ -99,12 +96,11 @@ class ImportRawDialog final : public wxDialogWrapper {
 // This function leaves outTracks empty as an indication of error,
 // but may also throw FileException to make use of the application's
 // user visible error reporting.
-void ImportRaw(wxWindow *parent, const wxString &fileName,
-              TrackFactory *trackFactory, TrackHolders &outTracks)
+void ImportRaw(const AudacityProject &project, wxWindow *parent, const wxString &fileName,
+              WaveTrackFactory *trackFactory, TrackHolders &outTracks)
 {
    outTracks.clear();
    int encoding = 0; // Guess Format
-   sampleFormat format;
    sf_count_t offset = 0;
    double rate = 44100.0;
    double percent = 100.0;
@@ -134,6 +130,8 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
          numChannels = 1;
          offset = 0;
       }
+
+      rate = ProjectSettings::Get( project ).GetRate();
 
       numChannels = std::max(1u, numChannels);
       ImportRawDialog dlog(parent, encoding, numChannels, (int)offset, rate);
@@ -195,11 +193,8 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
       // the quality of the original file.
       //
 
-      format = QualityPrefs::SampleFormatChoice();
-
-      if (format != floatSample &&
-          sf_subtype_more_than_16_bits(encoding))
-         format = floatSample;
+      auto format = ImportFileHandle::ChooseFormat(
+         sf_subtype_to_effective_format(encoding));
 
       results.resize(1);
       auto &channels = results[0];
@@ -223,12 +218,10 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
          totalFrames = 0;
       }
 
-      wxString msg;
+      auto msg = XO("Importing %s").Format( wxFileName::FileName(fileName).GetFullName() );
 
-      msg.Printf(_("Importing %s"), wxFileName::FileName(fileName).GetFullName());
-
-      /* i18n-hint: 'Raw' means 'unprocessed' here and should usually be tanslated.*/
-      ProgressDialog progress(_("Import Raw"), msg);
+      /* i18n-hint: 'Raw' means 'unprocessed' here and should usually be translated.*/
+      ProgressDialog progress(XO("Import Raw"), msg);
 
       size_t block;
       do {
@@ -308,7 +301,7 @@ END_EVENT_TABLE()
 ImportRawDialog::ImportRawDialog(wxWindow * parent,
                                  int encoding, unsigned channels,
                                  int offset, double rate)
-:  wxDialogWrapper(parent, wxID_ANY, _("Import Raw Data"),
+:  wxDialogWrapper(parent, wxID_ANY, XO("Import Raw Data"),
             wxDefaultPosition, wxDefaultSize,
             wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
     mEncoding(encoding),
@@ -318,10 +311,10 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
 {
    wxASSERT(channels >= 1);
 
-   SetName(GetTitle());
+   SetName();
 
    ShuttleGui S(this, eIsCreating);
-   wxArrayStringEx encodings;
+   TranslatableStrings encodings;
    int num;
    int selection;
    int endian;
@@ -344,7 +337,7 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
 
       if (sf_format_check(&info)) {
          mEncodingSubtype[mNumEncodings] = subtype;
-         encodings.push_back(sf_encoding_index_name(i));
+         encodings.push_back( Verbatim( sf_encoding_index_name(i) ) );
 
          if ((mEncoding & SF_FORMAT_SUBMASK) == subtype)
             selection = mNumEncodings;
@@ -353,19 +346,19 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
       }
    }
 
-   wxArrayStringEx endians{
+   TranslatableStrings endians{
       /* i18n-hint: Refers to byte-order.  Don't translate "endianness" if you don't
           know the correct technical word. */
-      _("No endianness") ,
+      XO("No endianness") ,
       /* i18n-hint: Refers to byte-order.  Don't translate this if you don't
        know the correct technical word. */
-      _("Little-endian") ,
+      XO("Little-endian") ,
       /* i18n-hint: Refers to byte-order.  Don't translate this if you don't
          know the correct technical word. */
-      _("Big-endian") ,
+      XO("Big-endian") ,
       /* i18n-hint: Refers to byte-order.  Don't translate "endianness" if you don't
          know the correct technical word. */
-      _("Default endianness") ,
+      XO("Default endianness") ,
    };
 
    switch (mEncoding & (SF_FORMAT_ENDMASK))
@@ -385,12 +378,12 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
          break;
    }
 
-   wxArrayStringEx chans{
-      _("1 Channel (Mono)") ,
-      _("2 Channels (Stereo)") ,
+   TranslatableStrings chans{
+      XO("1 Channel (Mono)") ,
+      XO("2 Channels (Stereo)") ,
    };
    for (i=2; i<16; i++) {
-      chans.push_back(wxString::Format(_("%d Channels"), i + 1));
+      chans.push_back( XO("%d Channels").Format( i + 1 ) );
    }
 
    S.StartVerticalLay(false);
@@ -398,13 +391,13 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
       S.SetBorder(5);
       S.StartTwoColumn();
       {
-         mEncodingChoice = S.Id(ChoiceID).AddChoice(_("Encoding:"),
+         mEncodingChoice = S.Id(ChoiceID).AddChoice(XXO("Encoding:"),
                                                     encodings,
                                                     selection);
-         mEndianChoice = S.Id(ChoiceID).AddChoice(_("Byte order:"),
+         mEndianChoice = S.Id(ChoiceID).AddChoice(XXO("Byte order:"),
                                                   endians,
                                                   endian);
-         mChannelChoice = S.Id(ChoiceID).AddChoice(_("Channels:"),
+         mChannelChoice = S.Id(ChoiceID).AddChoice(XXO("Channels:"),
                                                    chans,
                                                    mChannels - 1);
       }
@@ -415,25 +408,31 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
       {
          // Offset text
          /* i18n-hint: (noun)*/
-         mOffsetText = S.AddTextBox(_("Start offset:"),
+         mOffsetText = S.AddTextBox(XXO("Start offset:"),
                                     wxString::Format(wxT("%d"), mOffset),
                                     12);
-         S.AddUnits(_("bytes"));
+         S.AddUnits(XO("bytes"));
 
          // Percent text
-         mPercentText = S.AddTextBox(_("Amount to import:"),
+         mPercentText = S.AddTextBox(XXO("Amount to import:"),
                                      wxT("100"),
                                      12);
-         S.AddUnits(_("%"));
+         S.AddUnits(XO("%"));
 
          // Rate text
+         wxArrayStringEx rates;
+         for (int i = 0; i < AudioIOBase::NumStandardRates; i++) {
+            rates.Add(
+               wxString::Format(wxT("%d"), AudioIOBase::StandardRates[i]));
+         }
+
          /* i18n-hint: (noun)*/
-         mRateText = S.AddTextBox(_("Sample rate:"),
-                                  wxString::Format(wxT("%d"), (int)mRate),
-                                  12);
+         mRateText = S.AddCombo(XXO("Sample rate:"),
+                                wxString::Format(wxT("%d"), (int)mRate),
+                                rates);
          /* i18n-hint: This is the abbreviation for "Hertz", or
             cycles per second. */
-         S.AddUnits(_("Hz"));
+         S.AddUnits(XO("Hz"));
       }
       S.EndMultiColumn();
 

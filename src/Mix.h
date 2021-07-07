@@ -20,14 +20,12 @@
 #ifndef __AUDACITY_MIX__
 #define __AUDACITY_MIX__
 
-#include "MemoryX.h"
 #include "SampleFormat.h"
 #include <vector>
 
 class Resample;
-class DirManager;
-class TimeTrack;
-class TrackFactory;
+class BoundedEnvelope;
+class WaveTrackFactory;
 class TrackList;
 class WaveTrack;
 using WaveTrackConstArray = std::vector < std::shared_ptr < const WaveTrack > >;
@@ -45,7 +43,7 @@ class WaveTrackCache;
  * no explicit time range to process, and the whole occupied length of the
  * input tracks is processed.
  */
-void MixAndRender(TrackList * tracks, TrackFactory *factory,
+void AUDACITY_DLL_API MixAndRender(TrackList * tracks, WaveTrackFactory *factory,
                   double rate, sampleFormat format,
                   double startTime, double endTime,
                   std::shared_ptr<WaveTrack> &uLeft,
@@ -81,18 +79,21 @@ class AUDACITY_DLL_API Mixer {
  public:
 
     // An argument to Mixer's constructor
-    class WarpOptions
+    class AUDACITY_DLL_API WarpOptions
     {
     public:
-       explicit WarpOptions(const TimeTrack *t)
-          : timeTrack(t), minSpeed(0.0), maxSpeed(0.0)
-       {}
+       //! Construct with warp from the TimeTrack if there is one
+       explicit WarpOptions(const TrackList &list);
 
+       //! Construct with an explicit warp
+       explicit WarpOptions(const BoundedEnvelope *e);
+
+       //! Construct with no time warp
        WarpOptions(double min, double max);
 
     private:
        friend class Mixer;
-       const TimeTrack *timeTrack;
+       const BoundedEnvelope *envelope = nullptr;
        double minSpeed, maxSpeed;
     };
 
@@ -105,15 +106,10 @@ class AUDACITY_DLL_API Mixer {
          double startTime, double stopTime,
          unsigned numOutChannels, size_t outBufferSize, bool outInterleaved,
          double outRate, sampleFormat outFormat,
-         bool highQuality = true, MixerSpec *mixerSpec = NULL);
+         bool highQuality = true, MixerSpec *mixerSpec = nullptr,
+         bool applytTrackGains = true);
 
    virtual ~ Mixer();
-
-   //
-   // Setup
-   //
-
-   void ApplyTrackGains(bool apply = true); // True by default
 
    //
    // Processing
@@ -135,6 +131,8 @@ class AUDACITY_DLL_API Mixer {
 
    // Used in scrubbing.
    void SetTimesAndSpeed(double t0, double t1, double speed);
+   void SetSpeedForPlayAtSpeed(double speed);
+   void SetSpeedForKeyboardScrubbing(double speed, double startTime);
 
    /// Current time in seconds (unwarped, i.e. always between startTime and stopTime)
    /// This value is not accurate, it's useful for progress bars and indicators, but nothing else.
@@ -162,18 +160,18 @@ class AUDACITY_DLL_API Mixer {
  private:
 
     // Input
-   size_t           mNumInputTracks;
+   const size_t     mNumInputTracks;
    ArrayOf<WaveTrackCache> mInputTrack;
    bool             mbVariableRates;
-   const TimeTrack *mTimeTrack;
+   const BoundedEnvelope *mEnvelope;
    ArrayOf<sampleCount> mSamplePos;
-   bool             mApplyTrackGains;
+   const bool       mApplyTrackGains;
    Doubles          mEnvValues;
    double           mT0; // Start time
    double           mT1; // Stop time (none if mT0==mT1)
    double           mTime;  // Current time (renamed from mT to mTime for consistency with AudioIO - mT represented warped time there)
    ArrayOf<std::unique_ptr<Resample>> mResample;
-   size_t           mQueueMaxLen;
+   const size_t     mQueueMaxLen;
    FloatBuffers     mSampleQueue;
    ArrayOf<int>     mQueueStart;
    ArrayOf<int>     mQueueLen;
@@ -182,21 +180,21 @@ class AUDACITY_DLL_API Mixer {
 
    // Output
    size_t              mMaxOut;
-   unsigned         mNumChannels;
+   const unsigned   mNumChannels;
    Floats           mGains;
    unsigned         mNumBuffers;
    size_t              mBufferSize;
    size_t              mInterleavedBufferSize;
-   sampleFormat     mFormat;
+   const sampleFormat mFormat;
    bool             mInterleaved;
    ArrayOf<SampleBuffer> mBuffer, mTemp;
    Floats           mFloatBuffer;
-   double           mRate;
+   const double     mRate;
    double           mSpeed;
    bool             mHighQuality;
    std::vector<double> mMinFactor, mMaxFactor;
 
-   bool             mMayThrow;
+   const bool       mMayThrow;
 };
 
 #endif

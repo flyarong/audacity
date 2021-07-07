@@ -21,7 +21,7 @@
 
 *//**********************************************************************/
 
-#include "../Audacity.h"
+
 #include "ToolDock.h"
 
 #include <wx/tokenzr.h>
@@ -40,17 +40,12 @@
 #include <wx/window.h>
 #endif  /*  */
 
-#include "ToolManager.h"
-
 #include <algorithm>
 
 #include "../AColor.h"
 #include "../AllThemeResources.h"
 #include "../ImageManipulation.h"
 #include "../Prefs.h"
-#include "../Project.h"
-#include "../Theme.h"
-#include "../widgets/AButton.h"
 #include "../widgets/Grabber.h"
 
 const ToolBarConfiguration::Position
@@ -380,11 +375,11 @@ END_EVENT_TABLE()
 //
 // Constructor
 //
-ToolDock::ToolDock( ToolManager *manager, wxWindow *parent, int dockid ):
+ToolDock::ToolDock( wxEvtHandler *manager, wxWindow *parent, int dockid ):
    wxPanelWrapper( parent, dockid, wxDefaultPosition, parent->GetSize() )
 {
-   SetLabel( _( "ToolDock" ) );
-   SetName( _( "ToolDock" ) );
+   SetLabel( XO( "ToolDock" ) );
+   SetName( XO( "ToolDock" ) );
 
    // Init
    mManager = manager;
@@ -396,7 +391,7 @@ ToolDock::ToolDock( ToolManager *manager, wxWindow *parent, int dockid ):
 }
 
 //
-// Destructer
+// Destructor
 //
 ToolDock::~ToolDock()
 {
@@ -699,14 +694,18 @@ void ToolDock::LayoutToolBars()
    };
    VisitLayout(sizeSetter, &mWrappedConfiguration);
 
-   // Set tab order
+   // Set tab order and layout internal controls.
    {
       ToolBar *lt{};
       for ( const auto &place : GetConfiguration() ) {
          auto ct = place.pTree->pBar;
-         if( lt )
+         if( lt ){
             ct->MoveAfterInTabOrder( lt );
+         }
          lt = ct;
+         // Bug 1371.
+         // After a dock size change, the toolbars may need relaying inside.
+         lt->Layout();
       }
    }
 

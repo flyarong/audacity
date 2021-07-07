@@ -23,17 +23,17 @@ in a background thread.
 #ifndef __AUDACITY_ODTASK__
 #define __AUDACITY_ODTASK__
 
-#include "ODTaskThread.h"
 #include "../BlockFile.h"
 
-#include "../MemoryX.h"
 #include <vector>
+#include <wx/event.h> // to declare custom event type
 class AudacityProject;
 class Track;
 class WaveTrack;
 
 
-DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_ODTASK_COMPLETE, -1)
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
+                         EVT_ODTASK_COMPLETE, wxCommandEvent);
 
 /// A class representing a modular task to be used with the On-Demand structures.
 class ODTask /* not final */
@@ -84,12 +84,13 @@ class ODTask /* not final */
 
    ///Replaces all instances to a wavetrack with a NEW one, effectively transferring the task.
    ///ODTask has no wavetrack, so it does nothing.  But subclasses that do should override this.
-   virtual void ReplaceWaveTrack(Track *oldTrack, Track *newTrack);
+   virtual void ReplaceWaveTrack(Track *oldTrack,
+      const std::shared_ptr< Track > &newTrack);
 
     ///Adds a WaveTrack to do the task for
-   void AddWaveTrack(WaveTrack* track);
+   void AddWaveTrack( const std::shared_ptr< WaveTrack > &track);
    virtual int GetNumWaveTracks();
-   virtual WaveTrack* GetWaveTrack(int i);
+   virtual std::shared_ptr< WaveTrack > GetWaveTrack(int i);
 
    ///changes the tasks associated with this Waveform to process the task from a different point in the track
    virtual void DemandTrackUpdate(WaveTrack* track, double seconds);
@@ -116,7 +117,7 @@ class ODTask /* not final */
    bool GetNeedsODUpdate();
    void ResetNeedsODUpdate();
 
-   virtual const wxChar* GetTip()=0;
+   virtual TranslatableString GetTip()=0;
 
     ///returns true if the task is associated with the project.
    virtual bool IsTaskAssociatedWithProject(AudacityProject* proj);
@@ -130,7 +131,7 @@ class ODTask /* not final */
    virtual void CalculatePercentComplete() = 0;
 
    ///pure virtual function that does some part of the task this object represents.
-   ///this function is meant to be called repeatedly until the IsComplete is true.
+   ///this function is meant to be called repeatedly until IsComplete is true.
    ///Does the smallest unit of work for this task.
    virtual void DoSomeInternal() = 0;
 
@@ -156,7 +157,7 @@ class ODTask /* not final */
    //for a function not a member var.
    ODLock mBlockUntilTerminateMutex;
 
-   std::vector<WaveTrack*> mWaveTracks;
+   std::vector< std::weak_ptr< WaveTrack > > mWaveTracks;
    ODLock     mWaveTrackMutex;
 
    sampleCount mDemandSample;

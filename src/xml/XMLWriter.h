@@ -15,7 +15,7 @@
 
 #include "../FileException.h"
 
-#include "audacity/Types.h"
+#include "Identifier.h"
 
 ///
 /// XMLWriter
@@ -29,6 +29,12 @@ class AUDACITY_DLL_API XMLWriter /* not final */ {
 
    virtual void StartTag(const wxString &name);
    virtual void EndTag(const wxString &name);
+
+   // nonvirtual pass-through
+   void WriteAttr(const wxString &name, const Identifier &value)
+      // using GET once here, permitting Identifiers in XML,
+      // so no need for it at each WriteAttr call
+      { WriteAttr( name, value.GET() ); }
 
    virtual void WriteAttr(const wxString &name, const wxString &value);
    virtual void WriteAttr(const wxString &name, const wxChar *value);
@@ -78,9 +84,9 @@ class AUDACITY_DLL_API XMLFileWriter final : private wxFFile, public XMLWriter {
 
    /// The caption is for message boxes to show in case of errors.
    /// Might throw.
-   XMLFileWriter
-      ( const FilePath &outputPath, const wxString &caption,
-        bool keepBackup = false );
+   XMLFileWriter(
+      const FilePath &outputPath, const TranslatableString &caption,
+      bool keepBackup = false );
 
    virtual ~XMLFileWriter();
 
@@ -105,7 +111,7 @@ class AUDACITY_DLL_API XMLFileWriter final : private wxFFile, public XMLWriter {
  private:
 
    void ThrowException(
-      const wxFileName &fileName, const wxString &caption)
+      const wxFileName &fileName, const TranslatableString &caption)
    {
       throw FileException{ FileException::Cause::Write, fileName, caption };
    }
@@ -115,7 +121,7 @@ class AUDACITY_DLL_API XMLFileWriter final : private wxFFile, public XMLWriter {
    void CloseWithoutEndingTags(); // for auto-save files
 
    const FilePath mOutputPath;
-   const wxString mCaption;
+   const TranslatableString mCaption;
    FilePath mBackupName;
    const bool mKeepBackup;
 
@@ -135,8 +141,6 @@ class XMLStringWriter final : public wxString, public XMLWriter {
    virtual ~XMLStringWriter();
 
    void Write(const wxString &data) override;
-
-   wxString Get();
 
  private:
 

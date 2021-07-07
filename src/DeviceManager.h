@@ -18,16 +18,19 @@
 #ifndef __AUDACITY_DEVICEMANAGER__
 #define __AUDACITY_DEVICEMANAGER__
 
-#include "Experimental.h"
-
 #include <chrono>
 #include <vector>
 
+#include <wx/event.h> // to declare a custom event type
 #include <wx/string.h> // member variables
 
 #if defined(EXPERIMENTAL_DEVICE_CHANGE_HANDLER)
 #include "DeviceChange.h"
 #endif
+
+// Event sent to the application
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
+                         EVT_RESCANNED_DEVICES, wxCommandEvent);
 
 typedef struct DeviceSourceMap {
    int deviceIndex;
@@ -40,9 +43,10 @@ typedef struct DeviceSourceMap {
    wxString hostString;
 } DeviceSourceMap;
 
+AUDACITY_DLL_API
 wxString MakeDeviceSourceString(const DeviceSourceMap *map);
 
-class DeviceManager final
+class AUDACITY_DLL_API DeviceManager final
 #if defined(EXPERIMENTAL_DEVICE_CHANGE_HANDLER)
 #if defined(HAVE_DEVICE_CHANGE)
 :  public DeviceChangeHandler

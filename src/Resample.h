@@ -12,13 +12,11 @@
 #ifndef __AUDACITY_RESAMPLE_H__
 #define __AUDACITY_RESAMPLE_H__
 
-#include "Audacity.h"
 
-#include "MemoryX.h"
 
 #include "SampleFormat.h"
 
-class EnumSetting;
+template< typename Enum > class EnumSetting;
 
 struct soxr;
 extern "C" void soxr_delete(soxr*);
@@ -27,7 +25,7 @@ struct soxr_deleter {
 };
 using soxrHandle = std::unique_ptr<soxr, soxr_deleter>;
 
-class Resample final
+class AUDACITY_DLL_API Resample final
 {
  public:
    /// Resamplers may have more than one method, offering a
@@ -43,8 +41,8 @@ class Resample final
    Resample(const bool useBestMethod, const double dMinFactor, const double dMaxFactor);
    ~Resample();
 
-   static EnumSetting FastMethodSetting;
-   static EnumSetting BestMethodSetting;
+   static EnumSetting< int > FastMethodSetting;
+   static EnumSetting< int > BestMethodSetting;
 
    /** @brief Main processing function. Resamples from the input buffer to the
     * output buffer.
@@ -61,7 +59,7 @@ class Resample final
     @param inBufferLen Length of the input buffer, in samples.
     @param lastFlag Flag to indicate this is the last lot of input samples and
     the buffer needs to be emptied out into the rate converter.
-    (unless lastFlag is true, we don't garuntee to process all the samples in
+    (unless lastFlag is true, we don't guarantee to process all the samples in
     the input this time, we may leave some for next time)
     @param outBuffer Buffer to write output (converted) samples to.
     @param outBufferLen How big outBuffer is.

@@ -16,17 +16,19 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "SetClipCommand.h"
 
-#include "../Project.h"
-#include "../Track.h"
-#include "../TrackPanel.h"
+#include "LoadCommands.h"
 #include "../WaveClip.h"
 #include "../WaveTrack.h"
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
-#include "CommandContext.h"
+
+const ComponentInterfaceSymbol SetClipCommand::Symbol
+{ XO("Set Clip") };
+
+namespace{ BuiltinCommandsModule::Registration< SetClipCommand > reg; }
 
 SetClipCommand::SetClipCommand()
 {
@@ -65,17 +67,16 @@ void SetClipCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(3, wxALIGN_CENTER);
    {
-      S.Optional( bHasContainsTime).TieNumericTextBox(  _("At:"),            mContainsTime );
-      S.Optional( bHasColour      ).TieChoice(          _("Colour:"),        mColour,
-         LocalizedStrings( kColourStrings, nColours ) );
-      S.Optional( bHasT0          ).TieNumericTextBox(  _("Start:"),         mT0 );
+      S.Optional( bHasContainsTime).TieNumericTextBox(  XXO("At:"),            mContainsTime );
+      S.Optional( bHasColour      ).TieChoice(          XXO("Color:"),         mColour,
+         Msgids( kColourStrings, nColours ) );
+      S.Optional( bHasT0          ).TieNumericTextBox(  XXO("Start:"),         mT0 );
    }
    S.EndMultiColumn();
 }
 
-bool SetClipCommand::ApplyInner( const CommandContext & context, Track * t )
+bool SetClipCommand::ApplyInner( const CommandContext &, Track * t )
 {
-   static_cast<void>(context);
    // if no 'At' is specified, then any clip in any selected track will be set.
    t->TypeSwitch([&](WaveTrack *waveTrack) {
       WaveClipPointers ptrs( waveTrack->SortedClipArray());

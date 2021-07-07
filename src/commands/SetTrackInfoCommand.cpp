@@ -33,21 +33,25 @@ SetTrackAudioCommand and SetTrackVisualsCommand.
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "SetTrackInfoCommand.h"
 
+#include "LoadCommands.h"
 #include "../Project.h"
-#include "../Track.h"
+#include "../TrackPanelAx.h"
 #include "../TrackPanel.h"
 #include "../WaveTrack.h"
 #include "../prefs/WaveformSettings.h"
 #include "../prefs/SpectrogramSettings.h"
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveTrackView.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveTrackViewConstants.h"
 #include "CommandContext.h"
 
 SetTrackBase::SetTrackBase(){
    mbPromptForTracks = true;
+   bIsSecondChannel = false;
 }
 
 //Define for the old scheme, where SetTrack defines its own track selection.
@@ -83,8 +87,8 @@ void SetTrackBase::PopulateOrExchange(ShuttleGui & S)
    S.StartMultiColumn(3, wxEXPAND);
    {
       S.SetStretchyCol( 2 );
-      S.Optional( bHasTrackIndex  ).TieNumericTextBox(  _("Track Index:"),   mTrackIndex );
-      S.Optional( bHasChannelIndex).TieNumericTextBox(  _("Channel Index:"), mChannelIndex );
+      S.Optional( bHasTrackIndex  ).TieNumericTextBox(  XO("Track Index:"),   mTrackIndex );
+      S.Optional( bHasChannelIndex).TieNumericTextBox(  XO("Channel Index:"), mChannelIndex );
    }
    S.EndMultiColumn();
 #endif
@@ -94,8 +98,8 @@ bool SetTrackBase::Apply(const CommandContext & context  )
 {
    long i = 0;// track counter
    long j = 0;// channel counter
-   auto tracks = context.GetProject()->GetTracks();
-   for ( auto t : tracks->Leaders() )
+   auto &tracks = TrackList::Get( context.project );
+   for ( auto t : tracks.Leaders() )
    {
       auto channels = TrackList::Channels(t);
       for ( auto channel : channels ) {
@@ -118,7 +122,12 @@ bool SetTrackBase::Apply(const CommandContext & context  )
    return true;
 }
 
-bool SetTrackStatusCommand::DefineParams( ShuttleParams & S ){ 
+const ComponentInterfaceSymbol SetTrackStatusCommand::Symbol
+{ XO("Set Track Status") };
+
+namespace{ BuiltinCommandsModule::Registration< SetTrackStatusCommand > reg; }
+
+bool SetTrackStatusCommand::DefineParams( ShuttleParams & S ){
    SetTrackBase::DefineParams( S );
    S.OptionalN( bHasTrackName      ).Define(     mTrackName,      wxT("Name"),       _("Unnamed") );
    // There is also a select command.  This is an alternative.
@@ -133,14 +142,14 @@ void SetTrackStatusCommand::PopulateOrExchange(ShuttleGui & S)
    S.StartMultiColumn(3, wxEXPAND);
    {
       S.SetStretchyCol( 2 );
-      S.Optional( bHasTrackName   ).TieTextBox(         _("Name:"),          mTrackName );
+      S.Optional( bHasTrackName   ).TieTextBox(         XXO("Name:"),          mTrackName );
    }
    S.EndMultiColumn();
    S.StartMultiColumn(2, wxEXPAND);
    {
       S.SetStretchyCol( 1 );
-      S.Optional( bHasSelected       ).TieCheckBox( _("Selected"),           bSelected );
-      S.Optional( bHasFocused        ).TieCheckBox( _("Focused"),            bFocused);
+      S.Optional( bHasSelected       ).TieCheckBox( XXO("Selected"),           bSelected );
+      S.Optional( bHasFocused        ).TieCheckBox( XXO("Focused"),            bFocused);
    }
    S.EndMultiColumn();
 }
@@ -163,17 +172,22 @@ bool SetTrackStatusCommand::ApplyInner(const CommandContext & context, Track * t
    if( !bIsSecondChannel ){
       if( bHasFocused )
       {
-         TrackPanel *panel = context.GetProject()->GetTrackPanel();
+         auto &trackFocus = TrackFocus::Get( context.project );
          if( bFocused)
-            panel->SetFocusedTrack( t );
-         else if( t== panel->GetFocusedTrack() )
-            panel->SetFocusedTrack( nullptr );
+            trackFocus.Set( t );
+         else if( t == trackFocus.Get() )
+            trackFocus.Set( nullptr );
       }
    }
    return true;
 }
 
 
+
+const ComponentInterfaceSymbol SetTrackAudioCommand::Symbol
+{ XO("Set Track Audio") };
+
+namespace{ BuiltinCommandsModule::Registration< SetTrackAudioCommand > reg2; }
 
 bool SetTrackAudioCommand::DefineParams( ShuttleParams & S ){ 
    SetTrackBase::DefineParams( S );
@@ -191,15 +205,15 @@ void SetTrackAudioCommand::PopulateOrExchange(ShuttleGui & S)
    S.StartMultiColumn(2, wxEXPAND);
    {
       S.SetStretchyCol( 1 );
-      S.Optional( bHasMute           ).TieCheckBox( _("Mute"),               bMute);
-      S.Optional( bHasSolo           ).TieCheckBox( _("Solo"),               bSolo);
+      S.Optional( bHasMute           ).TieCheckBox( XXO("Mute"),               bMute);
+      S.Optional( bHasSolo           ).TieCheckBox( XXO("Solo"),               bSolo);
    }
    S.EndMultiColumn();
    S.StartMultiColumn(3, wxEXPAND);
    {
       S.SetStretchyCol( 2 );
-      S.Optional( bHasGain        ).TieSlider(          _("Gain:"),          mGain, 36.0,-36.0);
-      S.Optional( bHasPan         ).TieSlider(          _("Pan:"),           mPan,  100.0, -100.0);
+      S.Optional( bHasGain        ).TieSlider(          XXO("Gain:"),          mGain, 36.0,-36.0);
+      S.Optional( bHasPan         ).TieSlider(          XXO("Pan:"),           mPan,  100.0, -100.0);
    }
    S.EndMultiColumn();
 }
@@ -227,6 +241,11 @@ bool SetTrackAudioCommand::ApplyInner(const CommandContext & context, Track * t 
 
 
 
+const ComponentInterfaceSymbol SetTrackVisualsCommand::Symbol
+{ XO("Set Track Visuals") };
+
+namespace{ BuiltinCommandsModule::Registration< SetTrackVisualsCommand > reg3; }
+
 enum kColours
 {
    kColour0,
@@ -244,20 +263,6 @@ static const EnumValueSymbol kColourStrings[nColours] =
    { wxT("Color3"), XO("Color 3") },
 };
 
-
-enum kDisplayTypes
-{
-   kWaveform,
-   kSpectrogram,
-   nDisplayTypes
-};
-
-static const EnumValueSymbol kDisplayTypeStrings[nDisplayTypes] =
-{
-   // These are acceptable dual purpose internal/visible names
-   { XO("Waveform") },
-   { XO("Spectrogram") },
-};
 
 enum kScaleTypes
 {
@@ -289,10 +294,24 @@ static const EnumValueSymbol kZoomTypeStrings[nZoomTypes] =
    { XO("HalfWave") },
 };
 
+static EnumValueSymbols DiscoverSubViewTypes()
+{
+   const auto &types = WaveTrackSubViewType::All();
+   auto result = transform_container< EnumValueSymbols >(
+      types, std::mem_fn( &WaveTrackSubView::Type::name ) );
+   result.push_back( WaveTrackViewConstants::MultiViewSymbol );
+   return result;
+}
+
 bool SetTrackVisualsCommand::DefineParams( ShuttleParams & S ){ 
    SetTrackBase::DefineParams( S );
-   S.OptionalN( bHasHeight         ).Define(     mHeight,         wxT("Height"),     120, 44, 700 );
-   S.OptionalN( bHasDisplayType    ).DefineEnum( mDisplayType,    wxT("Display"),    kWaveform, kDisplayTypeStrings, nDisplayTypes );
+   S.OptionalN( bHasHeight         ).Define(     mHeight,         wxT("Height"),     120, 44, 2000 );
+
+   {
+      auto symbols = DiscoverSubViewTypes();
+      S.OptionalN( bHasDisplayType    ).DefineEnum( mDisplayType,    wxT("Display"),    0, symbols.data(), symbols.size() );
+   }
+
    S.OptionalN( bHasScaleType      ).DefineEnum( mScaleType,      wxT("Scale"),      kLinear,   kScaleTypeStrings, nScaleTypes );
    S.OptionalN( bHasColour         ).DefineEnum( mColour,         wxT("Color"),      kColour0,  kColourStrings, nColours );
    S.OptionalN( bHasVZoom          ).DefineEnum( mVZoom,          wxT("VZoom"),      kReset,    kZoomTypeStrings, nZoomTypes );
@@ -301,7 +320,9 @@ bool SetTrackVisualsCommand::DefineParams( ShuttleParams & S ){
 
    S.OptionalN( bHasUseSpecPrefs   ).Define(     bUseSpecPrefs,   wxT("SpecPrefs"),  false );
    S.OptionalN( bHasSpectralSelect ).Define(     bSpectralSelect, wxT("SpectralSel"),true );
-   S.OptionalN( bHasGrayScale      ).Define(     bGrayScale,      wxT("GrayScale"),  false );
+
+   auto schemes = SpectrogramSettings::GetColorSchemeNames();
+   S.OptionalN( bHasSpecColorScheme).DefineEnum( mSpecColorScheme,wxT("SpecColor"),  SpectrogramSettings::csColorNew, schemes.data(), schemes.size());
 
    return true;
 };
@@ -312,25 +333,39 @@ void SetTrackVisualsCommand::PopulateOrExchange(ShuttleGui & S)
    S.StartMultiColumn(3, wxEXPAND);
    {
       S.SetStretchyCol( 2 );
-      S.Optional( bHasHeight      ).TieNumericTextBox(  _("Height:"),        mHeight );
-      S.Optional( bHasColour      ).TieChoice(          _("Colour:"),        mColour,
-         LocalizedStrings(  kColourStrings, nColours ) );
-      S.Optional( bHasDisplayType ).TieChoice(          _("Display:"),       mDisplayType,
-         LocalizedStrings( kDisplayTypeStrings, nDisplayTypes ) );
-      S.Optional( bHasScaleType   ).TieChoice(          _("Scale:"),         mScaleType,
-         LocalizedStrings( kScaleTypeStrings, nScaleTypes ) );
-      S.Optional( bHasVZoom       ).TieChoice(          _("VZoom:"),         mVZoom,
-         LocalizedStrings( kZoomTypeStrings, nZoomTypes ) );
-      S.Optional( bHasVZoomTop    ).TieTextBox(         _("VZoom Top:"),     mVZoomTop );
-      S.Optional( bHasVZoomBottom ).TieTextBox(         _("VZoom Bottom:"),  mVZoomBottom );
+      S.Optional( bHasHeight      ).TieNumericTextBox(  XXO("Height:"),        mHeight );
+      S.Optional( bHasColour      ).TieChoice(          XXO("Color:"),         mColour,
+         Msgids(  kColourStrings, nColours ) );
+      
+      {
+         auto symbols = DiscoverSubViewTypes();
+         auto typeNames = transform_container<TranslatableStrings>(
+             symbols, std::mem_fn( &EnumValueSymbol::Stripped ) );
+         S.Optional( bHasDisplayType ).TieChoice(          XXO("Display:"),       mDisplayType,
+            typeNames );
+      }
+
+      S.Optional( bHasScaleType   ).TieChoice(          XXO("Scale:"),         mScaleType,
+         Msgids( kScaleTypeStrings, nScaleTypes ) );
+      S.Optional( bHasVZoom       ).TieChoice(          XXO("VZoom:"),         mVZoom,
+         Msgids( kZoomTypeStrings, nZoomTypes ) );
+      S.Optional( bHasVZoomTop    ).TieTextBox(         XXO("VZoom Top:"),     mVZoomTop );
+      S.Optional( bHasVZoomBottom ).TieTextBox(         XXO("VZoom Bottom:"),  mVZoomBottom );
    }
    S.EndMultiColumn();
    S.StartMultiColumn(2, wxEXPAND);
    {
       S.SetStretchyCol( 1 );
-      S.Optional( bHasUseSpecPrefs   ).TieCheckBox( _("Use Spectral Prefs"), bUseSpecPrefs );
-      S.Optional( bHasSpectralSelect ).TieCheckBox( _("Spectral Select"),    bSpectralSelect);
-      S.Optional( bHasGrayScale      ).TieCheckBox( _("Gray Scale"),         bGrayScale );
+      S.Optional( bHasUseSpecPrefs   ).TieCheckBox( XXO("Use Spectral Prefs"), bUseSpecPrefs );
+      S.Optional( bHasSpectralSelect ).TieCheckBox( XXO("Spectral Select"),    bSpectralSelect);
+   }
+   S.EndMultiColumn();
+   S.StartMultiColumn(3, wxEXPAND);
+   {
+      S.SetStretchyCol( 2 );
+      auto schemes = SpectrogramSettings::GetColorSchemeNames();
+      S.Optional( bHasSpecColorScheme).TieChoice( XC("Sche&me", "spectrum prefs"), mSpecColorScheme,
+         Msgids( schemes.data(), schemes.size() ) );
    }
    S.EndMultiColumn();
 }
@@ -348,16 +383,20 @@ bool SetTrackVisualsCommand::ApplyInner(const CommandContext & context, Track * 
       wt->SetWaveColorIndex( mColour );
 
    if( t && bHasHeight )
-      t->SetHeight( mHeight );
+      TrackView::Get( *t ).SetHeight( mHeight );
 
-   if( wt && bHasDisplayType  )
-      wt->SetDisplay(
-         (mDisplayType == kWaveform) ?
-            WaveTrack::WaveTrackDisplayValues::Waveform
-            : WaveTrack::WaveTrackDisplayValues::Spectrum
-         );
+   if( wt && bHasDisplayType  ) {
+      auto &view = WaveTrackView::Get( *wt );
+      auto &all = WaveTrackSubViewType::All();
+      if (mDisplayType < all.size())
+         view.SetDisplay( all[ mDisplayType ].id );
+      else {
+         view.SetMultiView( true );
+         view.SetDisplay( WaveTrackSubViewType::Default(), false );
+      }
+   }
    if( wt && bHasScaleType )
-      wt->GetIndependentWaveformSettings().scaleType = 
+      wt->GetWaveformSettings().scaleType = 
          (mScaleType==kLinear) ? 
             WaveformSettings::stLinear
             : WaveformSettings::stLogarithmic;
@@ -395,8 +434,8 @@ bool SetTrackVisualsCommand::ApplyInner(const CommandContext & context, Track * 
          mVZoomTop = c + ZOOMLIMIT / 2.0;
       }
       wt->SetDisplayBounds(mVZoomBottom, mVZoomTop);
-      TrackPanel *const tp = ::GetActiveProject()->GetTrackPanel();
-      tp->UpdateVRulers();
+      auto &tp = TrackPanel::Get( context.project );
+      tp.UpdateVRulers();
    }
 
    if( wt && bHasUseSpecPrefs   ){
@@ -405,13 +444,18 @@ bool SetTrackVisualsCommand::ApplyInner(const CommandContext & context, Track * 
    if( wt && bHasSpectralSelect ){
       wt->GetSpectrogramSettings().spectralSelection = bSpectralSelect;
    }
-   if( wt && bHasGrayScale ){
-      wt->GetSpectrogramSettings().isGrayscale = bGrayScale;
+   if (wt && bHasSpecColorScheme) {
+      wt->GetSpectrogramSettings().colorScheme = (SpectrogramSettings::ColorScheme)mSpecColorScheme;
    }
 
    return true;
 }
 
+
+const ComponentInterfaceSymbol SetTrackCommand::Symbol
+{ XO("Set Track") };
+
+namespace{ BuiltinCommandsModule::Registration< SetTrackCommand > reg4; }
 
 SetTrackCommand::SetTrackCommand()
 {

@@ -8,8 +8,8 @@
 
 **********************************************************************/
 
-#include "Audacity.h" // for USE_* macros
-#include "Experimental.h"
+
+
 
 #ifndef __AUDACITY_MIXER_BOARD__
 #define __AUDACITY_MIXER_BOARD__
@@ -19,6 +19,8 @@
 
 #include "widgets/ASlider.h" // to inherit
 #include "commands/CommandManagerWindowClasses.h"
+
+#include "Prefs.h"
 
 class wxArrayString;
 class wxBitmapButton;
@@ -38,7 +40,7 @@ class MixerTrackSlider final : public ASlider
 public:
    MixerTrackSlider(wxWindow * parent,
                      wxWindowID id,
-                     const wxString &name,
+                     const TranslatableString &name,
                      const wxPoint & pos,
                      const wxSize & size,
                      const ASlider::Options &options = ASlider::Options{});
@@ -188,7 +190,7 @@ public:
 class MixerBoardFrame;
 class TrackList;
 
-class MixerBoard final : public wxWindow
+class MixerBoard final : public wxWindow, private PrefsListener
 {
    friend class MixerBoardFrame;
 
@@ -198,10 +200,10 @@ public:
                const wxPoint& pos = wxDefaultPosition,
                const wxSize& size = wxDefaultSize);
 
-   void UpdatePrefs();
+   void UpdatePrefs() override;
 
    // Add clusters for any tracks we're not yet showing.
-   // Update pointers for tracks we're aleady showing.
+   // Update pointers for tracks we're already showing.
    void UpdateTrackClusters();
 
    int GetTrackClustersWidth();
@@ -222,7 +224,7 @@ private:
    void ResetMeters(const bool bResetClipping);   
    void RemoveTrackCluster(size_t nIndex);
    void MakeButtonBitmap( wxMemoryDC & dc, wxBitmap & bitmap,
-      wxRect & bev, const wxString & str, bool up );
+      wxRect & bev, const TranslatableString & str, bool up );
    void CreateMuteSoloImages();
    int FindMixerTrackCluster(const PlayableTrack* pTrack,
                               MixerTrackCluster** hMixerTrackCluster) const;
@@ -277,6 +279,9 @@ private:
    void OnSize(wxSizeEvent &evt);
    void OnKeyEvent(wxKeyEvent &evt);
 
+   void SetWindowTitle();
+
+   AudacityProject *mProject;
 public:
    MixerBoard* mMixerBoard;
 

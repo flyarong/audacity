@@ -19,8 +19,9 @@
 *//*******************************************************************/
 
 
-#include "../Audacity.h"
+
 #include "FindClipping.h"
+#include "LoadEffects.h"
 
 #include <math.h>
 
@@ -29,17 +30,21 @@
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../widgets/valnum.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
 #include "../LabelTrack.h"
 #include "../WaveTrack.h"
-#include "../MemoryX.h"
 
 // Define keys, defaults, minimums, and maximums for the effect parameters
 //
 //     Name    Type  Key                     Def   Min   Max      Scale
 Param( Start,  int,  wxT("Duty Cycle Start"), 3,    1,    INT_MAX, 1   );
 Param( Stop,   int,  wxT("Duty Cycle End"),   3,    1,    INT_MAX, 1   );
+
+const ComponentInterfaceSymbol EffectFindClipping::Symbol
+{ XO("Find Clipping") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectFindClipping > reg; }
 
 EffectFindClipping::EffectFindClipping()
 {
@@ -55,17 +60,17 @@ EffectFindClipping::~EffectFindClipping()
 
 ComponentInterfaceSymbol EffectFindClipping::GetSymbol()
 {
-   return FINDCLIPPING_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectFindClipping::GetDescription()
+TranslatableString EffectFindClipping::GetDescription()
 {
-   return _("Creates labels where clipping is detected");
+   return XO("Creates labels where clipping is detected");
 }
 
-wxString EffectFindClipping::ManualPage()
+ManualPageID EffectFindClipping::ManualPage()
 {
-   return wxT("Find_Clipping");
+   return L"Find_Clipping";
 }
 
 // EffectDefinitionInterface implementation
@@ -106,7 +111,7 @@ bool EffectFindClipping::SetAutomationParameters(CommandParameters & parms)
 bool EffectFindClipping::Process()
 {
    std::shared_ptr<AddedAnalysisTrack> addedTrack;
-   Maybe<ModifiedAnalysisTrack> modifiedTrack;
+   Optional<ModifiedAnalysisTrack> modifiedTrack;
    const wxString name{ _("Clipping") };
 
    auto clt = *inputTracks()->Any< const LabelTrack >().find_if(
@@ -116,7 +121,7 @@ bool EffectFindClipping::Process()
    if (!clt)
       addedTrack = (AddAnalysisTrack(name)), lt = addedTrack->get();
    else
-      modifiedTrack.create(ModifyAnalysisTrack(clt, name)),
+      modifiedTrack.emplace(ModifyAnalysisTrack(clt, name)),
       lt = modifiedTrack->get();
 
    int count = 0;
@@ -172,7 +177,7 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
       buffer.reinit(blockSize);
    }
    catch( const std::bad_alloc & ) {
-      Effect::MessageBox(_("Requested value exceeds memory capacity."));
+      Effect::MessageBox( XO("Requested value exceeds memory capacity.") );
       return false;
    }
 
@@ -193,7 +198,7 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
 
          block = limitSampleBufferSize( blockSize, len - s );
 
-         wt->Get((samplePtr)buffer.get(), floatSample, start + s, block);
+         wt->GetFloats(buffer.get(), start + s, block);
          ptr = buffer.get();
       }
 
@@ -217,8 +222,7 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
             if (stoprun >= mStop) {
                lt->AddLabel(SelectedRegion(startTime,
                                           wt->LongSamplesToTime(start + s - mStop)),
-                           wxString::Format(wxT("%lld of %lld"), startrun.as_long_long(), (samps - mStop).as_long_long()),
-                           -2);
+                           wxString::Format(wxT("%lld of %lld"), startrun.as_long_long(), (samps - mStop).as_long_long()));
                startrun = 0;
                stoprun = 0;
                samps = 0;
@@ -240,17 +244,13 @@ void EffectFindClipping::PopulateOrExchange(ShuttleGui & S)
 {
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      IntegerValidator<int> vldStart(&mStart);
-      vldStart.SetMin(MIN_Start);
-      S.TieTextBox(_("Start threshold (samples):"),
-                   mStart,
-                   10)->SetValidator(vldStart);
+      S.Validator<IntegerValidator<int>>(
+            &mStart, NumValidatorStyle::DEFAULT, MIN_Start)
+         .TieTextBox(XXO("&Start threshold (samples):"), mStart, 10);
 
-      IntegerValidator<int> vldStop(&mStop);
-      vldStop.SetMin(MIN_Stop);
-      S.TieTextBox(_("Stop threshold (samples):"),
-                   mStop,
-                   10)->SetValidator(vldStop);
+      S.Validator<IntegerValidator<int>>(
+            &mStop, NumValidatorStyle::DEFAULT, MIN_Stop)
+         .TieTextBox(XXO("St&op threshold (samples):"), mStop, 10);
    }
    S.EndMultiColumn();
 }

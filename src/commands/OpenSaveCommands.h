@@ -16,49 +16,107 @@
 \class SaveProjectCommand
 \brief Command for saving an Audacity project
 
+\class SaveCopyCommand
+\brief Command for saving a copy of currently project
+
+\class SaveLogCommand
+\brief Command for saving the log contents
+
 *//*******************************************************************/
 
 #include "Command.h"
 #include "CommandType.h"
 
-#define OPEN_PROJECT_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Open Project2") }
-
 class OpenProjectCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return OPEN_PROJECT_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Opens a project.");};
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Opens a project.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
    bool Apply(const CommandContext & context) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#open_project");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#open_project";}
 public:
    wxString mFileName;
    bool mbAddToHistory;
    bool bHasAddToHistory;
 };
 
-#define SAVE_PROJECT_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Save Project2") }
-
 class SaveProjectCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SAVE_PROJECT_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Saves a project.");};
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Saves a project.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
    bool Apply(const CommandContext & context) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#save_project");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#save_project";}
 public:
    wxString mFileName;
    bool mbAddToHistory;
-   bool mbCompress;
    bool bHasAddToHistory;
-   bool bHasCompress;
+};
+
+class SaveCopyCommand : public AudacityCommand
+{
+public:
+   static const ComponentInterfaceSymbol Symbol;
+
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Saves a copy of current project.");};
+   bool DefineParams( ShuttleParams & S ) override;
+   void PopulateOrExchange(ShuttleGui & S) override;
+   bool Apply(const CommandContext & context) override;
+
+   // AudacityCommand overrides
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#save_copy";}
+public:
+   wxString mFileName;
+};
+
+class SaveLogCommand : public AudacityCommand
+{
+public:
+   static const ComponentInterfaceSymbol Symbol;
+
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Saves the log contents.");};
+   bool DefineParams( ShuttleParams & S ) override;
+   void PopulateOrExchange(ShuttleGui & S) override;
+   bool Apply(const CommandContext & context) override;
+
+   // AudacityCommand overrides
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#save_log";}
+public:
+   wxString mFileName;
+};
+
+class ClearLogCommand : public AudacityCommand
+{
+public:
+   static const ComponentInterfaceSymbol Symbol;
+
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Clears the log contents.");};
+   bool DefineParams( ShuttleParams & S ) override;
+   bool PromptUser(wxWindow *parent) override;
+   bool Apply(const CommandContext & context) override;
+
+   // AudacityCommand overrides
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#Clear_log";}
+public:
+   wxString mFileName;
 };

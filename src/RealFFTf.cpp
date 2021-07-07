@@ -36,10 +36,10 @@
 *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
-#include "Audacity.h"
+
 #include "RealFFTf.h"
 
-#include "Experimental.h"
+
 
 #include <vector>
 #include <stdlib.h>
@@ -47,10 +47,6 @@
 #include <math.h>
 
 #include <wx/thread.h>
-
-#ifdef EXPERIMENTAL_EQ_SSE_THREADED
-#include "RealFFTf48x.h"
-#endif
 
 #ifndef M_PI
 #define	M_PI		3.14159265358979323846  /* pi */

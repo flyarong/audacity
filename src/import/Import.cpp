@@ -15,7 +15,7 @@
   and return the tracks that were imported.  This function just
   figures out which one to call; the actual importers are in
   ImportPCM, ImportMP3, ImportOGG, ImportRawData, ImportLOF,
-  ImportQT and ImportFLAC.
+  ImportQT, ImportFLAC and ImportAUP.
 
 *//***************************************************************//**
 
@@ -27,19 +27,21 @@ It's defined in Import.h
 *//***************************************************************//**
 
 \class Importer
-\brief Class which actulaly imports the auido, using functions defined
+\brief Class which actually imports the auido, using functions defined
 in ImportPCM.cpp, ImportMP3.cpp, ImportOGG.cpp, ImportRawData.cpp,
-and ImportLOF.cpp.
+ImportLOF.cpp, and ImportAUP.cpp.
 
 *//******************************************************************/
 
 
 
-#include "../Audacity.h" // for USE_* macros
+
 #include "Import.h"
+
 #include "ImportPlugin.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 #include <wx/textctrl.h>
 #include <wx/string.h>
@@ -47,22 +49,17 @@ and ImportLOF.cpp.
 #include <wx/listbox.h>
 #include <wx/log.h>
 #include <wx/sizer.h>         //for wxBoxSizer
+#include "../FFmpeg.h"
+#include "../FileNames.h"
 #include "../ShuttleGui.h"
 #include "../Project.h"
 #include "../WaveTrack.h"
 
-#include "ImportPCM.h"
-#include "ImportMP3.h"
-#include "ImportOGG.h"
-#include "ImportQT.h"
-#include "ImportRaw.h"
-#include "ImportLOF.h"
-#include "ImportFLAC.h"
-#include "ImportFFmpeg.h"
-#include "ImportGStreamer.h"
 #include "../Prefs.h"
 
 #include "../widgets/ProgressDialog.h"
+
+using NewChannelGroup = std::vector< std::shared_ptr<WaveTrack> >;
 
 // ============================================================================
 //
@@ -84,30 +81,87 @@ Importer::~Importer()
 {
 }
 
+ImportPluginList &Importer::sImportPluginList()
+{
+   static ImportPluginList theList;
+   return theList;
+}
+
+namespace {
+static const auto PathStart = wxT("Importers");
+
+static Registry::GroupItem &sRegistry()
+{
+   static Registry::TransparentGroupItem<> registry{ PathStart };
+   return registry;
+}
+
+struct ImporterItem final : Registry::SingleItem {
+   ImporterItem( const Identifier &id, std::unique_ptr<ImportPlugin> pPlugin )
+      : SingleItem{ id }
+      , mpPlugin{ std::move( pPlugin ) }
+   {}
+
+   std::unique_ptr<ImportPlugin> mpPlugin;
+};
+}
+
+Importer::RegisteredImportPlugin::RegisteredImportPlugin(
+   const Identifier &id,
+   std::unique_ptr<ImportPlugin> pPlugin,
+   const Registry::Placement &placement )
+{
+   if ( pPlugin )
+      Registry::RegisterItem( sRegistry(), placement,
+         std::make_unique< ImporterItem >( id, std::move( pPlugin ) ) );
+}
+
+UnusableImportPluginList &Importer::sUnusableImportPluginList()
+{
+   static UnusableImportPluginList theList;
+   return theList;
+}
+
+Importer::RegisteredUnusableImportPlugin::RegisteredUnusableImportPlugin(
+   std::unique_ptr<UnusableImportPlugin> pPlugin )
+{
+   if ( pPlugin )
+      sUnusableImportPluginList().emplace_back( std::move( pPlugin ) );
+}
+
 bool Importer::Initialize()
 {
-   ImportPluginList{}.swap(mImportPluginList);
-   UnusableImportPluginList{}.swap(mUnusableImportPluginList);
-   ExtImportItems{}.swap(mExtImportItems);
-
    // build the list of import plugin and/or unusableImporters.
    // order is significant.  If none match, they will all be tried
    // in the order defined here.
-   GetPCMImportPlugin(mImportPluginList, mUnusableImportPluginList);
-   GetOGGImportPlugin(mImportPluginList, mUnusableImportPluginList);
-   GetFLACImportPlugin(mImportPluginList, mUnusableImportPluginList);
-   GetMP3ImportPlugin(mImportPluginList, mUnusableImportPluginList);
-   GetLOFImportPlugin(mImportPluginList, mUnusableImportPluginList);
 
-   #if defined(USE_FFMPEG)
-   GetFFmpegImportPlugin(mImportPluginList, mUnusableImportPluginList);
-   #endif
-   #ifdef USE_QUICKTIME
-   GetQTImportPlugin(mImportPluginList, mUnusableImportPluginList);
-   #endif
-   #if defined(USE_GSTREAMER)
-   GetGStreamerImportPlugin(mImportPluginList, mUnusableImportPluginList);
-   #endif
+   using namespace Registry;
+   static OrderingPreferenceInitializer init{
+      PathStart,
+      { {wxT(""), wxT("AUP,PCM,OGG,FLAC,MP3,LOF,FFmpeg") } }
+      // QT and GStreamer are only conditionally compiled and would get
+      // placed at the end if present
+   };
+   
+   static struct MyVisitor final : Visitor {
+      MyVisitor()
+      {
+         // Once only, visit the registry to collect the plug-ins properly
+         // sorted
+         TransparentGroupItem<> top{ PathStart };
+         Registry::Visit( *this, &top, &sRegistry() );
+      }
+
+      void Visit( SingleItem &item, const Path &path ) override
+      {
+         sImportPluginList().push_back(
+            static_cast<ImporterItem&>( item ).mpPlugin.get() );
+      }
+   } visitor;
+
+   // Ordering of the unusable plugin list is not important.
+
+   ExtImportItems{}.swap(mExtImportItems);
 
    ReadImportItems();
 
@@ -117,19 +171,91 @@ bool Importer::Initialize()
 bool Importer::Terminate()
 {
    WriteImportItems();
-   ImportPluginList{}.swap( mImportPluginList );
-   UnusableImportPluginList{}.swap( mUnusableImportPluginList );
 
    return true;
 }
 
-void Importer::GetSupportedImportFormats(FormatList *formatList)
+FileNames::FileTypes
+Importer::GetFileTypes( const FileNames::FileType &extraType )
 {
-   for(const auto &importPlugin : mImportPluginList)
+   // Construct the filter
+   FileNames::FileTypes fileTypes{
+      FileNames::AllFiles,
+      // Will fill in the list of extensions later:
+      { XO("All supported files"), {} },
+      FileNames::AudacityProjects
+   };
+
+   if ( !extraType.extensions.empty() )
+      fileTypes.push_back( extraType );
+ 
+   FileNames::FileTypes l;
+   for(const auto &importPlugin : sImportPluginList())
    {
-      formatList->emplace_back(importPlugin->GetPluginFormatDescription(),
+      l.emplace_back(importPlugin->GetPluginFormatDescription(),
                                importPlugin->GetSupportedExtensions());
    }
+
+   FileExtensions extraExtensions = FileNames::AudacityProjects.extensions;
+   extraExtensions.insert(extraExtensions.end(),
+                          extraType.extensions.begin(),
+                          extraType.extensions.end());
+
+   using ExtensionSet = std::unordered_set< FileExtension >;
+   FileExtensions allList = FileNames::AudacityProjects.extensions, newList;
+   allList.insert(allList.end(), extraType.extensions.begin(), extraType.extensions.end());
+   ExtensionSet allSet{ allList.begin(), allList.end() }, newSet;
+   for ( const auto &format : l ) {
+      newList.clear();
+      newSet.clear();
+      for ( const auto &extension : format.extensions ) {
+         if ( newSet.insert( extension ).second )
+            newList.push_back( extension );
+         if ( allSet.insert( extension ).second )
+            allList.push_back( extension );
+      }
+      fileTypes.push_back( { format.description, newList } );
+   }
+
+   fileTypes[1].extensions = allList;
+   return fileTypes;
+}
+
+void Importer::SetLastOpenType( const FileNames::FileType &type )
+{
+   // PRL:  Preference key /LastOpenType, unusually, stores a localized
+   // string!
+   // The bad consequences of a change of locale are not severe -- only that
+   // a default choice of file type for an open dialog is not remembered
+   gPrefs->Write(wxT("/LastOpenType"), type.description.Translation());
+   gPrefs->Flush();
+}
+
+void Importer::SetDefaultOpenType( const FileNames::FileType &type )
+{
+   // PRL:  Preference key /DefaultOpenType, unusually, stores a localized
+   // string!
+   // The bad consequences of a change of locale are not severe -- only that
+   // a default choice of file type for an open dialog is not remembered
+   gPrefs->Write(wxT("/DefaultOpenType"), type.description.Translation());
+   gPrefs->Flush();
+}
+
+size_t Importer::SelectDefaultOpenType( const FileNames::FileTypes &fileTypes )
+{
+   wxString defaultValue;
+   if ( !fileTypes.empty() )
+      defaultValue = fileTypes[0].description.Translation();
+
+   wxString type = gPrefs->Read(wxT("/DefaultOpenType"), defaultValue);
+   // Convert the type to the filter index
+   auto begin = fileTypes.begin();
+   auto index = std::distance(
+      begin,
+      std::find_if( begin, fileTypes.end(),
+         [&type](const FileNames::FileType &fileType){
+            return fileType.description.Translation() == type; } ) );
+   return (index == fileTypes.size()) ? 0 : index;
 }
 
 void Importer::StringToList(wxString &str, wxString &delims, wxArrayString &list, wxStringTokenizerMode mod)
@@ -207,11 +333,11 @@ void Importer::ReadImportItems()
       for (size_t i = 0; i < new_item->filters.size(); i++)
       {
          bool found = false;
-         for (const auto &importPlugin : mImportPluginList)
+         for (const auto &importPlugin : sImportPluginList())
          {
             if (importPlugin->GetPluginStringID() == new_item->filters[i])
             {
-               new_item->filter_objects.push_back(importPlugin.get());
+               new_item->filter_objects.push_back(importPlugin);
                found = true;
                break;
             }
@@ -221,12 +347,12 @@ void Importer::ReadImportItems()
            new_item->filter_objects.push_back(nullptr);
       }
       /* Find all filter objects that are not present in the filter list */
-      for (const auto &importPlugin : mImportPluginList)
+      for (const auto &importPlugin : sImportPluginList())
       {
          bool found = false;
          for (size_t i = 0; i < new_item->filter_objects.size(); i++)
          {
-            if (importPlugin.get() == new_item->filter_objects[i])
+            if (importPlugin == new_item->filter_objects[i])
             {
                found = true;
                break;
@@ -242,7 +368,7 @@ void Importer::ReadImportItems()
                new_item->filters.begin() + index,
                importPlugin->GetPluginStringID());
             new_item->filter_objects.insert(
-               new_item->filter_objects.begin() + index, importPlugin.get());
+               new_item->filter_objects.begin() + index, importPlugin);
             if (new_item->divider >= 0)
                new_item->divider++;
          }
@@ -318,44 +444,46 @@ std::unique_ptr<ExtImportItem> Importer::CreateDefaultImportItem()
    new_item->extensions.push_back(wxT("*"));
    new_item->mime_types.push_back(wxT("*"));
 
-   for (const auto &importPlugin : mImportPluginList)
+   for (const auto &importPlugin : sImportPluginList())
    {
       new_item->filters.push_back(importPlugin->GetPluginStringID());
-      new_item->filter_objects.push_back(importPlugin.get());
+      new_item->filter_objects.push_back(importPlugin);
    }
    new_item->divider = -1;
    return new_item;
 }
 
-bool Importer::IsMidi(const FilePath &fName)
-{
-   const auto extension = fName.AfterLast(wxT('.'));
-   return
-      extension.IsSameAs(wxT("gro"), false) ||
-      extension.IsSameAs(wxT("midi"), false) ||
-      extension.IsSameAs(wxT("mid"), false);
-}
-
 // returns number of tracks imported
-bool Importer::Import(const FilePath &fName,
-                     TrackFactory *trackFactory,
+bool Importer::Import( AudacityProject &project,
+                     const FilePath &fName,
+                     WaveTrackFactory *trackFactory,
                      TrackHolders &tracks,
                      Tags *tags,
-                     wxString &errorMessage)
+                     TranslatableString &errorMessage)
 {
-   AudacityProject *pProj = GetActiveProject();
+   AudacityProject *pProj = &project;
    auto cleanup = valueRestorer( pProj->mbBusyImporting, true );
 
-   wxString extension = fName.AfterLast(wxT('.'));
+   const FileExtension extension{ fName.AfterLast(wxT('.')) };
 
    // Always refuse to import MIDI, even though the FFmpeg plugin pretends to know how (but makes very bad renderings)
 #ifdef USE_MIDI
    // MIDI files must be imported, not opened
-   if (IsMidi(fName)) {
-      errorMessage.Printf(_("\"%s\" \nis a MIDI file, not an audio file. \nAudacity cannot open this type of file for playing, but you can\nedit it by clicking File > Import > MIDI."), fName);
+   if (FileNames::IsMidi(fName)) {
+      errorMessage = XO(
+"\"%s\" \nis a MIDI file, not an audio file. \nAudacity cannot open this type of file for playing, but you can\nedit it by clicking File > Import > MIDI.")
+         .Format( fName );
       return false;
    }
 #endif
+
+   // Bug #2647: Peter has a Word 2000 .doc file that is recognized and imported by FFmpeg.
+   if (wxFileName(fName).GetExt() == wxT("doc")) {
+      errorMessage =
+         XO("\"%s\" \nis a not an audio file. \nAudacity cannot open this type of file.")
+         .Format( fName );
+      return false;
+   }
 
    using ImportPluginPtrs = std::vector< ImportPlugin* >;
 
@@ -365,10 +493,6 @@ bool Importer::Import(const FilePath &fName,
    // This list is used to remember plugins that should have been compatible with the file.
    ImportPluginPtrs compatiblePlugins;
 
-   // If user explicitly selected a filter,
-   // then we should try importing via corresponding plugin first
-   wxString type = gPrefs->Read(wxT("/LastOpenType"),wxT(""));
-
    // Not implemented (yet?)
    wxString mime_type = wxT("*");
 
@@ -376,18 +500,22 @@ bool Importer::Import(const FilePath &fName,
    bool usersSelectionOverrides;
    gPrefs->Read(wxT("/ExtendedImport/OverrideExtendedImportByOpenFileDialogChoice"), &usersSelectionOverrides, false);
 
-   wxLogDebug(wxT("LastOpenType is %s"),type);
-   wxLogDebug(wxT("OverrideExtendedImportByOpenFileDialogChoice is %i"),usersSelectionOverrides);
-
    if (usersSelectionOverrides)
    {
-      for (const auto &plugin : mImportPluginList)
+      // If user explicitly selected a filter,
+      // then we should try importing via corresponding plugin first
+      wxString type = gPrefs->Read(wxT("/LastOpenType"),wxT(""));
+
+      wxLogDebug(wxT("LastOpenType is %s"),type);
+      wxLogDebug(wxT("OverrideExtendedImportByOpenFileDialogChoice is %i"),usersSelectionOverrides);
+
+      for (const auto &plugin : sImportPluginList())
       {
-         if (plugin->GetPluginFormatDescription().CompareTo(type) == 0)
+         if (plugin->GetPluginFormatDescription().Translation() == type )
          {
             // This plugin corresponds to user-selected filter, try it first.
             wxLogDebug(wxT("Inserting %s"),plugin->GetPluginStringID());
-            importPlugins.insert(importPlugins.begin(), plugin.get());
+            importPlugins.insert(importPlugins.begin(), plugin);
          }
       }
    }
@@ -450,63 +578,29 @@ bool Importer::Import(const FilePath &fName,
    }
 
    // Add all plugins that support the extension
-
-   // Here we rely on the fact that the first plugin in mImportPluginList is libsndfile.
-   // We want to save this for later insertion ahead of libmad, if libmad supports the extension.
-   // The order of plugins in mImportPluginList is determined by the Importer constructor alone and
-   // is not changed by user selection overrides or any other mechanism, but we include an assert
-   // in case subsequent code revisions to the constructor should break this assumption that
-   // libsndfile is first.
-   ImportPlugin *libsndfilePlugin = mImportPluginList.begin()->get();
-   wxASSERT(libsndfilePlugin->GetPluginStringID() == wxT("libsndfile"));
-
-   for (const auto &plugin : mImportPluginList)
+   for (const auto &plugin : sImportPluginList())
    {
       // Make sure its not already in the list
       if (importPlugins.end() ==
-          std::find(importPlugins.begin(), importPlugins.end(), plugin.get()))
+          std::find(importPlugins.begin(), importPlugins.end(), plugin))
       {
          if (plugin->SupportsExtension(extension))
          {
-            // If libmad is accidentally fed a wav file which has been incorrectly
-            // given an .mp3 extension then it can choke on the contents and crash.
-            // To avoid this, put libsndfile ahead of libmad in the lists created for
-            // mp3 files, or for any of the extensions supported by libmad.
-            // A genuine .mp3 file will first fail an attempted import with libsndfile
-            // but then get processed as desired by libmad.
-            // But a wav file which bears an incorrect .mp3 extension will be successfully
-            // processed by libsndfile and thus avoid being submitted to libmad.
-            if (plugin->GetPluginStringID() == wxT("libmad"))
-            {
-               // Make sure libsndfile is not already in the list
-               if (importPlugins.end() ==
-                   std::find(importPlugins.begin(), importPlugins.end(), libsndfilePlugin))
-               {
-                  wxLogDebug(wxT("Appending %s"),libsndfilePlugin->GetPluginStringID());
-                  importPlugins.push_back(libsndfilePlugin);
-               }
-            }
             wxLogDebug(wxT("Appending %s"),plugin->GetPluginStringID());
-            importPlugins.push_back(plugin.get());
+            importPlugins.push_back(plugin);
          }
       }
    }
 
-   // Add remaining plugins, except for libmad, which should not be used as a fallback for anything.
-   // Otherwise, if FFmpeg (libav) has not been installed, libmad will still be there near the
-   // end of the preference list importPlugins, where it will claim success importing FFmpeg file
-   // formats unsuitable for it, and produce distorted results.
-   for (const auto &plugin : mImportPluginList)
+   // Add remaining plugins
+   for (const auto &plugin : sImportPluginList())
    {
-      if (!(plugin->GetPluginStringID() == wxT("libmad")))
+      // Make sure its not already in the list
+      if (importPlugins.end() ==
+            std::find(importPlugins.begin(), importPlugins.end(), plugin))
       {
-         // Make sure its not already in the list
-         if (importPlugins.end() ==
-             std::find(importPlugins.begin(), importPlugins.end(), plugin.get()))
-         {
-            wxLogDebug(wxT("Appending %s"),plugin->GetPluginStringID());
-            importPlugins.push_back(plugin.get());
-         }
+         wxLogDebug(wxT("Appending %s"),plugin->GetPluginStringID());
+         importPlugins.push_back(plugin);
       }
    }
 
@@ -515,14 +609,14 @@ bool Importer::Import(const FilePath &fName,
    {
       // Try to open the file with this plugin (probe it)
       wxLogMessage(wxT("Opening with %s"),plugin->GetPluginStringID());
-      auto inFile = plugin->Open(fName);
+      auto inFile = plugin->Open(fName, pProj);
       if ( (inFile != NULL) && (inFile->GetStreamCount() > 0) )
       {
          wxLogMessage(wxT("Open(%s) succeeded"), fName);
          // File has more than one stream - display stream selector
          if (inFile->GetStreamCount() > 1)
          {
-            ImportStreamDialog ImportDlg(inFile.get(), NULL, -1, _("Select stream(s) to import"));
+            ImportStreamDialog ImportDlg(inFile.get(), NULL, -1, XO("Select stream(s) to import"));
 
             if (ImportDlg.ShowModal() == wxID_CANCEL)
             {
@@ -539,6 +633,12 @@ bool Importer::Import(const FilePath &fName,
          {
             // LOF ("list-of-files") has different semantics
             if (extension.IsSameAs(wxT("lof"), false))
+            {
+               return true;
+            }
+
+            // AUP ("legacy projects") have different semantics
+            if (extension.IsSameAs(wxT("aup"), false))
             {
                return true;
             }
@@ -575,13 +675,12 @@ bool Importer::Import(const FilePath &fName,
    // None of our plugins can handle this file.  It might be that
    // Audacity supports this format, but support was not compiled in.
    // If so, notify the user of this fact
-   for (const auto &unusableImportPlugin : mUnusableImportPluginList)
+   for (const auto &unusableImportPlugin : sUnusableImportPluginList())
    {
       if( unusableImportPlugin->SupportsExtension(extension) )
       {
-         errorMessage.Printf(_("This version of Audacity was not compiled with %s support."),
-                             unusableImportPlugin->
-                             GetPluginFormatDescription());
+         errorMessage = XO("This version of Audacity was not compiled with %s support.")
+            .Format( unusableImportPlugin->GetPluginFormatDescription() );
          return false;
       }
    }
@@ -592,97 +691,142 @@ bool Importer::Import(const FilePath &fName,
    {
       // if someone has sent us a .cda file, send them away
       if (extension.IsSameAs(wxT("cda"), false)) {
-         /* i18n-hint: %s will be the filename */
-         errorMessage.Printf(_("\"%s\" is an audio CD track. \nAudacity cannot open audio CDs directly. \nExtract (rip) the CD tracks to an audio format that \nAudacity can import, such as WAV or AIFF."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is an audio CD track. \nAudacity cannot open audio CDs directly. \nExtract (rip) the CD tracks to an audio format that \nAudacity can import, such as WAV or AIFF.")
+            .Format( fName );
          return false;
       }
 
       // playlist type files
       if ((extension.IsSameAs(wxT("m3u"), false))||(extension.IsSameAs(wxT("ram"), false))||(extension.IsSameAs(wxT("pls"), false))) {
-         errorMessage.Printf(_("\"%s\" is a playlist file. \nAudacity cannot open this file because it only contains links to other files. \nYou may be able to open it in a text editor and download the actual audio files."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is a playlist file. \nAudacity cannot open this file because it only contains links to other files. \nYou may be able to open it in a text editor and download the actual audio files.")
+            .Format( fName );
          return false;
       }
       //WMA files of various forms
       if ((extension.IsSameAs(wxT("wma"), false))||(extension.IsSameAs(wxT("asf"), false))) {
-         errorMessage.Printf(_("\"%s\" is a Windows Media Audio file. \nAudacity cannot open this type of file due to patent restrictions. \nYou need to convert it to a supported audio format, such as WAV or AIFF."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is a Windows Media Audio file. \nAudacity cannot open this type of file due to patent restrictions. \nYou need to convert it to a supported audio format, such as WAV or AIFF.")
+            .Format( fName );
          return false;
       }
       //AAC files of various forms (probably not encrypted)
       if ((extension.IsSameAs(wxT("aac"), false))||(extension.IsSameAs(wxT("m4a"), false))||(extension.IsSameAs(wxT("m4r"), false))||(extension.IsSameAs(wxT("mp4"), false))) {
-         errorMessage.Printf(_("\"%s\" is an Advanced Audio Coding file. \nAudacity cannot open this type of file. \nYou need to convert it to a supported audio format, such as WAV or AIFF."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is an Advanced Audio Coding file.\nWithout the optional FFmpeg library, Audacity cannot open this type of file.\nOtherwise, you need to convert it to a supported audio format, such as WAV or AIFF.")
+            .Format( fName );
          return false;
       }
       // encrypted itunes files
       if ((extension.IsSameAs(wxT("m4p"), false))) {
-         errorMessage.Printf(_("\"%s\" is an encrypted audio file. \nThese typically are from an online music store. \nAudacity cannot open this type of file due to the encryption. \nTry recording the file into Audacity, or burn it to audio CD then \nextract the CD track to a supported audio format such as WAV or AIFF."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is an encrypted audio file. \nThese typically are from an online music store. \nAudacity cannot open this type of file due to the encryption. \nTry recording the file into Audacity, or burn it to audio CD then \nextract the CD track to a supported audio format such as WAV or AIFF.")
+            .Format( fName );
          return false;
       }
       // Real Inc. files of various sorts
       if ((extension.IsSameAs(wxT("ra"), false))||(extension.IsSameAs(wxT("rm"), false))||(extension.IsSameAs(wxT("rpm"), false))) {
-         errorMessage.Printf(_("\"%s\" is a RealPlayer media file. \nAudacity cannot open this proprietary format. \nYou need to convert it to a supported audio format, such as WAV or AIFF."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is a RealPlayer media file. \nAudacity cannot open this proprietary format. \nYou need to convert it to a supported audio format, such as WAV or AIFF.")
+            .Format( fName );
          return false;
       }
 
       // Other notes-based formats
       if ((extension.IsSameAs(wxT("kar"), false))||(extension.IsSameAs(wxT("mod"), false))||(extension.IsSameAs(wxT("rmi"), false))) {
-         errorMessage.Printf(_("\"%s\" is a notes-based file, not an audio file. \nAudacity cannot open this type of file. \nTry converting it to an audio file such as WAV or AIFF and \nthen import it, or record it into Audacity."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is a notes-based file, not an audio file. \nAudacity cannot open this type of file. \nTry converting it to an audio file such as WAV or AIFF and \nthen import it, or record it into Audacity.")
+            .Format( fName );
          return false;
       }
 
       // MusePack files
       if ((extension.IsSameAs(wxT("mp+"), false))||(extension.IsSameAs(wxT("mpc"), false))||(extension.IsSameAs(wxT("mpp"), false))) {
-         errorMessage.Printf(_("\"%s\" is a Musepack audio file. \nAudacity cannot open this type of file. \nIf you think it might be an mp3 file, rename it to end with \".mp3\" \nand try importing it again. Otherwise you need to convert it to a supported audio \nformat, such as WAV or AIFF."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is a Musepack audio file. \nAudacity cannot open this type of file. \nIf you think it might be an mp3 file, rename it to end with \".mp3\" \nand try importing it again. Otherwise you need to convert it to a supported audio \nformat, such as WAV or AIFF.")
+            .Format( fName );
          return false;
       }
 
       // WavPack files
       if ((extension.IsSameAs(wxT("wv"), false))||(extension.IsSameAs(wxT("wvc"), false))) {
-         errorMessage.Printf(_("\"%s\" is a Wavpack audio file. \nAudacity cannot open this type of file. \nYou need to convert it to a supported audio format, such as WAV or AIFF."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is a Wavpack audio file. \nAudacity cannot open this type of file. \nYou need to convert it to a supported audio format, such as WAV or AIFF.")
+            .Format( fName );
          return false;
       }
 
       // AC3 files
       if ((extension.IsSameAs(wxT("ac3"), false))) {
-         errorMessage.Printf(_("\"%s\" is a Dolby Digital audio file. \nAudacity cannot currently open this type of file. \nYou need to convert it to a supported audio format, such as WAV or AIFF."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is a Dolby Digital audio file. \nAudacity cannot currently open this type of file. \nYou need to convert it to a supported audio format, such as WAV or AIFF.")
+            .Format( fName );
          return false;
       }
 
       // Speex files
       if ((extension.IsSameAs(wxT("spx"), false))) {
-         errorMessage.Printf(_("\"%s\" is an Ogg Speex audio file. \nAudacity cannot currently open this type of file. \nYou need to convert it to a supported audio format, such as WAV or AIFF."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is an Ogg Speex audio file. \nAudacity cannot currently open this type of file. \nYou need to convert it to a supported audio format, such as WAV or AIFF.")
+            .Format( fName );
          return false;
       }
 
       // Video files of various forms
       if ((extension.IsSameAs(wxT("mpg"), false))||(extension.IsSameAs(wxT("mpeg"), false))||(extension.IsSameAs(wxT("avi"), false))||(extension.IsSameAs(wxT("wmv"), false))||(extension.IsSameAs(wxT("rv"), false))) {
-         errorMessage.Printf(_("\"%s\" is a video file. \nAudacity cannot currently open this type of file. \nYou need to extract the audio to a supported format, such as WAV or AIFF."), fName);
+         errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"\"%s\" is a video file. \nAudacity cannot currently open this type of file. \nYou need to extract the audio to a supported format, such as WAV or AIFF.")
+            .Format( fName );
          return false;
       }
 
-      // Audacity project
-      if (extension.IsSameAs(wxT("aup"), false)) {
-         errorMessage.Printf(_("\"%s\" is an Audacity Project file. \nUse the 'File > Open' command to open Audacity Projects."), fName);
+      if( !wxFileExists(fName)){
+         errorMessage = XO( "File \"%s\" not found.").Format( fName );
          return false;
       }
 
       // we were not able to recognize the file type
-      errorMessage.Printf(_("Audacity did not recognize the type of the file '%s'.\nTry installing FFmpeg. For uncompressed files, also try File > Import > Raw Data."),fName);
+      errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"Audacity did not recognize the type of the file '%s'.\n\n%sFor uncompressed files, also try File > Import > Raw Data.")
+         .Format( fName,
+#if defined(USE_FFMPEG)
+                  !FFmpegLibsInst()
+                  ? XO("Try installing FFmpeg.\n\n") :
+#endif
+                  Verbatim("") );
    }
    else
    {
       // We DO have a plugin for this file, but import failed.
-      wxString pluglist;
+      TranslatableString pluglist;
 
       for (const auto &plugin : compatiblePlugins)
       {
          if (pluglist.empty())
            pluglist = plugin->GetPluginFormatDescription();
          else
-           pluglist = wxString::Format( _("%s, %s"),
-               pluglist, plugin->GetPluginFormatDescription() );
+           pluglist = XO("%s, %s")
+               .Format( pluglist, plugin->GetPluginFormatDescription() );
       }
 
-      errorMessage.Printf(_("Audacity recognized the type of the file '%s'.\nImporters supposedly supporting such files are:\n%s,\nbut none of them understood this file format."),fName, pluglist);
+      errorMessage = XO(
+/* i18n-hint: %s will be the filename */
+"Audacity recognized the type of the file '%s'.\nImporters supposedly supporting such files are:\n%s,\nbut none of them understood this file format.")
+         .Format( fName, pluglist );
    }
 
    return false;
@@ -697,35 +841,36 @@ BEGIN_EVENT_TABLE( ImportStreamDialog, wxDialogWrapper )
    EVT_BUTTON( wxID_CANCEL, ImportStreamDialog::OnCancel )
 END_EVENT_TABLE()
 
-ImportStreamDialog::ImportStreamDialog( ImportFileHandle *_mFile, wxWindow *parent, wxWindowID id, const wxString &title,
+ImportStreamDialog::ImportStreamDialog( ImportFileHandle *_mFile, wxWindow *parent, wxWindowID id, const TranslatableString &title,
                                        const wxPoint &position, const wxSize& size, long style ):
 wxDialogWrapper( parent, id, title, position, size, style | wxRESIZE_BORDER )
 {
-   SetName(GetTitle());
+   SetName();
 
    mFile = _mFile;
    scount = mFile->GetStreamCount();
    for (wxInt32 i = 0; i < scount; i++)
       mFile->SetStreamUsage(i, FALSE);
 
-   wxBoxSizer *vertSizer;
+   ShuttleGui S{ this, eIsCreating };
    {
-      auto uVertSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
-      vertSizer = uVertSizer.get();
+      S.SetBorder( 5 );
 
-      auto choices = mFile->GetStreamInfo();
-      StreamList = safenew wxListBox(this, -1, wxDefaultPosition, wxDefaultSize, choices, wxLB_EXTENDED | wxLB_ALWAYS_SB);
+      StreamList =
+      S
+         .Prop(1)
+         .Position(wxEXPAND | wxALIGN_LEFT | wxALL)
+         .Style(wxLB_EXTENDED | wxLB_ALWAYS_SB)
+         .AddListBox(
+            transform_container<wxArrayStringEx>(
+               mFile->GetStreamInfo(),
+               std::mem_fn( &TranslatableString::Translation ) ) );
 
-      vertSizer->Add(StreamList, 1, wxEXPAND | wxALIGN_LEFT | wxALL, 5);
-
-      vertSizer->Add(CreateStdButtonSizer(this, eCancelButton | eOkButton).release(), 0, wxEXPAND);
-
-      SetAutoLayout(true);
-
-      SetSizer(uVertSizer.release());
+      S.AddStandardButtons();
    }
 
-   vertSizer->Fit( this );
+   SetAutoLayout(true);
+   GetSizer()->Fit( this );
 
    SetSize( 400, 200 );
 }
@@ -748,22 +893,3 @@ void ImportStreamDialog::OnCancel(wxCommandEvent & WXUNUSED(event))
 {
    EndModal( wxID_CANCEL );
 }
-
-ImportFileHandle::ImportFileHandle(const FilePath & filename)
-:  mFilename(filename)
-{
-}
-
-ImportFileHandle::~ImportFileHandle()
-{
-}
-
-void ImportFileHandle::CreateProgress()
-{
-   wxFileName ff( mFilename );
-   wxString title;
-
-   title.Printf(_("Importing %s"), GetFileDescription());
-   mProgress = std::make_unique< ProgressDialog >( title, ff.GetFullName() );
-}
-

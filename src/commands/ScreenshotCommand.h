@@ -14,7 +14,6 @@
 #define __SCREENSHOT_COMMAND__
 
 #include "Command.h"
-#include "../commands/AudacityCommand.h"
 
 #include <wx/colour.h> // member variable
 
@@ -29,9 +28,7 @@ class AdornedRulerPanel;
 class AudacityProject;
 class CommandContext;
 
-#define SCREENSHOT_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Screenshot") }
-
-class ScreenshotCommand : public AudacityCommand
+class AUDACITY_DLL_API ScreenshotCommand : public AudacityCommand
 {
 public:
    enum kBackgrounds
@@ -54,6 +51,7 @@ public:
       kpreferences,
       kselectionbar,
       kspectralselection,
+      ktimer,
       ktools,
       ktransport,
       kmixer,
@@ -79,15 +77,17 @@ public:
       nCaptureWhats
    };
 
-   ScreenshotCommand(){ mbBringToTop=true;mIgnore=NULL;};
+   static const ComponentInterfaceSymbol Symbol;
+
+   ScreenshotCommand();
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SCREENSHOT_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Takes screenshots.");};
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Takes screenshots.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#screenshot_short_format");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#screenshot_short_format";}
 
 private:
    int mWhat;
@@ -96,7 +96,7 @@ private:
    bool mbBringToTop;
    bool bHasBackground;
    bool bHasBringToTop;
-   friend class ScreenFrame;
+   friend class ScreenshotBigDialog;
 
 public:
    bool Apply(const CommandContext & context) override;
@@ -142,7 +142,7 @@ private:
 public:
    static ScreenshotCommand * mpShooter;
    static void (*mIdleHandler)(wxIdleEvent& event);
-   static void SetIdleHandler( void (*pHandler)(wxIdleEvent& event) ){mIdleHandler=pHandler;};
+   static void SetIdleHandler( AudacityProject &project );
    static bool MayCapture( wxDialog * pDlg );
 
    void CaptureWindowOnIdle( const CommandContext & context, wxWindow * pWin );

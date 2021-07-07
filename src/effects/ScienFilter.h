@@ -27,21 +27,21 @@ class wxTextCtrl;
 class RulerPanel;
 class ShuttleGui;
 
-#define CLASSICFILTERS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Classic Filters") }
-
 class EffectScienFilterPanel;
 
 class EffectScienFilter final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectScienFilter();
    virtual ~EffectScienFilter();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 
@@ -69,12 +69,8 @@ private:
    // EffectScienFilter implementation
 
    bool TransferGraphLimitsFromWindow();
-   bool CalcFilter();
-   double ChebyPoly (int Order, double NormFreq);
+   void CalcFilter();
    float FilterMagnAtFreq(float Freq);
-
-   bool CalcFilterCoeffs (void);
-
    void EnableDisableRippleCtl (int FilterType);
 
    void OnSize( wxSizeEvent & evt );

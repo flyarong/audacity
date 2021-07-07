@@ -8,7 +8,7 @@
 
 **********************************************************************/
 
-#include "../../Audacity.h" // for USE_* macros
+
 
 #if USE_VST
 
@@ -17,12 +17,13 @@
 #include "audacity/PluginInterface.h"
 
 #include "../../SampleFormat.h"
-#include "../../widgets/NumericTextCtrl.h"
 #include "../../xml/XMLTagHandler.h"
 
 class wxSizerItem;
 class wxSlider;
 class wxStaticText;
+
+class NumericTextCtrl;
 
 class VSTControl;
 #include "VSTControl.h"
@@ -104,7 +105,7 @@ class VSTEffect final : public wxEvtHandler,
    ComponentInterfaceSymbol GetSymbol() override;
    VendorSymbol GetVendor() override;
    wxString GetVersion() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 
@@ -131,6 +132,7 @@ class VSTEffect final : public wxEvtHandler,
 
    void SetSampleRate(double rate) override;
    size_t SetBlockSize(size_t maxBlockSize) override;
+   size_t GetBlockSize() const override;
 
    bool IsReady() override;
    bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
@@ -149,7 +151,8 @@ class VSTEffect final : public wxEvtHandler,
                                        size_t numSamples) override;
    bool RealtimeProcessEnd() override;
 
-   bool ShowInterface(wxWindow *parent, bool forceModal = false) override;
+   bool ShowInterface( wxWindow &parent,
+      const EffectDialogFactory &factory, bool forceModal = false) override;
 
    bool GetAutomationParameters(CommandParameters & parms) override;
    bool SetAutomationParameters(CommandParameters & parms) override;
@@ -164,7 +167,7 @@ class VSTEffect final : public wxEvtHandler,
    // EffectUIClientInterface implementation
 
    void SetHostUI(EffectUIHostInterface *host) override;
-   bool PopulateUI(wxWindow *parent) override;
+   bool PopulateUI(ShuttleGui &S) override;
    bool IsGraphicalUI() override;
    bool ValidateUI() override;
    bool HideUI() override;
@@ -400,7 +403,7 @@ private:
 class VSTEffectsModule final : public ModuleInterface
 {
 public:
-   VSTEffectsModule(ModuleManagerInterface *moduleManager, const wxString *path);
+   VSTEffectsModule();
    virtual ~VSTEffectsModule();
 
    // ComponentInterface implementation
@@ -409,35 +412,32 @@ public:
    ComponentInterfaceSymbol GetSymbol() override;
    VendorSymbol GetVendor() override;
    wxString GetVersion() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // ModuleInterface implementation
 
    bool Initialize() override;
    void Terminate() override;
+   EffectFamilySymbol GetOptionalFamilySymbol() override;
 
-   FileExtensions GetFileExtensions() override;
+   const FileExtensions &GetFileExtensions() override;
    FilePath InstallPath() override;
 
    bool AutoRegisterPlugins(PluginManagerInterface & pm) override;
    PluginPaths FindPluginPaths(PluginManagerInterface & pm) override;
    unsigned DiscoverPluginsAtPath(
-      const PluginPath & path, wxString &errMsg,
+      const PluginPath & path, TranslatableString &errMsg,
       const RegistrationCallback &callback)
          override;
 
    bool IsPluginValid(const PluginPath & path, bool bFast) override;
 
-   ComponentInterface *CreateInstance(const PluginPath & path) override;
-   void DeleteInstance(ComponentInterface *instance) override;
+   std::unique_ptr<ComponentInterface>
+      CreateInstance(const PluginPath & path) override;
 
    // VSTEffectModule implementation
 
    static void Check(const wxChar *path);
-
-private:
-   ModuleManagerInterface *mModMan;
-   PluginPath mPath;
 };
 
 #endif // USE_VST

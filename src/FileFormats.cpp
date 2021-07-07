@@ -15,20 +15,20 @@ information.
 *//*******************************************************************/
 
 
-#include "Audacity.h"
+
 #include "FileFormats.h"
 
-#include "MemoryX.h"
 #include <wx/arrstr.h>
 #include <wx/intl.h>
 #include "sndfile.h"
-#include "widgets/ErrorDialog.h"
+#include "Internat.h"
+#include "MemoryX.h"
+#include "widgets/AudacityMessageBox.h"
+#include "Prefs.h"
 
 #ifndef SNDFILE_1
 #error Requires libsndfile 1.0 or higher
 #endif
-
-#include "Internat.h"
 
 //
 // enumerating headers
@@ -204,6 +204,40 @@ bool sf_subtype_is_integer(unsigned int format)
            subtype == SF_FORMAT_PCM_32);
 }
 
+int sf_subtype_bytes_per_sample(unsigned int format){
+   unsigned int subtype = format & SF_FORMAT_SUBMASK;
+   if( subtype == SF_FORMAT_PCM_S8 )
+      return 1;
+   if( subtype == SF_FORMAT_PCM_U8 )
+      return 1;
+   if( subtype == SF_FORMAT_PCM_16 )
+      return 2;
+   if( subtype == SF_FORMAT_PCM_24 )
+      return 3;
+   if( subtype == SF_FORMAT_PCM_32 )
+      return 4;
+   if( subtype == SF_FORMAT_FLOAT )
+      return 4;
+   if( subtype == SF_FORMAT_DOUBLE )
+      return 8;
+
+   // might be different to 2, but this is good enough for 
+   // WAV and AIFF file size error trapping.
+   return 2;
+}
+
+sampleFormat sf_subtype_to_effective_format(unsigned int format)
+{
+   unsigned int subtype = format & SF_FORMAT_SUBMASK;
+   if (subtype == SF_FORMAT_PCM_24)
+      return int24Sample;
+   else if (sf_subtype_more_than_16_bits(format))
+      return widestSampleFormat;
+   else
+      return int16Sample;
+}
+
+
 FileExtensions sf_get_all_extensions()
 {
    FileExtensions exts;
@@ -298,7 +332,7 @@ static OSType sf_header_mactype(int format)
 
 #endif // __WXMAC__
 
-ODLock libSndFileMutex;
+//std::mutex libSndFileMutex;
 
 int SFFileCloser::operator() (SNDFILE *sf) const
 {
@@ -306,10 +340,37 @@ int SFFileCloser::operator() (SNDFILE *sf) const
    if (err) {
       char buffer[1000];
       sf_error_str(sf, buffer, 1000);
-      AudacityMessageBox(wxString::Format
-         /* i18n-hint: %s will be the error message from libsndfile */
-         (_("Error (file may not have been written): %s"),
-         buffer));
+      AudacityMessageBox(
+         /* i18n-hint: %s will be the error message from the libsndfile software library */
+         XO( "Error (file may not have been written): %s" )
+            // Not attempting to localize error messages
+            // from the library
+            .Format( buffer ));
    }
    return err;
 }
+
+ChoiceSetting FileFormatsCopyOrEditSetting{
+   wxT("/FileFormats/CopyOrEditUncompressedData"),
+   {
+      EnumValueSymbol{
+         wxT("copy"),
+         XXO("&Copy uncompressed files into the project (safer)")
+      },
+      EnumValueSymbol{
+         wxT("edit"),
+         XXO("&Read uncompressed files from original location (faster)")
+      },
+   },
+   0 // copy
+};
+
+ChoiceSetting FileFormatsSaveWithDependenciesSetting{
+   wxT("/FileFormats/SaveProjectWithDependencies"),
+   {
+      { wxT("copy"), XXO("&Copy all audio into project (safest)") },
+      { wxT("never"), XXO("Do &not copy any audio") },
+      { wxT("ask"), XXO("As&k") },
+   },
+   2 // ask
+};

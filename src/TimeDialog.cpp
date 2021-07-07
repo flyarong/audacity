@@ -13,7 +13,7 @@
 
 *//*******************************************************************/
 
-#include "Audacity.h"
+
 #include "TimeDialog.h"
 
 #include <wx/defs.h>
@@ -21,19 +21,19 @@
 #include <wx/sizer.h>
 #include <wx/string.h>
 
-#include "widgets/NumericTextCtrl.h"
 #include "ShuttleGui.h"
+#include "widgets/NumericTextCtrl.h"
 
 BEGIN_EVENT_TABLE(TimeDialog, wxDialogWrapper)
    EVT_COMMAND(wxID_ANY, EVT_TIMETEXTCTRL_UPDATED, TimeDialog::OnUpdate)
 END_EVENT_TABLE()
 
 TimeDialog::TimeDialog(wxWindow *parent,
-                       const wxString &title,
+                       const TranslatableString &title,
                        const NumericFormatSymbol &format,
                        double rate,
                        double time,
-                       const wxString &prompt)
+                       const TranslatableString &prompt)
 :  wxDialogWrapper(parent, wxID_ANY, title),
    mPrompt(prompt),
    mFormat(format),
@@ -41,7 +41,7 @@ TimeDialog::TimeDialog(wxWindow *parent,
    mTime(time),
    mTimeCtrl(NULL)
 {
-   SetName(GetTitle());
+   SetName();
    ShuttleGui S(this, eIsCreating);
    PopulateOrExchange(S);
 }

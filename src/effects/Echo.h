@@ -13,23 +13,22 @@
 #define __AUDACITY_EFFECT_ECHO__
 
 #include "Effect.h"
-#include "../SampleFormat.h"
 
 class ShuttleGui;
-
-#define ECHO_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Echo") }
 
 class EffectEcho final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectEcho();
    virtual ~EffectEcho();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

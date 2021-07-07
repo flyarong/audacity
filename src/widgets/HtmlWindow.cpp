@@ -15,12 +15,11 @@
 *//*******************************************************************//**
 
 \class HtmlWindow
-\brief The widget to the left of a ToolBar that allows it to be dragged
-around to NEW positions.
+\brief An accessible wxHtmlWindow.
 
 *//**********************************************************************/
 
-#include "../Audacity.h"
+
 #include "HtmlWindow.h"
 
 #include <wx/setup.h> // for wxUSE_* macros

@@ -20,13 +20,14 @@ used throughout Audacity into this one place.
 
 *//********************************************************************/
 
-#include "Audacity.h"
+
 #include "FileNames.h"
 
-#include "Experimental.h"
 
-#include "MemoryX.h"
 
+#include <memory>
+
+#include <wx/app.h>
 #include <wx/defs.h>
 #include <wx/filename.h>
 #include <wx/intl.h>
@@ -35,7 +36,8 @@ used throughout Audacity into this one place.
 #include "Internat.h"
 #include "PlatformCompatibility.h"
 #include "wxFileNameWrapper.h"
-#include "../lib-src/FileDialog/FileDialog.h"
+#include "widgets/AudacityMessageBox.h"
+#include "widgets/FileDialog/FileDialog.h"
 
 #if defined(__WXMAC__) || defined(__WXGTK__)
 #include <dlfcn.h>
@@ -47,7 +49,103 @@ used throughout Audacity into this one place.
 
 static wxString gDataDir;
 
-bool FileNames::CopyFile(
+const FileNames::FileType
+     FileNames::AllFiles{ XO("All files"), { wxT("") } }
+     /* i18n-hint an Audacity project is the state of the program, stored as
+     files that can be reopened to resume the session later */
+   , FileNames::AudacityProjects{ XO("AUP3 project files"), { wxT("aup3") }, true }
+   , FileNames::DynamicLibraries{
+#if defined(__WXMSW__)
+      XO("Dynamically Linked Libraries"), { wxT("dll") }, true
+#elif defined(__WXMAC__)
+      XO("Dynamic Libraries"), { wxT("dylib") }, true
+#else
+      XO("Dynamically Linked Libraries"), { wxT("so*") }, true
+#endif
+     }
+   , FileNames::TextFiles{ XO("Text files"), { wxT("txt") }, true }
+   , FileNames::XMLFiles{ XO("XML files"), { wxT("xml"), wxT("XML") }, true }
+;
+
+wxString FileNames::FormatWildcard( const FileTypes &fileTypes )
+{
+   // |-separated list of:
+   // [ Description,
+   //   ( if appendExtensions, then ' (', globs, ')' ),
+   //   '|',
+   //   globs ]
+   // where globs is a ;-separated list of filename patterns, which are
+   // '*' for an empty extension, else '*.' then the extension
+   // Only the part before | is displayed in the choice drop-down of file
+   // dialogs
+   //
+   // Exceptional case: if there is only one type and its description is empty,
+   // then just give the globs with no |
+   // Another exception: an empty description, when there is more than one
+   // type, is replaced with a default
+   // Another exception:  if an extension contains a dot, it is interpreted as
+   // not really an extension, but a literal filename
+
+   const wxString dot{ '.' };
+   const auto makeGlobs = [&dot]( const FileExtensions &extensions ){
+      wxString globs;
+      for ( const auto &extension: extensions ) {
+         if ( !globs.empty() )
+            globs += ';';
+         if ( extension.Contains( dot ) )
+            globs += extension;
+         else {
+            globs += '*';
+            if ( !extension.empty() ) {
+               globs += '.';
+               globs += extension;
+            }
+         }
+      }
+      return globs;
+   };
+
+   const auto defaultDescription = []( const FileExtensions &extensions ){
+      // Assume extensions is not empty
+      wxString exts = extensions[0];
+      for (size_t ii = 1, size = extensions.size(); ii < size; ++ii ) {
+         exts += XO(", ").Translation();
+         exts += extensions[ii];
+      }
+      /* i18n-hint a type or types such as "txt" or "txt, xml" will be
+         substituted for %s */
+      return XO("%s files").Format( exts );
+   };
+
+   if ( fileTypes.size() == 1 && fileTypes[0].description.empty() ) {
+      return makeGlobs( fileTypes[0].extensions );
+   }
+   else {
+      wxString result;
+      for ( const auto &fileType : fileTypes ) {
+         const auto &extensions = fileType.extensions;
+         if (extensions.empty())
+            continue;
+
+         if (!result.empty())
+            result += '|';
+
+         const auto globs = makeGlobs( extensions );
+
+         auto mask = fileType.description;
+         if ( mask.empty() )
+           mask = defaultDescription( extensions );
+         if ( fileType.appendExtensions )
+            mask.Join( XO("(%s)").Format( globs ), " " );
+         result += mask.Translation();
+         result += '|';
+         result += globs;
+      }
+      return result;
+   }
+}
+
+bool FileNames::DoCopyFile(
    const FilePath& file1, const FilePath& file2, bool overwrite)
 {
 #ifdef __WXMSW__
@@ -98,16 +196,7 @@ wxString FileNames::MkDir(const wxString &Str)
    return Str;
 }
 
-/// Returns the directory used for temp files.
-/// \todo put a counter in here to see if it gets used a lot.
-/// if it does, then maybe we should cache the path name
-/// each time.
-wxString FileNames::TempDir()
-{
-   return FileNames::MkDir(gPrefs->Read(wxT("/Directories/TempDir"), wxT("")));
-}
-
-// originally an ExportMultiple method. Append suffix if newName appears in otherNames.
+// originally an ExportMultipleDialog method. Append suffix if newName appears in otherNames.
 void FileNames::MakeNameUnique(FilePaths &otherNames,
    wxFileName &newName)
 {
@@ -120,16 +209,6 @@ void FileNames::MakeNameUnique(FilePaths &otherNames,
       } while (otherNames.Index(newName.GetFullName(), false) >= 0);
    }
    otherNames.push_back(newName.GetFullName());
-}
-
-
-
-//
-// Audacity user data directories
-FilePath FileNames::AutoSaveDir()
-{
-   wxFileName autoSaveDir(FileNames::DataDir(), wxT("AutoSave"));
-   return FileNames::MkDir(autoSaveDir.GetFullPath());
 }
 
 // The APP name has upercase first letter (so that Quit Audacity is correctly
@@ -264,7 +343,7 @@ FilePath FileNames::BaseDir()
    baseDir = PlatformCompatibility::GetExecutablePath();
 #else
    // Linux goes into /*prefix*/share/audacity/
-   baseDir = FileNames::LowerCaseAppNameInPath(wxStandardPaths::Get().GetDataDir());
+   baseDir = FileNames::LowerCaseAppNameInPath(wxStandardPaths::Get().GetPluginsDir());
 #endif
 
    return baseDir.GetPath();
@@ -388,7 +467,7 @@ wxFileNameWrapper FileNames::DefaultToDocumentsFolder(const wxString &preference
 
 #ifdef __WIN32__
    wxFileName defaultPath( wxStandardPaths::Get().GetDocumentsDir(), "" );
-   defaultPath.AppendDir( wxGetApp().GetAppName() );
+   defaultPath.AppendDir( wxTheApp->GetAppName() );
    result.SetPath( gPrefs->Read( preference, defaultPath.GetPath( wxPATH_GET_VOLUME ) ) );
 
    // MJB: Bug 1899 & Bug 2007.  Only create directory if the result is the default path
@@ -421,56 +500,333 @@ wxFileNameWrapper FileNames::DefaultToDocumentsFolder(const wxString &preference
    return result;
 }
 
-namespace {
-   wxString PreferenceKey(FileNames::Operation op)
-   {
-      wxString key;
-      switch (op) {
-         case FileNames::Operation::Open:
-            key = wxT("/DefaultOpenPath"); break;
-         case FileNames::Operation::Export:
-            key = wxT("/DefaultExportPath"); break;
-         case FileNames::Operation::_None:
-         default:
-            break;
-      }
-      return key;
+wxString FileNames::PreferenceKey(FileNames::Operation op, FileNames::PathType type)
+{
+   wxString key;
+   switch (op) {
+      case FileNames::Operation::Temp:
+         key = wxT("/Directories/TempDir"); break;
+      case FileNames::Operation::Presets:
+         key = wxT("/Presets/Path"); break;
+      case FileNames::Operation::Open:
+         key = wxT("/Directories/Open"); break;
+      case FileNames::Operation::Save:
+         key = wxT("/Directories/Save"); break;
+      case FileNames::Operation::Import:
+         key = wxT("/Directories/Import"); break;
+      case FileNames::Operation::Export:
+         key = wxT("/Directories/Export"); break;
+      case FileNames::Operation::MacrosOut:
+         key = wxT("/Directories/MacrosOut"); break;
+      case FileNames::Operation::_None:
+      default:
+         break;
    }
+
+   switch (type) {
+      case FileNames::PathType::User:
+         key += "/Default"; break;
+      case FileNames::PathType::LastUsed:
+         key += "/LastUsed"; break;
+      case FileNames::PathType::_None:
+      default:
+         break;
+   }
+
+   return key;
 }
 
-wxString FileNames::FindDefaultPath(Operation op)
+FilePath FileNames::FindDefaultPath(Operation op)
 {
-   auto key = PreferenceKey(op);
+   auto key = PreferenceKey(op, PathType::User);
+
    if (key.empty())
       return wxString{};
-   else
-      return DefaultToDocumentsFolder(key).GetPath();
+
+   // If the user specified a default path, then use that
+   FilePath path = gPrefs->Read(key, wxT(""));
+   if (!path.empty()) {
+      return path;
+   }
+
+   // Maybe the last used path is available
+   key = PreferenceKey(op, PathType::LastUsed);
+   path = gPrefs->Read(key, wxT(""));
+   if (!path.empty()) {
+      return path;
+   }
+
+   // Last resort is to simply return the default folder
+   return DefaultToDocumentsFolder("").GetPath();
 }
 
 void FileNames::UpdateDefaultPath(Operation op, const FilePath &path)
 {
    if (path.empty())
       return;
-   auto key = PreferenceKey(op);
-   if (!key.empty())  {
-      gPrefs->Write(key, ::wxPathOnly(path));
+   wxString key;
+   if (op == Operation::Temp) {
+      key = PreferenceKey(op, PathType::_None);
+   }
+   else {
+      key = PreferenceKey(op, PathType::LastUsed);
+   }
+   if (!key.empty()) {
+      gPrefs->Write(key, path);
       gPrefs->Flush();
    }
 }
 
-wxString
+FilePath
 FileNames::SelectFile(Operation op,
-           const wxString& message,
-           const FilePath& default_path,
-           const FilePath& default_filename,
-           const wxString& default_extension,
-           const wxString& wildcard,
-           int flags,
-           wxWindow *parent)
+   const TranslatableString& message,
+   const FilePath& default_path,
+   const FilePath& default_filename,
+   const FileExtension& default_extension,
+   const FileTypes& fileTypes,
+   int flags,
+   wxWindow *parent)
 {
    return WithDefaultPath(op, default_path, [&](const FilePath &path) {
+      wxString filter;
+      if ( !default_extension.empty() )
+         filter = wxT("*.") + default_extension;
       return FileSelector(
-            message, path, default_filename, default_extension,
-            wildcard, flags, parent, wxDefaultCoord, wxDefaultCoord);
+            message.Translation(), path, default_filename, filter,
+            FormatWildcard( fileTypes ),
+            flags, parent, wxDefaultCoord, wxDefaultCoord);
    });
 }
+
+bool FileNames::IsMidi(const FilePath &fName)
+{
+   const auto extension = fName.AfterLast(wxT('.'));
+   return
+      extension.IsSameAs(wxT("gro"), false) ||
+      extension.IsSameAs(wxT("midi"), false) ||
+      extension.IsSameAs(wxT("mid"), false);
+}
+
+static FilePaths sAudacityPathList;
+
+const FilePaths &FileNames::AudacityPathList()
+{
+   return sAudacityPathList;
+}
+
+void FileNames::SetAudacityPathList( FilePaths list )
+{
+   sAudacityPathList = std::move( list );
+}
+
+// static
+void FileNames::AddUniquePathToPathList(const FilePath &pathArg,
+                                          FilePaths &pathList)
+{
+   wxFileNameWrapper pathNorm { pathArg };
+   pathNorm.Normalize();
+   const wxString newpath{ pathNorm.GetFullPath() };
+
+   for(const auto &path : pathList) {
+      if (pathNorm == wxFileNameWrapper{ path })
+         return;
+   }
+
+   pathList.push_back(newpath);
+}
+
+// static
+void FileNames::AddMultiPathsToPathList(const wxString &multiPathStringArg,
+                                          FilePaths &pathList)
+{
+   wxString multiPathString(multiPathStringArg);
+   while (!multiPathString.empty()) {
+      wxString onePath = multiPathString.BeforeFirst(wxPATH_SEP[0]);
+      multiPathString = multiPathString.AfterFirst(wxPATH_SEP[0]);
+      AddUniquePathToPathList(onePath, pathList);
+   }
+}
+
+#include <wx/log.h>
+
+// static
+void FileNames::FindFilesInPathList(const wxString & pattern,
+                                      const FilePaths & pathList,
+                                      FilePaths & results,
+                                      int flags)
+{
+   wxLogNull nolog;
+
+   if (pattern.empty()) {
+      return;
+   }
+
+   wxFileNameWrapper ff;
+
+   for(size_t i = 0; i < pathList.size(); i++) {
+      ff = pathList[i] + wxFILE_SEP_PATH + pattern;
+      wxDir::GetAllFiles(ff.GetPath(), &results, ff.GetFullName(), flags);
+   }
+}
+
+#if defined(__WXMSW__)
+static wxCharBuffer mFilename;
+
+//
+// On Windows, wxString::mb_str() can return a NULL pointer if the
+// conversion to multi-byte fails.  So, based on direction intent,
+// returns a pointer to an empty string or prompts for a NEW name.
+//
+char *FileNames::VerifyFilename(const wxString &s, bool input)
+{
+   static wxCharBuffer buf;
+   wxString name = s;
+
+   if (input) {
+      if ((char *) (const char *)name.mb_str() == NULL) {
+         name = wxEmptyString;
+      }
+   }
+   else {
+      wxFileName ff(name);
+      FileExtension ext;
+      while ((char *) (const char *)name.mb_str() == NULL) {
+         AudacityMessageBox(
+            XO(
+"The specified filename could not be converted due to Unicode character use."));
+
+         ext = ff.GetExt();
+         name = FileNames::SelectFile(FileNames::Operation::_None,
+            XO("Specify New Filename:"),
+            wxEmptyString,
+            name,
+            ext,
+            { ext.empty()
+               ? FileNames::AllFiles
+               : FileType{ {}, { ext } }
+            },
+            wxFD_SAVE | wxRESIZE_BORDER,
+            wxGetTopLevelParent(NULL));
+      }
+   }
+
+   mFilename = name.mb_str();
+
+   return (char *) (const char *) mFilename;
+}
+#endif
+
+bool FileNames::WritableLocationCheck(const FilePath& path)
+{
+    bool status = wxFileName::IsDirWritable(path);
+
+    if (!status)
+    {
+        AudacityMessageBox(
+            XO("Directory %s does not have write permissions")
+            .Format(path),
+            XO("Error"),
+            wxOK | wxICON_ERROR);
+    }
+
+    return status;
+}
+
+// Using this with wxStringArray::Sort will give you a list that
+// is alphabetical, without depending on case.  If you use the
+// default sort, you will get strings with 'R' before 'a', because it is in caps.
+int FileNames::CompareNoCase(const wxString& first, const wxString& second)
+{
+   return first.CmpNoCase(second);
+}
+
+// Create a unique filename using the passed prefix and suffix
+wxString FileNames::CreateUniqueName(const wxString &prefix,
+                                     const wxString &suffix /* = wxEmptyString */)
+{
+   static int count = 0;
+
+   return wxString::Format(wxT("%s %s N-%i.%s"),
+                           prefix,
+                           wxDateTime::Now().Format(wxT("%Y-%m-%d %H-%M-%S")),
+                           ++count,
+                           suffix);
+}
+
+wxString FileNames::UnsavedProjectExtension()
+{
+   return wxT("aup3unsaved");
+}
+
+// How to detect whether the file system of a path is FAT
+// No apparent way to do it with wxWidgets
+#if defined(__DARWIN__)
+#include <sys/mount.h>
+bool FileNames::IsOnFATFileSystem(const FilePath &path)
+{
+   struct statfs fs;
+   if (statfs(wxPathOnly(path).c_str(), &fs))
+      // Error from statfs
+      return false;
+   return 0 == strcmp(fs.f_fstypename, "msdos");
+}
+#elif defined(__linux__)
+#include <sys/statfs.h>
+#include "/usr/include/linux/magic.h"
+bool FileNames::IsOnFATFileSystem(const FilePath &path)
+{
+   struct statfs fs;
+   if (statfs(wxPathOnly(path).c_str(), &fs))
+      // Error from statfs
+      return false;
+   return fs.f_type == MSDOS_SUPER_MAGIC;
+}
+#elif defined(_WIN32)
+#include <fileapi.h>
+bool FileNames::IsOnFATFileSystem(const FilePath &path)
+{
+   wxFileNameWrapper fileName{path};
+   if (!fileName.HasVolume())
+      return false;
+   auto volume = AbbreviatePath(fileName) + wxT("\\");
+   DWORD volumeFlags;
+   wxChar volumeType[64];
+   if (!::GetVolumeInformationW(
+      volume.wc_str(), NULL, 0, NULL, NULL,
+      &volumeFlags,
+      volumeType,
+      WXSIZEOF(volumeType)))
+      return false;
+   wxString type(volumeType);
+   if (type == wxT("FAT") || type == wxT("FAT32"))
+      return true;
+   return false;
+}
+#else
+bool FileNames::IsOnFATFileSystem(const FilePath &path)
+{
+   return false;
+}
+#endif
+
+wxString FileNames::AbbreviatePath( const wxFileName &fileName )
+{
+   wxString target;
+#ifdef __WXMSW__
+
+   // Drive letter plus colon
+   target = fileName.GetVolume() + wxT(":");
+
+#else
+
+   // Shorten the path, arbitrarily to 3 components
+   auto path = fileName;
+   path.SetFullName(wxString{});
+   while(path.GetDirCount() > 3)
+      path.RemoveLastDir();
+   target = path.GetFullPath();
+
+#endif
+   return target;
+}
+

@@ -8,14 +8,14 @@
 
 **********************************************************************/
 
-#include "../../Audacity.h" // for USE_* macros
+
 
 #if defined(USE_VAMP)
 #include "LoadVamp.h"
+#include "../../ModuleManager.h"
 
 #include <wx/filename.h>
 
-#include "../EffectManager.h"
 #include "VampEffect.h"
 
 #include <iostream>
@@ -38,7 +38,7 @@ DECLARE_MODULE_ENTRY(AudacityModule)
 {
    // Create and register the importer
    // Trust the module manager not to leak this
-   return safenew VampEffectsModule(moduleManager, path);
+   return safenew VampEffectsModule();
 }
 
 // ============================================================================
@@ -52,14 +52,8 @@ DECLARE_BUILTIN_MODULE(VampsEffectBuiltin);
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-VampEffectsModule::VampEffectsModule(ModuleManagerInterface *moduleManager,
-                                           const wxString *path)
+VampEffectsModule::VampEffectsModule()
 {
-   mModMan = moduleManager;
-   if (path)
-   {
-      mPath = *path;
-   }
 }
 
 VampEffectsModule::~VampEffectsModule()
@@ -72,7 +66,7 @@ VampEffectsModule::~VampEffectsModule()
 
 PluginPath VampEffectsModule::GetPath()
 {
-   return mPath;
+   return {};
 }
 
 ComponentInterfaceSymbol VampEffectsModule::GetSymbol()
@@ -91,9 +85,9 @@ wxString VampEffectsModule::GetVersion()
    return VAMPEFFECTS_VERSION;
 }
 
-wxString VampEffectsModule::GetDescription()
+TranslatableString VampEffectsModule::GetDescription()
 {
-   return _("Provides Vamp Effects support to Audacity");
+   return XO("Provides Vamp Effects support to Audacity");
 }
 
 // ============================================================================
@@ -112,9 +106,19 @@ void VampEffectsModule::Terminate()
    return;
 }
 
-FileExtensions VampEffectsModule::GetFileExtensions()
+EffectFamilySymbol VampEffectsModule::GetOptionalFamilySymbol()
 {
+#if USE_VAMP
+   return VAMPEFFECTS_FAMILY;
+#else
    return {};
+#endif
+}
+
+const FileExtensions &VampEffectsModule::GetFileExtensions()
+{
+   static FileExtensions empty;
+   return empty;
 }
 
 bool VampEffectsModule::AutoRegisterPlugins(PluginManagerInterface & WXUNUSED(pm))
@@ -200,10 +204,10 @@ PluginPaths VampEffectsModule::FindPluginPaths(PluginManagerInterface & WXUNUSED
 }
 
 unsigned VampEffectsModule::DiscoverPluginsAtPath(
-   const PluginPath & path, wxString &errMsg,
+   const PluginPath & path, TranslatableString &errMsg,
    const RegistrationCallback &callback)
 {
-   errMsg.clear();
+   errMsg = {};
    int output;
    bool hasParameters;
 
@@ -217,7 +221,7 @@ unsigned VampEffectsModule::DiscoverPluginsAtPath(
       return 1;
    }
 
-   errMsg = _("Could not load the library");
+   errMsg = XO("Could not load the library");
    return 0;
 }
 
@@ -232,27 +236,16 @@ bool VampEffectsModule::IsPluginValid(const PluginPath & path, bool bFast)
    return bool(vp);
 }
 
-ComponentInterface *VampEffectsModule::CreateInstance(const PluginPath & path)
+std::unique_ptr<ComponentInterface>
+VampEffectsModule::CreateInstance(const PluginPath & path)
 {
    // Acquires a resource for the application.
    int output;
    bool hasParameters;
 
-   auto vp = FindPlugin(path, output, hasParameters);
-   if (vp)
-   {
-      // Safety of this depends on complementary calls to DeleteInstance on the module manager side.
-      return safenew VampEffect(std::move(vp), path, output, hasParameters);
-   }
-
-   return NULL;
-}
-
-void VampEffectsModule::DeleteInstance(ComponentInterface *instance)
-{
-   std::unique_ptr < VampEffect > {
-      dynamic_cast<VampEffect *>(instance)
-   };
+   if (auto vp = FindPlugin(path, output, hasParameters))
+      return std::make_unique<VampEffect>(std::move(vp), path, output, hasParameters);
+   return nullptr;
 }
 
 // VampEffectsModule implementation

@@ -14,19 +14,19 @@
 
 class ShuttleGui;
 
-#define PAULSTRETCH_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Paulstretch") }
-
 class EffectPaulstretch final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectPaulstretch();
    virtual ~EffectPaulstretch();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
-   wxString ManualPage() override;
+   TranslatableString GetDescription() override;
+   ManualPageID ManualPage() override;
 
    // EffectDefinitionInterface implementation
 

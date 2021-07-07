@@ -15,10 +15,13 @@
 #include <wx/defs.h>
 
 #include "export/Export.h"
+#include "commands/CommandFlag.h"
+#include "audacity/ComponentInterface.h" // for ComponentInterfaceSymbol
 
 class wxArrayString;
 class Effect;
 class CommandContext;
+class CommandManager;
 class AudacityProject;
 class wxArrayStringEx;
 
@@ -26,15 +29,15 @@ class MacroCommandsCatalog {
 public:
    // A triple of user-visible name, internal string identifier and type/help string.
    struct Entry {
-      TranslatedInternalString name;
-      wxString category;
+      ComponentInterfaceSymbol name;
+      TranslatableString category;
    };
    using Entries = std::vector<Entry>;
 
    MacroCommandsCatalog( const AudacityProject *project );
 
    // binary search
-   Entries::const_iterator ByFriendlyName( const wxString &friendlyName ) const;
+   Entries::const_iterator ByFriendlyName( const TranslatableString &friendlyName ) const;
    // linear search
    Entries::const_iterator ByCommandId( const CommandID &commandId ) const;
 
@@ -52,33 +55,29 @@ private:
 // Stores information for one macro
 class MacroCommands final {
  public:
+   static bool DoAudacityCommand(
+      const PluginID & ID, const CommandContext & context, unsigned flags );
+
    // constructors and destructors
-   MacroCommands();
+   MacroCommands( AudacityProject &project );
  public:
    bool ApplyMacro( const MacroCommandsCatalog &catalog,
       const wxString & filename = {});
-   bool ApplyCommand( const wxString &friendlyCommand,
+   static bool HandleTextualCommand( CommandManager &commandManager,
+      const CommandID & Str,
+      const CommandContext & context, CommandFlag flags, bool alwaysEnabled);
+   bool ApplyCommand( const TranslatableString &friendlyCommand,
       const CommandID & command, const wxString & params,
       CommandContext const * pContext=NULL );
-   bool ApplyCommandInBatchMode( const wxString &friendlyCommand,
+   bool ApplyCommandInBatchMode( const TranslatableString &friendlyCommand,
       const CommandID & command, const wxString &params,
       CommandContext const * pContext = NULL);
-   bool ApplySpecialCommand(
-      int iCommand, const wxString &friendlyCommand,
-      const CommandID & command, const wxString & params);
    bool ApplyEffectCommand(
-      const PluginID & ID, const wxString &friendlyCommand,
+      const PluginID & ID, const TranslatableString &friendlyCommand,
       const CommandID & command,
       const wxString & params, const CommandContext & Context);
-   bool ReportAndSkip( const wxString & friendlyCommand, const wxString & params );
+   bool ReportAndSkip( const TranslatableString & friendlyCommand, const wxString & params );
    void AbortBatch();
-
-   // Utility functions for the special commands.
-   static wxString BuildCleanFileName(const FilePath &fileName,
-      const FileExtension &extension);
-   bool WriteMp3File( const wxString & Name, int bitrate );
-   double GetEndTime();
-   static bool IsMono();
 
    // These commands do not depend on the command list.
    static void MigrateLegacyChains();
@@ -86,15 +85,16 @@ class MacroCommands final {
    static wxArrayStringEx GetNamesOfDefaultMacros();
 
    static wxString GetCurrentParamsFor(const CommandID & command);
-   static wxString PromptForParamsFor(const CommandID & command, const wxString & params, wxWindow *parent);
+   static wxString PromptForParamsFor(
+      const CommandID & command, const wxString & params, wxWindow &parent);
    static wxString PromptForPresetFor(const CommandID & command, const wxString & params, wxWindow *parent);
 
    // These commands do depend on the command list.
    void ResetMacro();
 
    void RestoreMacro(const wxString & name);
-   bool ReadMacro(const wxString & macro);
-   bool WriteMacro(const wxString & macro);
+   wxString ReadMacro(const wxString & macro, wxWindow *parent = nullptr);
+   wxString WriteMacro(const wxString & macro, wxWindow *parent = nullptr);
    bool AddMacro(const wxString & macro);
    bool DeleteMacro(const wxString & name);
    bool RenameMacro(const wxString & oldmacro, const wxString & newmacro);
@@ -113,6 +113,9 @@ class MacroCommands final {
 
    void Split(const wxString & str, wxString & command, wxString & param);
    wxString Join(const wxString & command, const wxString & param);
+
+private:
+   AudacityProject &mProject;
 
    CommandIDs mCommandMacro;
    wxArrayString mParamsMacro;

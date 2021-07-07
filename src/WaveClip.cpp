@@ -21,11 +21,9 @@
 
 #include "WaveClip.h"
 
-#include "Experimental.h"
+
 
 #include <math.h>
-#include "MemoryX.h"
-#include <functional>
 #include <vector>
 #include <wx/log.h>
 
@@ -34,9 +32,7 @@
 #include "Prefs.h"
 #include "Envelope.h"
 #include "Resample.h"
-#include "Project.h"
 #include "WaveTrack.h"
-#include "FFT.h"
 #include "Profiler.h"
 #include "InconsistencyException.h"
 #include "UserException.h"
@@ -60,7 +56,6 @@ public:
       , max(0)
       , rms(0)
       , bl(0)
-      , numODPixels(0)
    {
    }
 
@@ -75,16 +70,11 @@ public:
       , max(len)
       , rms(len)
       , bl(len)
-      , numODPixels(0)
    {
-
-      //find the number of OD pixels - the only way to do this is by recounting since we've lost some old cache.
-      numODPixels = CountODPixels(0, len);
    }
 
    ~WaveCache()
    {
-      ClearInvalidRegions();
    }
 
    int          dirty;
@@ -97,174 +87,6 @@ public:
    std::vector<float> max;
    std::vector<float> rms;
    std::vector<int> bl;
-   int         numODPixels;
-
-   class InvalidRegion
-   {
-   public:
-     InvalidRegion(size_t s, size_t e)
-         : start(s), end(e)
-     {}
-     //start and end pixel count.  (not samples)
-     size_t start;
-     size_t end;
-   };
-
-
-   //Thread safe call to add a NEW region to invalidate.  If it overlaps with other regions, it unions the them.
-   void AddInvalidRegion(sampleCount sampleStart, sampleCount sampleEnd)
-   {
-      //use pps to figure out where we are.  (pixels per second)
-      if(pps ==0)
-         return;
-      double samplesPerPixel = rate/pps;
-      //rate is SR, start is first time of the waveform (in second) on cache
-      long invalStart = (sampleStart.as_double() - start*rate) / samplesPerPixel ;
-
-      long invalEnd = (sampleEnd.as_double() - start*rate)/samplesPerPixel +1; //we should cover the end..
-
-      //if they are both off the cache boundary in the same direction, the cache is missed,
-      //so we are safe, and don't need to track this one.
-      if((invalStart<0 && invalEnd <0) || (invalStart>=(long)len && invalEnd >= (long)len))
-         return;
-
-      //in all other cases, we need to clip the boundries so they make sense with the cache.
-      //for some reason, the cache is set up to access up to array[len], not array[len-1]
-      if(invalStart <0)
-         invalStart =0;
-      else if(invalStart > (long)len)
-         invalStart = len;
-
-      if(invalEnd <0)
-         invalEnd =0;
-      else if(invalEnd > (long)len)
-         invalEnd = len;
-
-
-      ODLocker locker(&mRegionsMutex);
-
-      //look thru the region array for a place to insert.  We could make this more spiffy than a linear search
-      //but right now it is not needed since there will usually only be one region (which grows) for OD loading.
-      bool added=false;
-      if(mRegions.size())
-      {
-         for(size_t i=0;i<mRegions.size();i++)
-         {
-            //if the regions intersect OR are pixel adjacent
-            InvalidRegion &region = mRegions[i];
-            if((long)region.start <= (invalEnd+1)
-               && ((long)region.end + 1) >= invalStart)
-            {
-               //take the union region
-               if((long)region.start > invalStart)
-                  region.start = invalStart;
-               if((long)region.end < invalEnd)
-                  region.end = invalEnd;
-               added=true;
-               break;
-            }
-
-            //this bit doesn't make sense because it assumes we add in order - now we go backwards after the initial OD finishes
-//            //this array is sorted by start/end points and has no overlaps.   If we've passed all possible intersections, insert.  The array will remain sorted.
-//            if(region.end < invalStart)
-//            {
-//               mRegions.insert(
-//                  mRegions.begin() + i,
-//                  InvalidRegion{ invalStart, invalEnd }
-//               );
-//               break;
-//            }
-         }
-      }
-
-      if(!added)
-      {
-         InvalidRegion newRegion(invalStart, invalEnd);
-         mRegions.insert(mRegions.begin(), newRegion);
-      }
-
-
-      //now we must go and patch up all the regions that overlap.  Overlapping regions will be adjacent.
-      for(size_t i=1;i<mRegions.size();i++)
-      {
-         //if the regions intersect OR are pixel adjacent
-         InvalidRegion &region = mRegions[i];
-         InvalidRegion &prevRegion = mRegions[i - 1];
-         if(region.start <= prevRegion.end+1
-            && region.end + 1 >= prevRegion.start)
-         {
-            //take the union region
-            if(region.start > prevRegion.start)
-               region.start = prevRegion.start;
-            if(region.end < prevRegion.end)
-               region.end = prevRegion.end;
-
-            mRegions.erase(mRegions.begin()+i-1);
-               //musn't forget to reset cursor
-               i--;
-         }
-
-         //if we are past the end of the region we added, we are past the area of regions that might be oversecting.
-         if(invalEnd < 0 || (long)region.start > invalEnd)
-         {
-            break;
-         }
-      }
-   }
-
-   //lock before calling these in a section.  unlock after finished.
-   int GetNumInvalidRegions() const {return mRegions.size();}
-   size_t GetInvalidRegionStart(int i) const {return mRegions[i].start;}
-   size_t GetInvalidRegionEnd(int i) const {return mRegions[i].end;}
-
-   void ClearInvalidRegions()
-   {
-      mRegions.clear();
-   }
-
-   void LoadInvalidRegion(int ii, Sequence *sequence, bool updateODCount)
-   {
-      const auto invStart = GetInvalidRegionStart(ii);
-      const auto invEnd = GetInvalidRegionEnd(ii);
-
-      //before check number of ODPixels
-      int regionODPixels = 0;
-      if (updateODCount)
-         regionODPixels = CountODPixels(invStart, invEnd);
-
-      sequence->GetWaveDisplay(&min[invStart],
-         &max[invStart],
-         &rms[invStart],
-         &bl[invStart],
-         invEnd - invStart,
-         &where[invStart]);
-
-      //after check number of ODPixels
-      if (updateODCount)
-      {
-         const int regionODPixelsAfter = CountODPixels(invStart, invEnd);
-         numODPixels -= (regionODPixels - regionODPixelsAfter);
-      }
-   }
-
-   void LoadInvalidRegions(Sequence *sequence, bool updateODCount)
-   {
-      //invalid regions are kept in a sorted array.
-      for (int i = 0; i < GetNumInvalidRegions(); i++)
-         LoadInvalidRegion(i, sequence, updateODCount);
-   }
-
-   int CountODPixels(size_t startIn, size_t endIn)
-   {
-      using namespace std;
-      const int *begin = &bl[0];
-      return count_if(begin + startIn, begin + endIn, bind2nd(less<int>(), 0));
-   }
-
-protected:
-   std::vector<InvalidRegion> mRegions;
-   ODLock mRegionsMutex;
-
 };
 
 static void ComputeSpectrumUsingRealFFTf
@@ -296,12 +118,12 @@ static void ComputeSpectrumUsingRealFFTf
    }
 }
 
-WaveClip::WaveClip(const std::shared_ptr<DirManager> &projDirManager,
+WaveClip::WaveClip(const SampleBlockFactoryPtr &factory,
                    sampleFormat format, int rate, int colourIndex)
 {
    mRate = rate;
    mColourIndex = colourIndex;
-   mSequence = std::make_unique<Sequence>(projDirManager, format);
+   mSequence = std::make_unique<Sequence>(factory, format);
 
    mEnvelope = std::make_unique<Envelope>(true, 1e-7, 2.0, 1.0);
 
@@ -311,17 +133,17 @@ WaveClip::WaveClip(const std::shared_ptr<DirManager> &projDirManager,
 }
 
 WaveClip::WaveClip(const WaveClip& orig,
-                   const std::shared_ptr<DirManager> &projDirManager,
+                   const SampleBlockFactoryPtr &factory,
                    bool copyCutlines)
 {
    // essentially a copy constructor - but you must pass in the
-   // current project's DirManager, because we might be copying
+   // current sample block factory, because we might be copying
    // from one project to another
 
    mOffset = orig.mOffset;
    mRate = orig.mRate;
    mColourIndex = orig.mColourIndex;
-   mSequence = std::make_unique<Sequence>(*orig.mSequence, projDirManager);
+   mSequence = std::make_unique<Sequence>(*orig.mSequence, factory);
 
    mEnvelope = std::make_unique<Envelope>(*orig.mEnvelope);
 
@@ -332,13 +154,13 @@ WaveClip::WaveClip(const WaveClip& orig,
    if ( copyCutlines )
       for (const auto &clip: orig.mCutLines)
          mCutLines.push_back
-            ( std::make_unique<WaveClip>( *clip, projDirManager, true ) );
+            ( std::make_unique<WaveClip>( *clip, factory, true ) );
 
    mIsPlaceholder = orig.GetIsPlaceholder();
 }
 
 WaveClip::WaveClip(const WaveClip& orig,
-                   const std::shared_ptr<DirManager> &projDirManager,
+                   const SampleBlockFactoryPtr &factory,
                    bool copyCutlines,
                    double t0, double t1)
 {
@@ -359,7 +181,7 @@ WaveClip::WaveClip(const WaveClip& orig,
    orig.TimeToSamplesClip(t0, &s0);
    orig.TimeToSamplesClip(t1, &s1);
 
-   mSequence = orig.mSequence->Copy(s0, s1);
+   mSequence = orig.mSequence->Copy(factory, s0, s1);
 
    mEnvelope = std::make_unique<Envelope>(
       *orig.mEnvelope,
@@ -376,7 +198,7 @@ WaveClip::WaveClip(const WaveClip& orig,
          if (cutlinePosition >= t0 && cutlinePosition <= t1)
          {
             auto newCutLine =
-               std::make_unique< WaveClip >( *clip, projDirManager, true );
+               std::make_unique< WaveClip >( *clip, factory, true );
             newCutLine->SetOffset( cutlinePosition - t0 );
             mCutLines.push_back(std::move(newCutLine));
          }
@@ -388,8 +210,8 @@ WaveClip::~WaveClip()
 {
 }
 
+/*! @excsafety{No-fail} */
 void WaveClip::SetOffset(double offset)
-// NOFAIL-GUARANTEE
 {
     mOffset = offset;
     mEnvelope->SetOffset(mOffset);
@@ -401,18 +223,23 @@ bool WaveClip::GetSamples(samplePtr buffer, sampleFormat format,
    return mSequence->Get(buffer, format, start, len, mayThrow);
 }
 
-void WaveClip::SetSamples(samplePtr buffer, sampleFormat format,
+/*! @excsafety{Strong} */
+void WaveClip::SetSamples(constSamplePtr buffer, sampleFormat format,
                    sampleCount start, size_t len)
-// STRONG-GUARANTEE
 {
-   // use STRONG-GUARANTEE
+   // use Strong-guarantee
    mSequence->SetSamples(buffer, format, start, len);
 
-   // use NOFAIL-GUARANTEE
+   // use No-fail-guarantee
    MarkChanged();
 }
 
 BlockArray* WaveClip::GetSequenceBlockArray()
+{
+   return &mSequence->GetBlockArray();
+}
+
+const BlockArray* WaveClip::GetSequenceBlockArray() const
 {
    return &mSequence->GetBlockArray();
 }
@@ -449,6 +276,11 @@ sampleCount WaveClip::GetNumSamples() const
    return mSequence->GetNumSamples();
 }
 
+// Bug 2288 allowed overlapping clips.
+// This was a classic fencepost error.
+// We are within the clip if start < t <= end.
+// Note that BeforeClip and AfterClip must be consistent 
+// with this definition.
 bool WaveClip::WithinClip(double t) const
 {
    auto ts = (sampleCount)floor(t * mRate + 0.5);
@@ -467,19 +299,20 @@ bool WaveClip::AfterClip(double t) const
    return ts >= GetEndSample() + mAppendBufferLen;
 }
 
+// A sample at time t could be in the clip, but 
+// a clip start at time t still be from a clip 
+// not overlapping this one, with this test.
+bool WaveClip::IsClipStartAfterClip(double t) const
+{
+   auto ts = (sampleCount)floor(t * mRate + 0.5);
+   return ts >= GetEndSample() + mAppendBufferLen;
+}
+
+
 ///Delete the wave cache - force redraw.  Thread-safe
 void WaveClip::ClearWaveCache()
 {
-   ODLocker locker(&mWaveCacheMutex);
    mWaveCache = std::make_unique<WaveCache>();
-}
-
-///Adds an invalid region to the wavecache so it redraws that portion only.
-void WaveClip::AddInvalidRegion(sampleCount startSample, sampleCount endSample)
-{
-   ODLocker locker(&mWaveCacheMutex);
-   if(mWaveCache!=NULL)
-      mWaveCache->AddInvalidRegion(startSample,endSample);
 }
 
 namespace {
@@ -547,7 +380,7 @@ fillWhere(std::vector<sampleCount> &where, size_t len, double bias, double corre
 //
 
 bool WaveClip::GetWaveDisplay(WaveDisplay &display, double t0,
-                               double pixelsPerSecond, bool &isLoadingOD) const
+                               double pixelsPerSecond) const
 {
    const bool allocated = (display.where != 0);
 
@@ -571,9 +404,6 @@ bool WaveClip::GetWaveDisplay(WaveDisplay &display, double t0,
       pWhere = &display.ownWhere;
    }
    else {
-      // Lock the list of invalid regions
-      ODLocker locker(&mWaveCacheMutex);
-
       const double tstep = 1.0 / pixelsPerSecond;
       const double samplesPerPixel = mRate * tstep;
 
@@ -592,8 +422,6 @@ bool WaveClip::GetWaveDisplay(WaveDisplay &display, double t0,
       if (match &&
          mWaveCache->start == t0 &&
          mWaveCache->len >= numPixels) {
-         mWaveCache->LoadInvalidRegions(mSequence.get(), true);
-         mWaveCache->ClearInvalidRegions();
 
          // Satisfy the request completely from the cache
          display.min = &mWaveCache->min[0];
@@ -601,7 +429,6 @@ bool WaveClip::GetWaveDisplay(WaveDisplay &display, double t0,
          display.rms = &mWaveCache->rms[0];
          display.bl = &mWaveCache->bl[0];
          display.where = &mWaveCache->where[0];
-         isLoadingOD = mWaveCache->numODPixels > 0;
          return true;
       }
 
@@ -644,12 +471,6 @@ bool WaveClip::GetWaveDisplay(WaveDisplay &display, double t0,
       // possible
 
       if (oldCache) {
-
-         //TODO: only load inval regions if
-         //necessary.  (usually is the case, so no rush.)
-         //also, we should be updating the NEW cache, but here we are patching the old one up.
-         oldCache->LoadInvalidRegions(mSequence.get(), false);
-         oldCache->ClearInvalidRegions();
 
          // Copy what we can from the old cache.
          const int length = copyEnd - copyBegin;
@@ -704,9 +525,9 @@ bool WaveClip::GetWaveDisplay(WaveDisplay &display, double t0,
                else {
                   b.reinit(len);
                   pb = b.get();
-                  CopySamples(mAppendBuffer.ptr() + sLeft * SAMPLE_SIZE(seqFormat),
-                              seqFormat,
-                              (samplePtr)pb, floatSample, len);
+                  SamplesToFloats(
+                     mAppendBuffer.ptr() + sLeft * SAMPLE_SIZE(seqFormat),
+                     seqFormat, pb, len);
                }
 
                float theMax, theMin, sumsq;
@@ -746,13 +567,11 @@ bool WaveClip::GetWaveDisplay(WaveDisplay &display, double t0,
                                         p1-p0,
                                         &where[p0]))
          {
-            isLoadingOD=false;
             return false;
          }
       }
    }
 
-   //find the number of OD pixels - the only way to do this is by recounting
    if (!allocated) {
       // Now report the results
       display.min = min;
@@ -760,13 +579,6 @@ bool WaveClip::GetWaveDisplay(WaveDisplay &display, double t0,
       display.rms = rms;
       display.bl = bl;
       display.where = &(*pWhere)[0];
-      isLoadingOD = mWaveCache->numODPixels > 0;
-   }
-   else {
-      using namespace std;
-      isLoadingOD =
-         count_if(display.ownBl.begin(), display.ownBl.end(),
-                  bind2nd(less<int>(), 0)) > 0;
    }
 
    return true;
@@ -895,8 +707,8 @@ bool SpecCache::CalculateOneSpectrum
          }
 
          if (myLen > 0) {
-            useBuffer = (float*)(waveTrackCache.Get(
-               floatSample, sampleCount(
+            useBuffer = (float*)(waveTrackCache.GetFloats(
+               sampleCount(
                   floor(0.5 + from.as_double() + offset * rate)
                ),
                myLen,
@@ -1031,7 +843,7 @@ bool SpecCache::CalculateOneSpectrum
          ComputeSpectrumUsingRealFFTf
             (useBuffer, settings.hFFT.get(), settings.window.get(), fftLen, results);
          if (!gainFactors.empty()) {
-            // Apply a frequency-dependant gain factor
+            // Apply a frequency-dependent gain factor
             for (size_t ii = 0; ii < nBins; ++ii)
                results[ii] += gainFactors[ii];
          }
@@ -1184,7 +996,7 @@ void SpecCache::Populate
                   power = 10.0*log10f(power);
             }
             if (!gainFactors.empty()) {
-               // Apply a frequency-dependant gain factor
+               // Apply a frequency-dependent gain factor
                for (size_t ii = 0; ii < nBins; ++ii)
                   results[ii] += gainFactors[ii];
             }
@@ -1346,21 +1158,23 @@ float WaveClip::GetRMS(double t0, double t1, bool mayThrow) const
    return mSequence->GetRMS(s0, s1-s0, mayThrow);
 }
 
-void WaveClip::ConvertToSampleFormat(sampleFormat format)
+void WaveClip::ConvertToSampleFormat(sampleFormat format,
+   const std::function<void(size_t)> & progressReport)
 {
    // Note:  it is not necessary to do this recursively to cutlines.
    // They get converted as needed when they are expanded.
 
-   auto bChanged = mSequence->ConvertToSampleFormat(format);
+   auto bChanged = mSequence->ConvertToSampleFormat(format, progressReport);
    if (bChanged)
       MarkChanged();
 }
 
+/*! @excsafety{No-fail} */
 void WaveClip::UpdateEnvelopeTrackLen()
-// NOFAIL-GUARANTEE
 {
-   mEnvelope->SetTrackLen
-      ((mSequence->GetNumSamples().as_double()) / mRate, 1.0 / GetRate());
+   auto len = (mSequence->GetNumSamples().as_double()) / mRate;
+   if (len != mEnvelope->GetTrackLen())
+      mEnvelope->SetTrackLen(len, 1.0 / GetRate());
 }
 
 void WaveClip::TimeToSamplesClip(double t0, sampleCount *s0) const
@@ -1373,30 +1187,27 @@ void WaveClip::TimeToSamplesClip(double t0, sampleCount *s0) const
       *s0 = sampleCount( floor(((t0 - mOffset) * mRate) + 0.5) );
 }
 
-void WaveClip::ClearDisplayRect() const
+/*! @excsafety{Strong} */
+std::shared_ptr<SampleBlock> WaveClip::AppendNewBlock(
+   samplePtr buffer, sampleFormat format, size_t len)
 {
-   mDisplayRect.x = mDisplayRect.y = -1;
-   mDisplayRect.width = mDisplayRect.height = -1;
+   return mSequence->AppendNewBlock( buffer, format, len );
 }
 
-void WaveClip::SetDisplayRect(const wxRect& r) const
+/*! @excsafety{Strong} */
+void WaveClip::AppendSharedBlock(const std::shared_ptr<SampleBlock> &pBlock)
 {
-   mDisplayRect = r;
+   mSequence->AppendSharedBlock( pBlock );
 }
 
-void WaveClip::GetDisplayRect(wxRect* r)
-{
-   *r = mDisplayRect;
-}
-
-void WaveClip::Append(samplePtr buffer, sampleFormat format,
-                      size_t len, unsigned int stride /* = 1 */,
-                      XMLWriter* blockFileLog /*=NULL*/)
-// PARTIAL-GUARANTEE in case of exceptions:
-// Some prefix (maybe none) of the buffer is appended, and no content already
-// flushed to disk is lost.
+/*! @excsafety{Partial}
+ -- Some prefix (maybe none) of the buffer is appended,
+and no content already flushed to disk is lost. */
+bool WaveClip::Append(constSamplePtr buffer, sampleFormat format,
+                      size_t len, unsigned int stride)
 {
    //wxLogDebug(wxT("Append: len=%lli"), (long long) len);
+   bool result = false;
 
    auto maxBlockSize = mSequence->GetMaxBlockSize();
    auto blockSize = mSequence->GetIdealAppendLen();
@@ -1406,7 +1217,7 @@ void WaveClip::Append(samplePtr buffer, sampleFormat format,
       mAppendBuffer.Allocate(maxBlockSize, seqFormat);
 
    auto cleanup = finally( [&] {
-      // use NOFAIL-GUARANTEE
+      // use No-fail-guarantee
       UpdateEnvelopeTrackLen();
       MarkChanged();
    } );
@@ -1414,11 +1225,11 @@ void WaveClip::Append(samplePtr buffer, sampleFormat format,
    for(;;) {
       if (mAppendBufferLen >= blockSize) {
          // flush some previously appended contents
-         // use STRONG-GUARANTEE
-         mSequence->Append(mAppendBuffer.ptr(), seqFormat, blockSize,
-                           blockFileLog);
+         // use Strong-guarantee
+         mSequence->Append(mAppendBuffer.ptr(), seqFormat, blockSize);
+         result = true;
 
-         // use NOFAIL-GUARANTEE for rest of this "if"
+         // use No-fail-guarantee for rest of this "if"
          memmove(mAppendBuffer.ptr(),
                  mAppendBuffer.ptr() + blockSize * SAMPLE_SIZE(seqFormat),
                  (mAppendBufferLen - blockSize) * SAMPLE_SIZE(seqFormat));
@@ -1429,7 +1240,7 @@ void WaveClip::Append(samplePtr buffer, sampleFormat format,
       if (len == 0)
          break;
 
-      // use NOFAIL-GUARANTEE for rest of this "for"
+      // use No-fail-guarantee for rest of this "for"
       wxASSERT(mAppendBufferLen <= maxBlockSize);
       auto toCopy = std::min(len, maxBlockSize - mAppendBufferLen);
 
@@ -1437,44 +1248,23 @@ void WaveClip::Append(samplePtr buffer, sampleFormat format,
                   mAppendBuffer.ptr() + mAppendBufferLen * SAMPLE_SIZE(seqFormat),
                   seqFormat,
                   toCopy,
-                  true, // high quality
+                  gHighQualityDither,
                   stride);
 
       mAppendBufferLen += toCopy;
       buffer += toCopy * SAMPLE_SIZE(format) * stride;
       len -= toCopy;
    }
+
+   return result;
 }
 
-void WaveClip::AppendAlias(const FilePath &fName, sampleCount start,
-                            size_t len, int channel,bool useOD)
-// STRONG-GUARANTEE
-{
-   // use STRONG-GUARANTEE
-   mSequence->AppendAlias(fName, start, len, channel,useOD);
-
-   // use NOFAIL-GUARANTEE
-   UpdateEnvelopeTrackLen();
-   MarkChanged();
-}
-
-void WaveClip::AppendCoded(const FilePath &fName, sampleCount start,
-                            size_t len, int channel, int decodeType)
-// STRONG-GUARANTEE
-{
-   // use STRONG-GUARANTEE
-   mSequence->AppendCoded(fName, start, len, channel, decodeType);
-
-   // use NOFAIL-GUARANTEE
-   UpdateEnvelopeTrackLen();
-   MarkChanged();
-}
-
+/*! @excsafety{Mixed} */
+/*! @excsafety{No-fail} -- The clip will be in a flushed state. */
+/*! @excsafety{Partial}
+-- Some initial portion (maybe none) of the append buffer of the
+clip gets appended; no previously flushed contents are lost. */
 void WaveClip::Flush()
-// NOFAIL-GUARANTEE that the clip will be in a flushed state.
-// PARTIAL-GUARANTEE in case of exceptions:
-// Some initial portion (maybe none) of the append buffer of the
-// clip gets appended; no previously flushed contents are lost.
 {
    //wxLogDebug(wxT("WaveClip::Flush"));
    //wxLogDebug(wxT("   mAppendBufferLen=%lli"), (long long) mAppendBufferLen);
@@ -1486,7 +1276,7 @@ void WaveClip::Flush()
          // Blow away the append buffer even in case of failure.  May lose some
          // data but don't leave the track in an un-flushed state.
 
-         // Use NOFAIL-GUARANTEE of these steps.
+         // Use No-fail-guarantee of these steps.
          mAppendBufferLen = 0;
          UpdateEnvelopeTrackLen();
          MarkChanged();
@@ -1551,7 +1341,7 @@ XMLTagHandler *WaveClip::HandleXMLChild(const wxChar *tag)
    {
       // Nested wave clips are cut lines
       mCutLines.push_back(
-         std::make_unique<WaveClip>(mSequence->GetDirManager(),
+         std::make_unique<WaveClip>(mSequence->GetFactory(),
             mSequence->GetSampleFormat(), mRate, 0 /*colourindex*/));
       return mCutLines.back().get();
    }
@@ -1575,8 +1365,8 @@ void WaveClip::WriteXML(XMLWriter &xmlFile) const
    xmlFile.EndTag(wxT("waveclip"));
 }
 
+/*! @excsafety{Strong} */
 void WaveClip::Paste(double t0, const WaveClip* other)
-// STRONG-GUARANTEE
 {
    const bool clipNeedsResampling = other->mRate != mRate;
    const bool clipNeedsNewFormat =
@@ -1587,7 +1377,7 @@ void WaveClip::Paste(double t0, const WaveClip* other)
    if (clipNeedsResampling || clipNeedsNewFormat)
    {
       newClip =
-         std::make_unique<WaveClip>(*other, mSequence->GetDirManager(), true);
+         std::make_unique<WaveClip>(*other, mSequence->GetFactory(), true);
       if (clipNeedsResampling)
          // The other clip's rate is different from ours, so resample
          newClip->Resample(mRate);
@@ -1608,7 +1398,7 @@ void WaveClip::Paste(double t0, const WaveClip* other)
    {
       newCutlines.push_back(
          std::make_unique<WaveClip>
-            ( *cutline, mSequence->GetDirManager(),
+            ( *cutline, mSequence->GetFactory(),
               // Recursively copy cutlines of cutlines.  They don't need
               // their offsets adjusted.
               true));
@@ -1618,10 +1408,10 @@ void WaveClip::Paste(double t0, const WaveClip* other)
    sampleCount s0;
    TimeToSamplesClip(t0, &s0);
 
-   // Assume STRONG-GUARANTEE from Sequence::Paste
+   // Assume Strong-guarantee from Sequence::Paste
    mSequence->Paste(s0, pastedClip->mSequence.get());
 
-   // Assume NOFAIL-GUARANTEE in the remaining
+   // Assume No-fail-guarantee in the remaining
    MarkChanged();
    auto sampleTime = 1.0 / GetRate();
    mEnvelope->PasteEnvelope
@@ -1632,17 +1422,17 @@ void WaveClip::Paste(double t0, const WaveClip* other)
       mCutLines.push_back(std::move(holder));
 }
 
+/*! @excsafety{Strong} */
 void WaveClip::InsertSilence( double t, double len, double *pEnvelopeValue )
-// STRONG-GUARANTEE
 {
    sampleCount s0;
    TimeToSamplesClip(t, &s0);
    auto slen = (sampleCount)floor(len * mRate + 0.5);
 
-   // use STRONG-GUARANTEE
+   // use Strong-guarantee
    GetSequence()->InsertSilence(s0, slen);
 
-   // use NOFAIL-GUARANTEE
+   // use No-fail-guarantee
    OffsetCutLines(t, len);
 
    const auto sampleTime = 1.0 / GetRate();
@@ -1665,25 +1455,25 @@ void WaveClip::InsertSilence( double t, double len, double *pEnvelopeValue )
    MarkChanged();
 }
 
+/*! @excsafety{Strong} */
 void WaveClip::AppendSilence( double len, double envelopeValue )
-// STRONG-GUARANTEE
 {
    auto t = GetEndTime();
    InsertSilence( t, len, &envelopeValue );
 }
 
+/*! @excsafety{Strong} */
 void WaveClip::Clear(double t0, double t1)
-// STRONG-GUARANTEE
 {
    sampleCount s0, s1;
 
    TimeToSamplesClip(t0, &s0);
    TimeToSamplesClip(t1, &s1);
 
-   // use STRONG-GUARANTEE
+   // use Strong-guarantee
    GetSequence()->Delete(s0, s1-s0);
 
-   // use NOFAIL-GUARANTEE in the remaining
+   // use No-fail-guarantee in the remaining
 
    // msmeyer
    //
@@ -1733,10 +1523,10 @@ void WaveClip::Clear(double t0, double t1)
    MarkChanged();
 }
 
+/*! @excsafety{Weak}
+-- This WaveClip remains destructible in case of AudacityException.
+But some cutlines may be deleted */
 void WaveClip::ClearAndAddCutLine(double t0, double t1)
-// WEAK-GUARANTEE
-// this WaveClip remains destructible in case of AudacityException.
-// But some cutlines may be deleted
 {
    if (t0 > GetEndTime() || t1 < GetStartTime())
       return; // time out of bounds
@@ -1745,7 +1535,7 @@ void WaveClip::ClearAndAddCutLine(double t0, double t1)
    const double clip_t1 = std::min( t1, GetEndTime() );
 
    auto newClip = std::make_unique< WaveClip >
-      (*this, mSequence->GetDirManager(), true, clip_t0, clip_t1);
+      (*this, mSequence->GetFactory(), true, clip_t0, clip_t1);
 
    newClip->SetOffset( clip_t0 - mOffset );
 
@@ -1774,7 +1564,7 @@ void WaveClip::ClearAndAddCutLine(double t0, double t1)
    TimeToSamplesClip(t0, &s0);
    TimeToSamplesClip(t1, &s1);
 
-   // use WEAK-GUARANTEE
+   // use Weak-guarantee
    GetSequence()->Delete(s0, s1-s0);
 
    // Collapse envelope
@@ -1807,8 +1597,8 @@ bool WaveClip::FindCutLine(double cutLinePosition,
    return false;
 }
 
+/*! @excsafety{Strong} */
 void WaveClip::ExpandCutLine(double cutLinePosition)
-// STRONG-GUARANTEE
 {
    auto end = mCutLines.end();
    auto it = std::find_if( mCutLines.begin(), end,
@@ -1818,7 +1608,7 @@ void WaveClip::ExpandCutLine(double cutLinePosition)
 
    if ( it != end ) {
       auto cutline = it->get();
-      // assume STRONG-GUARANTEE from Paste
+      // assume Strong-guarantee from Paste
 
       // Envelope::Paste takes offset into account, WaveClip::Paste doesn't!
       // Do this to get the right result:
@@ -1855,8 +1645,8 @@ bool WaveClip::RemoveCutLine(double cutLinePosition)
    return false;
 }
 
+/*! @excsafety{No-fail} */
 void WaveClip::OffsetCutLines(double t0, double len)
-// NOFAIL-GUARANTEE
 {
    for (const auto &cutLine : mCutLines)
    {
@@ -1865,25 +1655,11 @@ void WaveClip::OffsetCutLines(double t0, double len)
    }
 }
 
-void WaveClip::Lock()
-{
-   GetSequence()->Lock();
-   for (const auto &cutline: mCutLines)
-      cutline->Lock();
-}
-
 void WaveClip::CloseLock()
 {
    GetSequence()->CloseLock();
    for (const auto &cutline: mCutLines)
       cutline->CloseLock();
-}
-
-void WaveClip::Unlock()
-{
-   GetSequence()->Unlock();
-   for (const auto &cutline: mCutLines)
-      cutline->Unlock();
 }
 
 void WaveClip::SetRate(int rate)
@@ -1894,8 +1670,8 @@ void WaveClip::SetRate(int rate)
    MarkChanged();
 }
 
+/*! @excsafety{Strong} */
 void WaveClip::Resample(int rate, ProgressDialog *progress)
-// STRONG-GUARANTEE
 {
    // Note:  it is not necessary to do this recursively to cutlines.
    // They get resampled as needed when they are expanded.
@@ -1915,7 +1691,7 @@ void WaveClip::Resample(int rate, ProgressDialog *progress)
    auto numSamples = mSequence->GetNumSamples();
 
    auto newSequence =
-      std::make_unique<Sequence>(mSequence->GetDirManager(), mSequence->GetSampleFormat());
+      std::make_unique<Sequence>(mSequence->GetFactory(), mSequence->GetSampleFormat());
 
    /**
     * We want to keep going as long as we have something to feed the resampler
@@ -1963,11 +1739,14 @@ void WaveClip::Resample(int rate, ProgressDialog *progress)
 
    if (error)
       throw SimpleMessageBoxException{
-         _("Resampling failed.")
+         ExceptionType::Internal,
+         XO("Resampling failed."),
+         XO("Warning"),
+         "Error:_Resampling"
       };
    else
    {
-      // Use NOFAIL-GUARANTEE in these steps
+      // Use No-fail-guarantee in these steps
 
       // Invalidate wave display cache
       mWaveCache = std::make_unique<WaveCache>();

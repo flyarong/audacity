@@ -24,15 +24,15 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "Compressor.h"
+#include "LoadEffects.h"
 
 #include <math.h>
 
 #include <wx/brush.h>
 #include <wx/checkbox.h>
 #include <wx/dcclient.h>
-#include <wx/dcmemory.h>
 #include <wx/intl.h>
 #include <wx/slider.h>
 #include <wx/stattext.h>
@@ -41,11 +41,11 @@
 #include "../Prefs.h"
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
+#include "../Theme.h"
 #include "../float_cast.h"
 #include "../widgets/Ruler.h"
 
 #include "../WaveTrack.h"
-#include "../Theme.h"
 #include "../AllThemeResources.h"
 
 enum
@@ -61,7 +61,7 @@ enum
 //
 //     Name          Type     Key                  Def      Min      Max      Scale
 Param( Threshold,    double,  wxT("Threshold"),     -12.0,   -60.0,   -1.0,    1   );
-Param( NoiseFloor,   double,  wxT("NoiseFloor"),    -40.0,   -80.0,   -20.0,   5   );
+Param( NoiseFloor,   double,  wxT("NoiseFloor"),    -40.0,   -80.0,   -20.0,   0.2   );
 Param( Ratio,        double,  wxT("Ratio"),         2.0,     1.1,     10.0,    10  );
 Param( AttackTime,   double,  wxT("AttackTime"),    0.2,     0.1,     5.0,     100 );
 Param( ReleaseTime,  double,  wxT("ReleaseTime"),   1.0,     1.0,     30.0,    10  );
@@ -71,6 +71,11 @@ Param( UsePeak,      bool,    wxT("UsePeak"),       false,   false,   true,    1
 //----------------------------------------------------------------------------
 // EffectCompressor
 //----------------------------------------------------------------------------
+
+const ComponentInterfaceSymbol EffectCompressor::Symbol
+{ XO("Compressor") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectCompressor > reg; }
 
 BEGIN_EVENT_TABLE(EffectCompressor, wxEvtHandler)
    EVT_SLIDER(wxID_ANY, EffectCompressor::OnSlider)
@@ -102,17 +107,17 @@ EffectCompressor::~EffectCompressor()
 
 ComponentInterfaceSymbol EffectCompressor::GetSymbol()
 {
-   return COMPRESSOR_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectCompressor::GetDescription()
+TranslatableString EffectCompressor::GetDescription()
 {
-   return _("Compresses the dynamic range of audio");
+   return XO("Compresses the dynamic range of audio");
 }
 
-wxString EffectCompressor::ManualPage()
+ManualPageID EffectCompressor::ManualPage()
 {
-   return wxT("Compressor");
+   return L"Compressor";
 }
 
 // EffectDefinitionInterface implementation
@@ -168,7 +173,7 @@ bool EffectCompressor::SetAutomationParameters(CommandParameters & parms)
    return true;
 }
 
-// Effect Implemenration
+// Effect Implementation
 
 bool EffectCompressor::Startup()
 {
@@ -203,6 +208,40 @@ bool EffectCompressor::Startup()
    return true;
 }
 
+namespace {
+
+TranslatableString ThresholdFormat( int value )
+   /* i18n-hint: usually leave this as is as dB doesn't get translated*/
+{ return XO("%3d dB").Format(value); }
+
+TranslatableString AttackTimeFormat( double value )
+{ return XO("%.2f secs").Format( value ); }
+
+TranslatableString DecayTimeFormat( double value )
+{ return XO("%.1f secs").Format( value ); }
+
+TranslatableString RatioTextFormat( int sliderValue, double value )
+{
+   auto format = (sliderValue % 10 == 0)
+      /* i18n-hint: Unless your language has a different convention for ratios,
+       * like 8:1, leave as is.*/
+      ? XO("%.0f:1")
+      /* i18n-hint: Unless your language has a different convention for ratios,
+       * like 8:1, leave as is.*/
+      : XO("%.1f:1");
+   return format.Format( value );
+}
+
+TranslatableString RatioLabelFormat( int sliderValue, double value )
+{
+   auto format = (sliderValue % 10 == 0)
+      ? XO("Ratio %.0f to 1")
+      : XO("Ratio %.1f to 1");
+   return format.Format( value );
+}
+
+}
+
 void EffectCompressor::PopulateOrExchange(ShuttleGui & S)
 {
    S.SetBorder(5);
@@ -214,8 +253,10 @@ void EffectCompressor::PopulateOrExchange(ShuttleGui & S)
                                          mThresholdDB,
                                          mNoiseFloorDB,
                                          mRatio);
-      mPanel->SetMinSize(wxSize(400, 200));
-      S.Prop(true).AddWindow(mPanel, wxEXPAND | wxALL);
+      S.Prop(true)
+         .Position(wxEXPAND | wxALL)
+         .MinSize( { 400, 200 } )
+         .AddWindow(mPanel);
       S.SetBorder(5);
    }
    S.EndHorizontalLay();
@@ -225,64 +266,81 @@ void EffectCompressor::PopulateOrExchange(ShuttleGui & S)
       S.StartMultiColumn(3, wxEXPAND);
       {
          S.SetStretchyCol(1);
-         mThresholdLabel = S.AddVariableText(_("Threshold:"), true,
-                                             wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-         S.SetStyle(wxSL_HORIZONTAL);
-         mThresholdSlider = S.Id(ID_Threshold).AddSlider( {},
-                                                         DEF_Threshold * SCL_Threshold,
-                                                         MAX_Threshold * SCL_Threshold,
-                                                         MIN_Threshold * SCL_Threshold);
-         mThresholdSlider->SetName(_("Threshold"));
-         mThresholdText = S.AddVariableText(wxT("XXX dB"), true,
-                                            wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+         mThresholdLabel = S.AddVariableText(XO("&Threshold:"), true,
+            wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+         mThresholdSlider = S.Id(ID_Threshold)
+            .Name(XO("Threshold"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {},
+               DEF_Threshold * SCL_Threshold,
+               MAX_Threshold * SCL_Threshold,
+               MIN_Threshold * SCL_Threshold);
+         mThresholdText = S.AddVariableText(ThresholdFormat(999), true,
+            wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
-         mNoiseFloorLabel = S.AddVariableText(_("Noise Floor:"), true,
-                                             wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-         S.SetStyle(wxSL_HORIZONTAL);
-         mNoiseFloorSlider = S.Id(ID_NoiseFloor).AddSlider( {},
-                                                           DEF_NoiseFloor / SCL_NoiseFloor,
-                                                           MAX_NoiseFloor / SCL_NoiseFloor,
-                                                           MIN_NoiseFloor / SCL_NoiseFloor);
-         mNoiseFloorSlider->SetName(_("Noise Floor"));
-         mNoiseFloorText = S.AddVariableText(wxT("XXX dB"), true,
-                                            wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+         mNoiseFloorLabel = S.AddVariableText(XO("&Noise Floor:"), true,
+            wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+         mNoiseFloorSlider = S.Id(ID_NoiseFloor)
+            .Name(XO("Noise Floor"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {},
+               DEF_NoiseFloor * SCL_NoiseFloor,
+               MAX_NoiseFloor * SCL_NoiseFloor,
+               MIN_NoiseFloor * SCL_NoiseFloor);
+         mNoiseFloorText = S.AddVariableText(ThresholdFormat(999),
+            true, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
-         mRatioLabel = S.AddVariableText(_("Ratio:"), true,
-                                         wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-         S.SetStyle(wxSL_HORIZONTAL);
-         mRatioSlider = S.Id(ID_Ratio).AddSlider( {},
-                                                 DEF_Ratio * SCL_Ratio,
-                                                 MAX_Ratio * SCL_Ratio,
-                                                 MIN_Ratio * SCL_Ratio);
-         mRatioSlider->SetName(_("Ratio"));
+         mRatioLabel = S.AddVariableText(XO("&Ratio:"), true,
+            wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+         mRatioSlider = S.Id(ID_Ratio)
+            .Name(XO("Ratio"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {},
+               DEF_Ratio * SCL_Ratio,
+               MAX_Ratio * SCL_Ratio,
+               MIN_Ratio * SCL_Ratio);
          mRatioSlider->SetPageSize(5);
-         mRatioText = S.AddVariableText(wxT("XXXX:1"), true,
-                                             wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+         mRatioText = S.AddVariableText(RatioTextFormat( 1, 99.9 ), true,
+            wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
          /* i18n-hint: Particularly in percussion, sounds can be regarded as having
           * an 'attack' phase where the sound builds up and a 'decay' where the
           * sound dies away.  So this means 'onset duration'.  */
-         mAttackLabel = S.AddVariableText(_("Attack Time:"), true,
-                                         wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-         S.SetStyle(wxSL_HORIZONTAL);
-         mAttackSlider = S.Id(ID_Attack).AddSlider( {},
-                                                   DEF_AttackTime * SCL_AttackTime,
-                                                   MAX_AttackTime * SCL_AttackTime,
-                                                   MIN_AttackTime * SCL_AttackTime);
-         mAttackSlider->SetName(_("Attack Time"));
-         mAttackText = S.AddVariableText(wxT("XXXX secs"), true,
-                                         wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+         mAttackLabel = S.AddVariableText(XO("&Attack Time:"), true,
+            wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+         mAttackSlider = S.Id(ID_Attack)
+         /* i18n-hint: Particularly in percussion, sounds can be regarded as having
+          * an 'attack' phase where the sound builds up and a 'decay' where the
+          * sound dies away.  So this means 'onset duration'.  */
+            .Name(XO("Attack Time"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {},
+               DEF_AttackTime * SCL_AttackTime,
+               MAX_AttackTime * SCL_AttackTime,
+               MIN_AttackTime * SCL_AttackTime);
+         mAttackText = S.AddVariableText(
+            AttackTimeFormat(9.99),
+            true, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
-         mDecayLabel = S.AddVariableText(_("Release Time:"), true,
-                                         wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-         S.SetStyle(wxSL_HORIZONTAL);
-         mDecaySlider = S.Id(ID_Decay).AddSlider( {},
-                                                 DEF_ReleaseTime * SCL_ReleaseTime,
-                                                 MAX_ReleaseTime * SCL_ReleaseTime,
-                                                 MIN_ReleaseTime * SCL_ReleaseTime);
-         mDecaySlider->SetName(_("Release Time"));
-         mDecayText = S.AddVariableText(wxT("XXXX secs"), true,
-                                        wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+         /* i18n-hint: Particularly in percussion, sounds can be regarded as having
+          * an 'attack' phase where the sound builds up and a 'decay' or 'release' where the
+          * sound dies away.  */
+         mDecayLabel = S.AddVariableText(XO("R&elease Time:"), true,
+            wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+         mDecaySlider = S.Id(ID_Decay)
+         /* i18n-hint: Particularly in percussion, sounds can be regarded as having
+          * an 'attack' phase where the sound builds up and a 'decay' or 'release' where the
+          * sound dies away.  */
+            .Name(XO("Release Time"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {},
+               DEF_ReleaseTime * SCL_ReleaseTime,
+               MAX_ReleaseTime * SCL_ReleaseTime,
+               MIN_ReleaseTime * SCL_ReleaseTime);
+
+         mDecayText = S.AddVariableText(
+            DecayTimeFormat(99.9),
+            true, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
       }
       S.EndMultiColumn();
    }
@@ -291,9 +349,11 @@ void EffectCompressor::PopulateOrExchange(ShuttleGui & S)
    S.StartHorizontalLay(wxCENTER, false);
    {
       /* i18n-hint: Make-up, i.e. correct for any reduction, rather than fabricate it.*/
-      mGainCheckBox = S.AddCheckBox(_("Make-up gain for 0 dB after compressing"),
+      mGainCheckBox = S.AddCheckBox(XXO("Ma&ke-up gain for 0 dB after compressing"),
                                     DEF_Normalize);
-      mPeakCheckBox = S.AddCheckBox(_("Compress based on Peaks"),
+      /* i18n-hint: "Compress" here means reduce variations of sound volume,
+       NOT related to file-size compression; Peaks means extremes in volume */
+      mPeakCheckBox = S.AddCheckBox(XXO("C&ompress based on Peaks"),
                                     DEF_UsePeak);
    }
    S.EndHorizontalLay();
@@ -302,7 +362,7 @@ void EffectCompressor::PopulateOrExchange(ShuttleGui & S)
 bool EffectCompressor::TransferDataToWindow()
 {
    mThresholdSlider->SetValue(lrint(mThresholdDB));
-   mNoiseFloorSlider->SetValue(lrint(mNoiseFloorDB / SCL_NoiseFloor));
+   mNoiseFloorSlider->SetValue(lrint(mNoiseFloorDB * SCL_NoiseFloor));
    mRatioSlider->SetValue(lrint(mRatio * SCL_Ratio));
    mAttackSlider->SetValue(lrint(mAttackTime * SCL_AttackTime));
    mDecaySlider->SetValue(lrint(mDecayTime * SCL_ReleaseTime));
@@ -322,7 +382,7 @@ bool EffectCompressor::TransferDataFromWindow()
    }
 
    mThresholdDB = (double) mThresholdSlider->GetValue();
-   mNoiseFloorDB = (double) mNoiseFloorSlider->GetValue() * SCL_NoiseFloor;
+   mNoiseFloorDB = (double) mNoiseFloorSlider->GetValue() / SCL_NoiseFloor;
    mRatio = (double) mRatioSlider->GetValue() / SCL_Ratio;
    mAttackTime = (double) mAttackSlider->GetValue() / 100.0; //SCL_AttackTime;
    mDecayTime = (double) mDecaySlider->GetValue() / SCL_ReleaseTime;
@@ -609,34 +669,25 @@ void EffectCompressor::OnSlider(wxCommandEvent & WXUNUSED(evt))
 void EffectCompressor::UpdateUI()
 {
    mThresholdLabel->SetName(wxString::Format(_("Threshold %d dB"), (int) mThresholdDB));
-   /* i18n-hint: usually leave this as is as dB doesn't get translated*/
-   mThresholdText->SetLabel(wxString::Format(_("%3d dB"), (int) mThresholdDB));
+   mThresholdText->SetLabel(ThresholdFormat((int) mThresholdDB).Translation());
    mThresholdText->SetName(mThresholdText->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
 
    mNoiseFloorLabel->SetName(wxString::Format(_("Noise Floor %d dB"), (int) mNoiseFloorDB));
-   mNoiseFloorText->SetLabel(wxString::Format(_("%3d dB"), (int) mNoiseFloorDB));
+   mNoiseFloorText->SetLabel(ThresholdFormat((int) mNoiseFloorDB).Translation());
    mNoiseFloorText->SetName(mNoiseFloorText->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
 
-   if (mRatioSlider->GetValue() % 10 == 0) {
-      mRatioLabel->SetName(wxString::Format(_("Ratio %.0f to 1"), mRatio));
-      /* i18n-hint: Unless your language has a different convention for ratios,
-       * like 8:1, leave as is.*/
-      mRatioText->SetLabel(wxString::Format(_("%.0f:1"), mRatio));
-   }
-   else {
-      mRatioLabel->SetName(wxString::Format(_("Ratio %.1f to 1"), mRatio));
-      /* i18n-hint: Unless your language has a different convention for ratios,
-       * like 8:1, leave as is.*/
-      mRatioText->SetLabel(wxString::Format(_("%.1f:1"), mRatio));
-   }
+   mRatioLabel->SetName(
+      RatioLabelFormat(mRatioSlider->GetValue(), mRatio).Translation());
+   mRatioText->SetLabel(
+      RatioTextFormat(mRatioSlider->GetValue(), mRatio).Translation());
    mRatioText->SetName(mRatioText->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
 
    mAttackLabel->SetName(wxString::Format(_("Attack Time %.2f secs"), mAttackTime));
-   mAttackText->SetLabel(wxString::Format(_("%.2f secs"), mAttackTime));
+   mAttackText->SetLabel(AttackTimeFormat(mAttackTime).Translation());
    mAttackText->SetName(mAttackText->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
 
    mDecayLabel->SetName(wxString::Format(_("Release Time %.1f secs"), mDecayTime));
-   mDecayText->SetLabel(wxString::Format(_("%.1f secs"), mDecayTime));
+   mDecayText->SetLabel(DecayTimeFormat(mDecayTime).Translation());
    mDecayText->SetName(mDecayText->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
 
    mPanel->Refresh(false);
@@ -682,7 +733,7 @@ void EffectCompressorPanel::OnPaint(wxPaintEvent & WXUNUSED(evt))
    vRuler.SetOrientation(wxVERTICAL);
    vRuler.SetRange(0, -rangeDB);
    vRuler.SetFormat(Ruler::LinearDBFormat);
-   vRuler.SetUnits(_("dB"));
+   vRuler.SetUnits(XO("dB"));
    vRuler.GetMaxSize(&w, NULL);
 
    Ruler hRuler;
@@ -690,7 +741,7 @@ void EffectCompressorPanel::OnPaint(wxPaintEvent & WXUNUSED(evt))
    hRuler.SetOrientation(wxHORIZONTAL);
    hRuler.SetRange(-rangeDB, 0);
    hRuler.SetFormat(Ruler::LinearDBFormat);
-   hRuler.SetUnits(_("dB"));
+   hRuler.SetUnits(XO("dB"));
    hRuler.SetFlip(true);
    hRuler.GetMaxSize(NULL, &h);
 

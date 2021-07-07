@@ -12,14 +12,11 @@
 #ifndef __AUDACITY_EFFECT__
 #define __AUDACITY_EFFECT__
 
-#include "../Audacity.h"
 
-#include "../Experimental.h"
 
-#include "../MemoryX.h"
+#include <functional>
 #include <set>
 
-#include "../MemoryX.h"
 #include <wx/defs.h>
 
 class wxButton;
@@ -31,9 +28,7 @@ class wxWindow;
 #include "audacity/ConfigInterface.h"
 #include "audacity/EffectInterface.h"
 
-#include "../SampleFormat.h"
 #include "../SelectedRegion.h"
-#include "../Internat.h"
 
 #include "../Track.h"
 
@@ -47,13 +42,22 @@ class AudacityCommand;
 
 class AudacityProject;
 class LabelTrack;
+class NotifyingSelectedRegion;
 class ProgressDialog;
 class SelectedRegion;
 class EffectUIHost;
 class Track;
 class TrackList;
-class TrackFactory;
+class WaveTrackFactory;
 class WaveTrack;
+
+/* i18n-hint: "Nyquist" is an embedded interpreted programming language in
+ Audacity, named in honor of the Swedish-American Harry Nyquist (or Nyqvist).
+ In the translations of this and other strings, you may transliterate the
+ name into another alphabet.  */
+#define NYQUISTEFFECTS_FAMILY ( EffectFamilySymbol{ XO("Nyquist") } )
+
+#define NYQUIST_WORKER_ID wxT("Nyquist Worker")
 
 // TODO:  Apr-06-2015
 // TODO:  Much more cleanup of old methods and variables is needed, but
@@ -76,6 +80,11 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    Effect();
    virtual ~Effect();
 
+   // Type of a registered function that, if it returns true,
+   // causes ShowInterface to return early without making any dialog
+   using VetoDialogHook = bool (*) ( wxDialog* );
+   static VetoDialogHook SetVetoDialogHook( VetoDialogHook hook );
+
    // ComponentInterface implementation
 
    PluginPath GetPath() override;
@@ -84,7 +93,7 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
 
    VendorSymbol GetVendor() override;
    wxString GetVersion() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 
@@ -111,6 +120,7 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
 
    void SetSampleRate(double rate) override;
    size_t SetBlockSize(size_t maxBlockSize) override;
+   size_t GetBlockSize() const override;
 
    bool IsReady() override;
    bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
@@ -129,7 +139,8 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
                                        size_t numSamples) override;
    bool RealtimeProcessEnd() override;
 
-   bool ShowInterface(wxWindow *parent, bool forceModal = false) override;
+   bool ShowInterface( wxWindow &parent,
+      const EffectDialogFactory &factory, bool forceModal = false) override;
 
    bool GetAutomationParameters(CommandParameters & parms) override;
    bool SetAutomationParameters(CommandParameters & parms) override;
@@ -144,7 +155,7 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    // EffectUIClientInterface implementation
 
    void SetHostUI(EffectUIHostInterface *host) override;
-   bool PopulateUI(wxWindow *parent) override;
+   bool PopulateUI(ShuttleGui &S) final;
    bool IsGraphicalUI() override;
    bool ValidateUI() override;
    bool HideUI() override;
@@ -153,6 +164,8 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    bool CanExportPresets() override;
    void ExportPresets() override;
    void ImportPresets() override;
+
+   static CommandID GetSquashedName(wxString name);
 
    bool HasOptions() override;
    void ShowOptions() override;
@@ -164,11 +177,6 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    NumericFormatSymbol GetDurationFormat() override;
    virtual NumericFormatSymbol GetSelectionFormat() /* not override? */; // time format in Selection toolbar
    void SetDuration(double duration) override;
-
-   bool Apply() override;
-   void Preview() override;
-
-   wxDialog *CreateUI(wxWindow *parent, EffectUIClientInterface *client) override;
 
    RegistryPath GetUserPresetsGroup(const RegistryPath & name) override;
    RegistryPath GetCurrentSettingsGroup() override;
@@ -227,13 +235,14 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    virtual RegistryPaths GetUserPresets();
    virtual bool HasCurrentSettings();
    virtual bool HasFactoryDefaults();
-   virtual wxString GetPreset(wxWindow * parent, const wxString & parms);
 
    // Name of page in the Audacity alpha manual
-   virtual wxString ManualPage();
+   virtual ManualPageID ManualPage();
    // Fully qualified local help file name
-   virtual wxString HelpPage();
+   virtual FilePath HelpPage();
 
+   virtual void SetUIFlags(unsigned flags);
+   virtual unsigned TestUIFlags(unsigned mask);
    virtual bool IsBatchProcessing();
    virtual void SetBatchProcessing(bool start);
 
@@ -245,20 +254,15 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    // Returns true on success.  Will only operate on tracks that
    // have the "selected" flag set to true, which is consistent with
    // Audacity's standard UI.
-   /* not virtual */ bool DoEffect(wxWindow *parent, double projectRate, TrackList *list,
-                 TrackFactory *factory, SelectedRegion *selectedRegion,
-                 bool shouldPrompt = true);
+   // Create a user interface only if the supplied function is not null.
+   /* not virtual */ bool DoEffect( double projectRate, TrackList *list,
+      WaveTrackFactory *factory, NotifyingSelectedRegion &selectedRegion,
+      // Prompt the user for input only if these arguments are both not null.
+      wxWindow *pParent = nullptr,
+      const EffectDialogFactory &dialogFactory = {} );
 
-   bool Delegate( Effect &delegate, wxWindow *parent, bool shouldPrompt);
-
-   // Realtime Effect Processing
-   /* not virtual */ bool RealtimeAddProcessor(int group, unsigned chans, float rate);
-   /* not virtual */ size_t RealtimeProcess(int group,
-                               unsigned chans,
-                               float **inbuf,
-                               float **outbuf,
-                               size_t numSamples);
-   /* not virtual */ bool IsRealtimeActive();
+   bool Delegate( Effect &delegate,
+      wxWindow &parent, const EffectDialogFactory &factory );
 
    virtual bool IsHidden();
 
@@ -266,9 +270,9 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    // Display a message box, using effect's (translated) name as the prefix
    // for the title.
    enum : long { DefaultMessageBoxStyle = wxOK | wxCENTRE };
-   int MessageBox(const wxString& message,
+   int MessageBox(const TranslatableString& message,
                   long style = DefaultMessageBoxStyle,
-                  const wxString& titleStr = wxString{});
+                  const TranslatableString& titleStr = {});
 
    static void IncEffectCounter(){ nEffectsDone++;};
 
@@ -284,12 +288,6 @@ protected:
    // make sure that the effect can be performed on the selected tracks and
    // return false otherwise
    virtual bool Init();
-
-   // If necessary, open a dialog to get parameters from the user.
-   // This method will not always be called (for example if a user
-   // repeats an effect) but if it is called, it will be called
-   // after Init.
-   virtual bool PromptUser(wxWindow *parent);
 
    // Check whether effect should be skipped
    // Typically this is only useful in automation, for example
@@ -332,22 +330,23 @@ protected:
    // is okay, but don't try to undo).
 
    // Pass a fraction between 0.0 and 1.0
-   bool TotalProgress(double frac, const wxString & = {});
+   bool TotalProgress(double frac, const TranslatableString & = {});
 
    // Pass a fraction between 0.0 and 1.0, for the current track
    // (when doing one track at a time)
-   bool TrackProgress(int whichTrack, double frac, const wxString & = {});
+   bool TrackProgress(int whichTrack, double frac, const TranslatableString & = {});
 
    // Pass a fraction between 0.0 and 1.0, for the current track group
    // (when doing stereo groups at a time)
-   bool TrackGroupProgress(int whichGroup, double frac, const wxString & = {});
+   bool TrackGroupProgress(int whichGroup, double frac, const TranslatableString & = {});
 
    int GetNumWaveTracks() { return mNumTracks; }
    int GetNumWaveGroups() { return mNumGroups; }
 
-   // Calculates the start time and selection length in samples
-   void GetSamples(
-      const WaveTrack *track, sampleCount *start, sampleCount *len);
+   // Calculates the start time and length in samples for one or two channels
+   void GetBounds(
+      const WaveTrack &track, const WaveTrack *pRight,
+      sampleCount *start, sampleCount *len);
 
    // Previewing linear effect can be optimised by pre-mixing. However this
    // should not be used for non-linear effects such as dynamic processors
@@ -376,7 +375,7 @@ protected:
 
    // For the use of analyzers, which don't need to make output wave tracks,
    // but may need to add label tracks.
-   class AddedAnalysisTrack {
+   class AUDACITY_DLL_API AddedAnalysisTrack {
       friend Effect;
       AddedAnalysisTrack(Effect *pEffect, const wxString &name);
       AddedAnalysisTrack(const AddedAnalysisTrack&) PROHIBITED;
@@ -406,7 +405,7 @@ protected:
 
    // For the use of analyzers, which don't need to make output wave tracks,
    // but may need to modify label tracks.
-   class ModifiedAnalysisTrack {
+   class AUDACITY_DLL_API ModifiedAnalysisTrack {
       friend Effect;
       ModifiedAnalysisTrack
          (Effect *pEffect, const LabelTrack *pOrigTrack, const wxString &name);
@@ -457,9 +456,10 @@ protected:
    double         mProjectRate; // Sample rate of the project - NEW tracks should
                                // be created with this rate...
    double         mSampleRate;
-   SelectedRegion *mpSelectedRegion{};
-   TrackFactory   *mFactory;
+   wxWeakRef<NotifyingSelectedRegion> mpSelectedRegion{};
+   WaveTrackFactory   *mFactory;
    const TrackList *inputTracks() const { return mTracks; }
+   const AudacityProject *FindProject() const;
    std::shared_ptr<TrackList> mOutputTracks; // used only if CopyInputTracks() is called.
    double         mT0;
    double         mT1;
@@ -475,13 +475,13 @@ protected:
    wxDialog       *mUIDialog;
    wxWindow       *mUIParent;
    int            mUIResultID;
+   unsigned       mUIFlags;
 
    sampleCount    mSampleCnt;
 
  // Used only by the base Effect class
  //
  private:
-   void CommonInit();
    void CountWaveTracks();
 
    // Driver for client effects
@@ -489,8 +489,7 @@ protected:
                      ChannelNames map,
                      WaveTrack *left,
                      WaveTrack *right,
-                     sampleCount leftStart,
-                     sampleCount rightStart,
+                     sampleCount start,
                      sampleCount len,
                      FloatBuffers &inBuffer,
                      FloatBuffers &outBuffer,
@@ -510,7 +509,6 @@ private:
    bool mPreviewWithNotSelected;
    bool mPreviewFullSelection;
 
-   bool mIsSelection;
    double mDuration;
    NumericFormatSymbol mDurationFormat;
 
@@ -533,186 +531,20 @@ private:
    size_t mBlockSize;
    unsigned mNumChannels;
 
-   std::vector<int> mGroupProcessor;
-   int mCurrentProcessor;
-
-   wxCriticalSection mRealtimeSuspendLock;
-   int mRealtimeSuspendCount;
-
+public:
    const static wxString kUserPresetIdent;
    const static wxString kFactoryPresetIdent;
    const static wxString kCurrentSettingsIdent;
    const static wxString kFactoryDefaultsIdent;
 
-   friend class EffectManager;// so it can call PromptUser in support of batch commands.
-   friend class EffectRack;
    friend class EffectUIHost;
-   friend class EffectPresetsDialog;
 };
-
 
 // FIXME:
 // FIXME:  Remove this once all effects are using the NEW dialog
 // FIXME:
 
 #define ID_EFFECT_PREVIEW ePreviewID
-
-// Base dialog for regular effect
-class AUDACITY_DLL_API EffectDialog /* not final */ : public wxDialogWrapper
-{
-public:
-   // constructors and destructors
-   EffectDialog(wxWindow * parent,
-                const wxString & title,
-                int type = 0,
-                int flags = wxDEFAULT_DIALOG_STYLE,
-                int additionalButtons = 0);
-
-   void Init();
-
-   bool TransferDataToWindow() override;
-   bool TransferDataFromWindow() override;
-   bool Validate() override;
-
-   // NEW virtuals:
-   virtual void PopulateOrExchange(ShuttleGui & S);
-   virtual void OnPreview(wxCommandEvent & evt);
-   virtual void OnOk(wxCommandEvent & evt);
-
-private:
-   int mType;
-   int mAdditionalButtons;
-
-   DECLARE_EVENT_TABLE()
-   wxDECLARE_NO_COPY_CLASS(EffectDialog);
-};
-
-//
-class EffectUIHost final : public wxDialogWrapper,
-                     public EffectUIHostInterface
-{
-public:
-   // constructors and destructors
-   EffectUIHost(wxWindow *parent,
-                Effect *effect,
-                EffectUIClientInterface *client);
-   EffectUIHost(wxWindow *parent,
-                AudacityCommand *command,
-                EffectUIClientInterface *client);
-   virtual ~EffectUIHost();
-
-   bool TransferDataToWindow() override;
-   bool TransferDataFromWindow() override;
-
-   int ShowModal() override;
-
-   bool Initialize();
-
-private:
-   void OnInitDialog(wxInitDialogEvent & evt);
-   void OnErase(wxEraseEvent & evt);
-   void OnPaint(wxPaintEvent & evt);
-   void OnClose(wxCloseEvent & evt);
-   void OnApply(wxCommandEvent & evt);
-   void DoCancel();
-   void OnCancel(wxCommandEvent & evt);
-   void OnHelp(wxCommandEvent & evt);
-   void OnDebug(wxCommandEvent & evt);
-   void OnMenu(wxCommandEvent & evt);
-   void OnEnable(wxCommandEvent & evt);
-   void OnPlay(wxCommandEvent & evt);
-   void OnRewind(wxCommandEvent & evt);
-   void OnFFwd(wxCommandEvent & evt);
-   void OnPlayback(wxCommandEvent & evt);
-   void OnCapture(wxCommandEvent & evt);
-   void OnUserPreset(wxCommandEvent & evt);
-   void OnFactoryPreset(wxCommandEvent & evt);
-   void OnDeletePreset(wxCommandEvent & evt);
-   void OnSaveAs(wxCommandEvent & evt);
-   void OnImport(wxCommandEvent & evt);
-   void OnExport(wxCommandEvent & evt);
-   void OnOptions(wxCommandEvent & evt);
-   void OnDefaults(wxCommandEvent & evt);
-
-   void UpdateControls();
-   wxBitmap CreateBitmap(const char * const xpm[], bool up, bool pusher);
-   void LoadUserPresets();
-
-   void InitializeRealtime();
-   void CleanupRealtime();
-   void Resume();
-
-private:
-   AudacityProject *mProject;
-   wxWindow *mParent;
-   Effect *mEffect;
-   AudacityCommand * mCommand;
-   EffectUIClientInterface *mClient;
-
-   RegistryPaths mUserPresets;
-   bool mInitialized;
-   bool mSupportsRealtime;
-   bool mIsGUI;
-   bool mIsBatch;
-
-   wxButton *mApplyBtn;
-   wxButton *mCloseBtn;
-   wxButton *mMenuBtn;
-   wxButton *mPlayBtn;
-   wxButton *mRewindBtn;
-   wxButton *mFFwdBtn;
-   wxCheckBox *mEnableCb;
-
-   wxButton *mEnableToggleBtn;
-   wxButton *mPlayToggleBtn;
-
-   wxBitmap mPlayBM;
-   wxBitmap mPlayDisabledBM;
-   wxBitmap mStopBM;
-   wxBitmap mStopDisabledBM;
-
-   bool mEnabled;
-
-   bool mDisableTransport;
-   bool mPlaying;
-   bool mCapturing;
-
-   SelectedRegion mRegion;
-   double mPlayPos;
-
-   bool mDismissed{};
-   bool mNeedsResume{};
-
-   DECLARE_EVENT_TABLE()
-};
-
-class EffectPresetsDialog final : public wxDialogWrapper
-{
-public:
-   EffectPresetsDialog(wxWindow *parent, Effect *effect);
-   virtual ~EffectPresetsDialog();
-
-   wxString GetSelected() const;
-   void SetSelected(const wxString & parms);
-
-private:
-   void SetPrefix(const wxString & type, const wxString & prefix);
-   void UpdateUI();
-
-   void OnType(wxCommandEvent & evt);
-   void OnOk(wxCommandEvent & evt);
-   void OnCancel(wxCommandEvent & evt);
-
-private:
-   wxChoice *mType;
-   wxListBox *mPresets;
-
-   RegistryPaths mFactoryPresets;
-   RegistryPaths mUserPresets;
-   wxString mSelection;
-
-   DECLARE_EVENT_TABLE()
-};
 
 // Utility functions
 

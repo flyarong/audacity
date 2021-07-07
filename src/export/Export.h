@@ -11,11 +11,15 @@
 #ifndef __AUDACITY_EXPORT__
 #define __AUDACITY_EXPORT__
 
-#include "../MemoryX.h"
+#include <functional>
 #include <vector>
 #include <wx/filename.h> // member variable
+#include "Identifier.h"
 #include "../SampleFormat.h"
 #include "../widgets/wxPanelWrapper.h" // to inherit
+#include "../FileNames.h" // for FileTypes
+
+#include "../Registry.h"
 
 class wxArrayString;
 class FileDialogWrapper;
@@ -24,16 +28,16 @@ class wxMemoryDC;
 class wxSimplebook;
 class wxStaticText;
 class AudacityProject;
-class DirManager;
 class WaveTrack;
 class Tags;
 class TrackList;
 class MixerSpec;
 class ProgressDialog;
-class TimeTrack;
+class ShuttleGui;
 class Mixer;
 using WaveTrackConstArray = std::vector < std::shared_ptr < const WaveTrack > >;
 enum class ProgressResult : unsigned;
+class wxFileNameWrapper;
 
 class AUDACITY_DLL_API FormatInfo
 {
@@ -46,10 +50,10 @@ class AUDACITY_DLL_API FormatInfo
       ~FormatInfo() {}
 
       wxString mFormat;
-      wxString mDescription;
+      TranslatableString mDescription;
       // wxString mExtension;
       FileExtensions mExtensions;
-      wxString mMask;
+      FileNames::FileTypes mMask;
       unsigned mMaxChannels;
       bool mCanMetaData;
 };
@@ -66,32 +70,31 @@ public:
 
    int AddFormat();
    void SetFormat(const wxString & format, int index);
-   void SetDescription(const wxString & description, int index);
-   void AddExtension(const wxString &extension,int index);
+   void SetDescription(const TranslatableString & description, int index);
+   void AddExtension(const FileExtension &extension, int index);
    void SetExtensions(FileExtensions extensions, int index);
-   void SetMask(const wxString & mask, int index);
+   void SetMask(FileNames::FileTypes mask, int index);
    void SetMaxChannels(unsigned maxchannels, unsigned index);
    void SetCanMetaData(bool canmetadata, int index);
 
    virtual int GetFormatCount();
    virtual wxString GetFormat(int index);
-   virtual wxString GetDescription(int index);
+   TranslatableString GetDescription(int index);
    /** @brief Return the (first) file name extension for the sub-format.
     * @param index The sub-format for which the extension is wanted */
    virtual FileExtension GetExtension(int index = 0);
    /** @brief Return all the file name extensions used for the sub-format.
     * @param index the sub-format for which the extension is required */
    virtual FileExtensions GetExtensions(int index = 0);
-   virtual wxString GetMask(int index);
+   FileNames::FileTypes GetMask(int index);
    virtual unsigned GetMaxChannels(int index);
    virtual bool GetCanMetaData(int index);
 
-   virtual bool IsExtension(const wxString & ext, int index);
+   virtual bool IsExtension(const FileExtension & ext, int index);
 
    virtual bool DisplayOptions(wxWindow *parent, int format = 0);
    
-   // Precondition: parent != NULL
-   virtual wxWindow *OptionsCreate(wxWindow *parent, int format) = 0;
+   virtual void OptionsCreate(ShuttleGui &S, int format) = 0;
 
    virtual bool CheckFileName(wxFileName &filename, int format = 0);
    /** @brief Exporter plug-ins may override this to specify the number
@@ -122,7 +125,7 @@ public:
    virtual ProgressResult Export(AudacityProject *project,
                        std::unique_ptr<ProgressDialog> &pDialog,
                        unsigned channels,
-                       const wxString &fName,
+                       const wxFileNameWrapper &fName,
                        bool selectedOnly,
                        double t0,
                        double t1,
@@ -131,16 +134,18 @@ public:
                        int subformat = 0) = 0;
 
 protected:
-   std::unique_ptr<Mixer> CreateMixer(const WaveTrackConstArray &inputTracks,
-         const TimeTrack *timeTrack,
+   std::unique_ptr<Mixer> CreateMixer(const TrackList &tracks,
+         bool selectionOnly,
          double startTime, double stopTime,
          unsigned numOutChannels, size_t outBufferSize, bool outInterleaved,
          double outRate, sampleFormat outFormat,
-         bool highQuality = true, MixerSpec *mixerSpec = NULL);
+         MixerSpec *mixerSpec);
 
    // Create or recycle a dialog.
    static void InitProgress(std::unique_ptr<ProgressDialog> &pDialog,
-         const wxString &title, const wxString &message);
+         const TranslatableString &title, const TranslatableString &message);
+   static void InitProgress(std::unique_ptr<ProgressDialog> &pDialog,
+         const wxFileNameWrapper &title, const TranslatableString &message);
 
 private:
    std::vector<FormatInfo> mFormatInfos;
@@ -153,23 +158,42 @@ using ExportPluginArray = std::vector < std::unique_ptr< ExportPlugin > > ;
 //----------------------------------------------------------------------------
 
 // For a file suffix change from the options.
-wxDECLARE_EVENT(AUDACITY_FILE_SUFFIX_EVENT, wxCommandEvent);
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
+   AUDACITY_FILE_SUFFIX_EVENT, wxCommandEvent);
 
 class  AUDACITY_DLL_API Exporter final : public wxEvtHandler
 {
 public:
 
-   Exporter();
+   using ExportPluginFactory =
+      std::function< std::unique_ptr< ExportPlugin >() >;
+
+   // Objects of this type are statically constructed in files implementing
+   // subclasses of ExportPlugin
+   // Register factories, not plugin objects themselves, which allows them
+   // to have some fresh state variables each time export begins again
+   // and to compute translated strings for the current locale
+   struct AUDACITY_DLL_API RegisteredExportPlugin{
+      RegisteredExportPlugin(
+         const Identifier &id, // an internal string naming the plug-in
+         const ExportPluginFactory&,
+         const Registry::Placement &placement = { wxEmptyString, {} } );
+   };
+
+   static bool DoEditMetadata(AudacityProject &project,
+      const TranslatableString &title,
+      const TranslatableString &shortUndoDescription, bool force);
+
+   Exporter( AudacityProject &project );
    virtual ~Exporter();
 
-   void SetFileDialogTitle( const wxString & DialogTitle );
-   void SetDefaultFormat( const wxString & Format ){ mFormatName = Format;};
-   void RegisterPlugin(std::unique_ptr<ExportPlugin> &&plugin);
+   void SetFileDialogTitle( const TranslatableString & DialogTitle );
+   void SetDefaultFormat( const FileExtension & Format ){ mFormatName = Format;};
 
-   bool Process(AudacityProject *project, bool selectedOnly,
+   bool Process(bool selectedOnly,
                 double t0, double t1);
-   bool Process(AudacityProject *project, unsigned numChannels,
-                const wxChar *type, const wxString & filename,
+   bool Process(unsigned numChannels,
+                const FileExtension &type, const wxString & filename,
                 bool selectedOnly, double t0, double t1);
 
    void DisplayOptions(int index);
@@ -178,15 +202,14 @@ public:
    const ExportPluginArray &GetPlugins();
 
    // Auto Export from Timer Recording
-   bool ProcessFromTimerRecording(AudacityProject *project,
-                                  bool selectedOnly,
+   bool ProcessFromTimerRecording(bool selectedOnly,
                                   double t0,
                                   double t1,
                                   wxFileName fnFile,
                                   int iFormat,
                                   int iSubFormat,
                                   int iFilterIndex);
-   bool SetAutoExportOptions(AudacityProject *project);
+   bool SetAutoExportOptions();
    int GetAutoExportFormat();
    int GetAutoExportSubFormat();
    int GetAutoExportFilterIndex();
@@ -198,7 +221,7 @@ private:
    bool ExamineTracks();
    bool GetFilename();
    bool CheckFilename();
-   bool CheckMix();
+   bool CheckMix(bool prompt = true);
    bool ExportTracks();
 
    static void CreateUserPaneCallback(wxWindow *parent, wxUIntPtr userdata);
@@ -206,9 +229,9 @@ private:
    void OnFilterChanged(wxFileCtrlEvent & evt);
 
 private:
-   wxString mFormatName;
+   FileExtension mFormatName;
    FileDialogWrapper *mDialog;
-   wxString mFileDialogTitle;
+   TranslatableString mFileDialogTitle;
    AudacityProject *mProject;
    std::unique_ptr<MixerSpec> mMixerSpec;
 
@@ -276,7 +299,7 @@ class ExportMixerDialog final : public wxDialogWrapper
 public:
    // constructors and destructors
    ExportMixerDialog( const TrackList * tracks, bool selectedOnly, unsigned maxNumChannels,
-         wxWindow *parent, wxWindowID id, const wxString &title,
+         wxWindow *parent, wxWindowID id, const TranslatableString &title,
          const wxPoint& pos = wxDefaultPosition,
          const wxSize& size = wxDefaultSize,
          long style = wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER );
@@ -299,4 +322,18 @@ private:
 private:
    DECLARE_EVENT_TABLE()
 };
+
+AUDACITY_DLL_API TranslatableString AudacityExportCaptionStr();
+AUDACITY_DLL_API TranslatableString AudacityExportMessageStr();
+
+/// We have many Export errors that are essentially anonymous
+/// and are distinguished only by an error code number.
+/// Rather than repeat the code, we have it just once.
+AUDACITY_DLL_API void ShowExportErrorDialog(wxString ErrorCode,
+   TranslatableString message = AudacityExportMessageStr(),
+   const TranslatableString& caption = AudacityExportCaptionStr());
+
+AUDACITY_DLL_API
+void ShowDiskFullExportErrorDialog(const wxFileNameWrapper &fileName);
+
 #endif

@@ -24,24 +24,20 @@
 
 //#include "../commands/AudacityCommand.h"
 
-
-#define SELECT_TIME_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Select Time") }
-#define SELECT_FREQUENCIES_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Select Frequencies") }
-#define SELECT_TRACKS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Select Tracks") }
-#define SELECT_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Select") }
-
 class SelectTimeCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SELECT_TIME_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Selects a time range.");};
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Selects a time range.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
    bool Apply(const CommandContext & context) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#select_time");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_I#select_time";}
 
    bool bHasT0;
    bool bHasT1;
@@ -57,15 +53,17 @@ public:
 class SelectFrequenciesCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SELECT_FREQUENCIES_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Selects a frequency range.");};
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Selects a frequency range.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
    bool Apply(const CommandContext & context) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#select_frequencies");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_I#select_frequencies";}
 
    bool bHasBottom;
    bool bHasTop;
@@ -78,14 +76,16 @@ public:
 class SelectTracksCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SELECT_TRACKS_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Selects a range of tracks.");};
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Selects a range of tracks.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
    bool Apply(const CommandContext & context) override;
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#select_tracks");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_I#select_tracks";}
 
    bool bHasFirstTrack;
    bool bHasNumTracks;
@@ -100,9 +100,11 @@ public:
 class SelectCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SELECT_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Selects Audio.");};
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Selects Audio.");};
    bool DefineParams( ShuttleParams & S ) override { 
       return 
          mSelTime.DefineParams(S) &&  
@@ -121,7 +123,7 @@ public:
          mSelTracks.Apply(context);
    }
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#select");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#select";}
 private:
    SelectTimeCommand mSelTime;
    SelectFrequenciesCommand mSelFreq;

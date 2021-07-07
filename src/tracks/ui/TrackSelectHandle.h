@@ -12,7 +12,6 @@ Paul Licameli split from TrackPanel.cpp
 #define __AUDACITY_TRACK_SELECT_HANDLE__
 
 #include "../../UIHandle.h"
-#include "../../MemoryX.h"
 
 class wxMouseEvent;
 class Track;
@@ -39,7 +38,7 @@ public:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release
@@ -60,7 +59,8 @@ private:
    int mMoveDownThreshold {};
    int mRearrangeCount {};
 
-   void CalculateRearrangingThresholds(const wxMouseEvent & event);
+   void CalculateRearrangingThresholds(
+      const wxMouseEvent & event, AudacityProject *project);
 };
 
 #endif
