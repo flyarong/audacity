@@ -16,11 +16,11 @@
 icons and colours.
 
 Provides:
- - Button to save current theme as a single png image.
- - Button to load theme from a single png image.
- - Button to save current theme to multiple png images.
- - Button to load theme from multiple png images.
- - (Optional) Button to save theme as Cee data.
+ - Button to save each theme as a single png image.
+ - Button to load current theme from a single png image.
+ - Button to save each theme to multiple png images.
+ - Button to load themes from multiple png images.
+ - (Optional) Button to save each theme as Cee data.
  - Button to read theme from default values in program.
  - CheckBox for loading custom themes at startup.
 
@@ -28,15 +28,16 @@ Provides:
 
 *//********************************************************************/
 
-#include "../Audacity.h"
+
 #include "ThemePrefs.h"
 
+#include <wx/app.h>
 #include <wx/wxprec.h>
-#include "../Prefs.h"
-#include "../Theme.h"
-#include "../Project.h"
-#include "../ShuttleGui.h"
-#include "../AColor.h"
+#include "Prefs.h"
+#include "Theme.h"
+#include "ShuttleGui.h"
+#include "AColor.h"
+#include "BasicUI.h"
 
 enum eThemePrefsIds {
    idLoadThemeCache=7000,
@@ -56,18 +57,48 @@ BEGIN_EVENT_TABLE(ThemePrefs, PrefsPanel)
    EVT_BUTTON(idSaveThemeAsCode,     ThemePrefs::OnSaveThemeAsCode)
 END_EVENT_TABLE()
 
+static bool ConfirmSave()
+{
+   if (!GUIBlendThemes.Read())
+      return true;
+
+   using namespace BasicUI;
+   const auto message = Verbatim(
+"\"Blend system and Audacity theme\" in Interface Preferences was on.\n"
+"This may cause images to to be re-saved with slight changes of color."
+   );
+
+   return MessageBoxResult::Cancel != ShowMessageBox(message,
+      MessageBoxOptions{}.CancelButton().IconStyle(Icon::Warning));
+}
+
 ThemePrefs::ThemePrefs(wxWindow * parent, wxWindowID winid)
 /* i18n-hint: A theme is a consistent visual style across an application's
  graphical user interface, including choices of colors, and similarity of images
  such as those on button controls.  Audacity can load and save alternative
  themes. */
-:  PrefsPanel(parent, winid, _("Theme"))
+:  PrefsPanel(parent, winid, XO("Theme"))
 {
    Populate();
 }
 
 ThemePrefs::~ThemePrefs(void)
 {
+}
+
+ComponentInterfaceSymbol ThemePrefs::GetSymbol() const
+{
+   return THEME_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString ThemePrefs::GetDescription() const
+{
+   return XO("Preferences for Theme");
+}
+
+ManualPageID ThemePrefs::HelpPageName()
+{
+   return "Theme_Preferences";
 }
 
 /// Creates the dialog and its contents.
@@ -90,41 +121,44 @@ void ThemePrefs::PopulateOrExchange(ShuttleGui & S)
    S.SetBorder(2);
    S.StartScroller();
 
-   S.StartStatic(_("Info"));
+   S.StartStatic(XO("Info"));
    {
       S.AddFixedText(
-         _("Themability is an experimental feature.\n\nTo try it out, click \"Save Theme Cache\" then find and modify the images and colors in\nImageCacheVxx.png using an image editor such as the Gimp.\n\nClick \"Load Theme Cache\" to load the changed images and colors back into Audacity.\n\n(Only the Transport Toolbar and the colors on the wavetrack are currently affected, even\nthough the image file shows other icons too.)")
+         XO(
+"Themability is an experimental feature.\n\nTo try it out, click \"Save Theme Cache\" then find and modify the images and colors in\nImageCacheVxx.png using an image editor such as the Gimp.\n\nClick \"Load Theme Cache\" to load the changed images and colors back into Audacity.")
          );
 
-#ifdef __WXDEBUG__
+#ifdef _DEBUG
       S.AddFixedText(
-         _("This is a debug version of Audacity, with an extra button, 'Output Sourcery'. This will save a\nC version of the image cache that can be compiled in as a default.")
+         Verbatim(
+"This is a debug version of Audacity, with an extra button, 'Output Sourcery'. This will save\nC versions of the image caches that can be compiled in as defaults.")
          );
 #endif
 
       S.AddFixedText(
-         _("Saving and loading individual theme files uses a separate file for each image, but is\notherwise the same idea.")
+         XO(
+"Saving and loading individual theme files uses a separate file for each image, but is\notherwise the same idea.")
          );
    }
    S.EndStatic();
 
    /* i18n-hint: && in here is an escape character to get a single & on screen,
     * so keep it as is */
-   S.StartStatic(		_("Theme Cache - Images && Color"));
+   S.StartStatic(		XO("Theme Cache - Images && Color"));
    {
       S.StartHorizontalLay(wxALIGN_LEFT);
       {
-         S.Id(idSaveThemeCache).AddButton(_("Save Theme Cache"));
-         S.Id(idLoadThemeCache).AddButton(_("Load Theme Cache"));
+         S.Id(idSaveThemeCache).AddButton(XXO("Save Theme Cache"));
+         S.Id(idLoadThemeCache).AddButton(XXO("Load Theme Cache"));
 
          // This next button is only provided in Debug mode.
          // It is for developers who are compiling Audacity themselves
-         // and who who wish to generate a NEW ThemeAsCeeCode.h and compile it in.
-#ifdef __WXDEBUG__
-         S.Id(idSaveThemeAsCode).AddButton(wxT("Output Sourcery"));
+         // and who wish to generate NEW *ThemeAsCeeCode.h and compile them in.
+#ifdef _DEBUG
+         S.Id(idSaveThemeAsCode).AddButton(Verbatim("Output Sourcery"));
 #endif
 
-         S.Id(idReadThemeInternal).AddButton(_("&Defaults"));
+         S.Id(idReadThemeInternal).AddButton(XXO("&Defaults"));
       }
       S.EndHorizontalLay();
    }
@@ -137,12 +171,12 @@ void ThemePrefs::PopulateOrExchange(ShuttleGui & S)
    // To reduce that risk, we use a separate box to separate them off.
    // And choose text on the buttons that is shorter, making the
    // buttons smaller and less tempting to click.
-   S.StartStatic( _("Individual Theme Files"),1);
+   S.StartStatic( XO("Individual Theme Files"),1);
    {
       S.StartHorizontalLay(wxALIGN_LEFT);
       {
-         S.Id(idSaveThemeComponents).AddButton( _("Save Files"));
-         S.Id(idLoadThemeComponents).AddButton( _("Load Files"));
+         S.Id(idSaveThemeComponents).AddButton( XXO("Save Files"));
+         S.Id(idLoadThemeComponents).AddButton( XXO("Load Files"));
       }
       S.EndHorizontalLay();
    }
@@ -154,26 +188,34 @@ void ThemePrefs::PopulateOrExchange(ShuttleGui & S)
 /// Load Theme from multiple png files.
 void ThemePrefs::OnLoadThemeComponents(wxCommandEvent & WXUNUSED(event))
 {
-   theTheme.LoadComponents();
-   theTheme.ApplyUpdatedImages();
+   wxBusyCursor busy;
+   theTheme.LoadThemeComponents();
+   AColor::ApplyUpdatedImages();
 }
 
 /// Save Theme to multiple png files.
 void ThemePrefs::OnSaveThemeComponents(wxCommandEvent & WXUNUSED(event))
 {
-   theTheme.SaveComponents();
+   if (!ConfirmSave())
+      return;
+   wxBusyCursor busy;
+   theTheme.SaveThemeComponents();
 }
 
 /// Load Theme from single png file.
 void ThemePrefs::OnLoadThemeCache(wxCommandEvent & WXUNUSED(event))
 {
-   theTheme.ReadImageCache();
-   theTheme.ApplyUpdatedImages();
+   wxBusyCursor busy;
+   theTheme.SwitchTheme({});
+   AColor::ApplyUpdatedImages();
 }
 
-/// Save Theme to single png file.
+/// Save Themes, each to a single png file.
 void ThemePrefs::OnSaveThemeCache(wxCommandEvent & WXUNUSED(event))
 {
+   if (!ConfirmSave())
+      return;
+   wxBusyCursor busy;
    theTheme.CreateImageCache();
    theTheme.WriteImageMap();// bonus - give them the html version.
 }
@@ -181,13 +223,17 @@ void ThemePrefs::OnSaveThemeCache(wxCommandEvent & WXUNUSED(event))
 /// Read Theme from internal storage.
 void ThemePrefs::OnReadThemeInternal(wxCommandEvent & WXUNUSED(event))
 {
-   theTheme.ReadImageCache( theTheme.GetFallbackThemeType() );
-   theTheme.ApplyUpdatedImages();
+   wxBusyCursor busy;
+   theTheme.SwitchTheme( theTheme.GetFallbackThemeType() );
+   AColor::ApplyUpdatedImages();
 }
 
 /// Save Theme as C source code.
 void ThemePrefs::OnSaveThemeAsCode(wxCommandEvent & WXUNUSED(event))
 {
+   if (!ConfirmSave())
+      return;
+   wxBusyCursor busy;
    theTheme.SaveThemeAsCode();
    theTheme.WriteImageDefs();// bonus - give them the Defs too.
 }
@@ -198,11 +244,31 @@ bool ThemePrefs::Commit()
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
 
+   theTheme.LoadPreferredTheme();
+   theTheme.DeleteUnusedThemes();
+   AColor::ApplyUpdatedImages();
    return true;
 }
 
-PrefsPanel *ThemePrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
+void ThemePrefs::Cancel()
 {
-   wxASSERT(parent); // to justify safenew
-   return safenew ThemePrefs(parent, winid);
+   theTheme.LoadPreferredTheme();
+   theTheme.DeleteUnusedThemes();
+   AColor::ApplyUpdatedImages();
 }
+
+#ifdef EXPERIMENTAL_THEME_PREFS
+namespace{
+PrefsPanel::Registration sAttachment{ "Theme",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew ThemePrefs(parent, winid);
+   },
+   false,
+   // Register with an explicit ordering hint because this one is
+   // only conditionally compiled
+   { "", { Registry::OrderingHint::After, "Effects" } }
+};
+}
+#endif

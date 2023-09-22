@@ -18,9 +18,7 @@
   This class, which is a child of Toolbar, creates the
   window containing the tool selection (ibeam, envelope,
   move, zoom). The window can be embedded within a
-  normal project window, or within a ToolbarFrame that is
-  managed by a global ToolBarStub called
-  gToolsToolBarStub.
+  normal project window, or within a ToolBarFrame.
 
   All of the controls in this window were custom-written for
   Audacity - they are not native controls on any platform -
@@ -32,8 +30,9 @@
 *//*******************************************************************/
 
 
-#include "../Audacity.h"
+
 #include "ToolsToolBar.h"
+#include "ToolManager.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
@@ -42,20 +41,17 @@
 
 #ifndef WX_PRECOMP
 #include <wx/defs.h>
-#include <wx/event.h>
-#include <wx/intl.h>
 #include <wx/sizer.h>
 #endif
 #include <wx/tooltip.h>
 
-#include "MeterToolBar.h"
-
-#include "../Prefs.h"
-#include "../AllThemeResources.h"
-#include "../ImageManipulation.h"
-#include "../Project.h"
+#include "Prefs.h"
+#include "AllThemeResources.h"
+#include "ImageManipulation.h"
+#include "Project.h"
+#include "../ProjectSettings.h"
+#include "../ProjectWindow.h"
 #include "../tracks/ui/Scrubbing.h"
-#include "../Theme.h"
 
 #include "../widgets/AButton.h"
 
@@ -67,24 +63,28 @@ IMPLEMENT_CLASS(ToolsToolBar, ToolBar);
 ////////////////////////////////////////////////////////////
 
 BEGIN_EVENT_TABLE(ToolsToolBar, ToolBar)
-   EVT_COMMAND_RANGE(firstTool+FirstToolID,
-                     lastTool+FirstToolID,
+   EVT_COMMAND_RANGE(ToolCodes::firstTool + FirstToolID,
+                     ToolsToolBar::numTools - 1 + FirstToolID,
                      wxEVT_COMMAND_BUTTON_CLICKED,
                      ToolsToolBar::OnTool)
 END_EVENT_TABLE()
 
-//Standard constructor
-ToolsToolBar::ToolsToolBar()
-: ToolBar(ToolsBarID, _("Tools"), wxT("Tools"))
+Identifier ToolsToolBar::ID()
 {
+   return wxT("Tools");
+}
+
+//Standard constructor
+ToolsToolBar::ToolsToolBar( AudacityProject &project )
+: ToolBar(project, XO("Tools"), ID())
+{
+   using namespace ToolCodes;
+
    //Read the following wxASSERTs as documentating a design decision
    wxASSERT( selectTool   == selectTool   - firstTool );
    wxASSERT( envelopeTool == envelopeTool - firstTool );
-   wxASSERT( slideTool    == slideTool    - firstTool );
-   wxASSERT( zoomTool     == zoomTool     - firstTool );
    wxASSERT( drawTool     == drawTool     - firstTool );
    wxASSERT( multiTool    == multiTool    - firstTool );
-
    bool multiToolActive = false;
    gPrefs->Read(wxT("/GUI/ToolBars/Tools/MultiToolActive"), &multiToolActive);
 
@@ -92,10 +92,27 @@ ToolsToolBar::ToolsToolBar()
       mCurrentTool = multiTool;
    else
       mCurrentTool = selectTool;
+
+   project.Bind(EVT_PROJECT_SETTINGS_CHANGE,
+      &ToolsToolBar::OnToolChanged, this);
 }
 
 ToolsToolBar::~ToolsToolBar()
 {
+   static_assert(
+      ToolsToolBar::numTools <= ToolCodes::numTools,
+      "mismatch in number of tools" );
+}
+
+ToolsToolBar &ToolsToolBar::Get( AudacityProject &project )
+{
+   auto &toolManager = ToolManager::Get( project );
+   return *static_cast<ToolsToolBar*>(toolManager.GetToolBar(ID()));
+}
+
+const ToolsToolBar &ToolsToolBar::Get( const AudacityProject &project )
+{
+   return Get( const_cast<AudacityProject&>( project )) ;
 }
 
 void ToolsToolBar::RegenerateTooltips()
@@ -124,25 +141,25 @@ void ToolsToolBar::RegenerateTooltips()
 
    #if wxUSE_TOOLTIPS
 
+   using namespace ToolCodes;
+
    static const struct Entry {
       int tool;
       CommandID commandName;
-      wxString untranslatedLabel;
+      TranslatableString untranslatedLabel;
    } table[] = {
       { selectTool,   wxT("SelectTool"),    XO("Selection Tool")  },
       { envelopeTool, wxT("EnvelopeTool"),  XO("Envelope Tool")   },
-      { slideTool,    wxT("TimeShiftTool"), XO("Time Shift Tool") },
-      { zoomTool,     wxT("ZoomTool"),      XO("Zoom Tool")       },
       { drawTool,     wxT("DrawTool"),      XO("Draw Tool")       },
-      { multiTool,    wxT("MultiTool"),     XO("Multi Tool")      },
+      { multiTool,    wxT("MultiTool"),     XO("Multi-Tool")      },
    };
 
    for (const auto &entry : table) {
-      TranslatedInternalString command{
-         entry.commandName, wxGetTranslation(entry.untranslatedLabel) };
-      ToolBar::SetButtonToolTip( *mTool[entry.tool], &command, 1u );
+      ComponentInterfaceSymbol command{
+         entry.commandName, entry.untranslatedLabel };
+      ToolBar::SetButtonToolTip( mProject,
+         *mTool[entry.tool], &command, 1u );
    }
-
    #endif
 
    //		wxSafeYield();
@@ -157,7 +174,7 @@ void ToolsToolBar::UpdatePrefs()
 
 AButton * ToolsToolBar::MakeTool(
    ToolsToolBar *pBar, teBmps eTool,
-   int id, const wxChar *label)
+   int id, const TranslatableString &label)
 {
    AButton *button = ToolBar::MakeButton(pBar,
       bmpRecoloredUpSmall, 
@@ -178,88 +195,167 @@ void ToolsToolBar::Populate()
 {
    SetBackgroundColour( theTheme.Colour( clrMedium  ) );
    MakeButtonBackgroundsSmall();
-   Add(mToolSizer = safenew wxGridSizer(2, 3, 1, 1));
+
+   Add(mToolSizer = safenew wxGridSizer(2, 2, 1, 1));
 
    /* Tools */
-   mTool[ selectTool   ] = MakeTool( this, bmpIBeam, selectTool, _("Selection Tool") );
-   mTool[ envelopeTool ] = MakeTool( this, bmpEnvelope, envelopeTool, _("Envelope Tool") );
-   mTool[ drawTool     ] = MakeTool( this, bmpDraw, drawTool, _("Draw Tool") );
-   mTool[ zoomTool     ] = MakeTool( this, bmpZoom, zoomTool, _("Zoom Tool") );
-   mTool[ slideTool    ] = MakeTool( this, bmpTimeShift, slideTool, _("Slide Tool") );
-   mTool[ multiTool    ] = MakeTool( this, bmpMulti, multiTool, _("Multi Tool") );
+   using namespace ToolCodes;
+   mTool[ selectTool   ] = MakeTool( this, bmpIBeam, selectTool, XO("Selection Tool") );
+   mTool[ envelopeTool ] = MakeTool( this, bmpEnvelope, envelopeTool, XO("Envelope Tool") );
+   mTool[ drawTool     ] = MakeTool( this, bmpDraw, drawTool, XO("Draw Tool") );
+   mTool[ multiTool    ] = MakeTool( this, bmpMulti, multiTool, XO("Multi-Tool") );
 
-   mTool[mCurrentTool]->PushDown();
+   DoToolChanged();
 
    RegenerateTooltips();
 }
 
-/// Gets the currently active tool
-/// In Multi-mode this might not return the multi-tool itself
-/// since the active tool may be changed by what you hover over.
-int ToolsToolBar::GetCurrentTool() const
-{
-   return mCurrentTool;
-}
-
-/// Sets the currently active tool
-/// @param tool - The index of the tool to be used.
-void ToolsToolBar::SetCurrentTool(int tool)
-{
-   //In multi-mode the current tool is shown by the
-   //cursor icon.  The buttons are not updated.
-
-   bool leavingMulticlipMode =
-      IsDown(multiTool) && tool != multiTool;
-
-   if (leavingMulticlipMode)
-      mTool[multiTool]->PopUp();
-
-   if (tool != mCurrentTool || leavingMulticlipMode) {
-      mTool[mCurrentTool]->PopUp();
-      mCurrentTool=tool;
-      mTool[mCurrentTool]->PushDown();
-   }
-   //JKC: ANSWER-ME: Why is this RedrawAllProjects() line required?
-   //msmeyer: I think it isn't, we leave it out for 1.3.1 (beta), and
-   // we'll see if anyone complains.
-   // RedrawAllProjects();
-
-   //msmeyer: But we instruct the projects to handle the cursor shape again
-   RefreshCursorForAllProjects();
-
-   gPrefs->Write(wxT("/GUI/ToolBars/Tools/MultiToolActive"),
-                 IsDown(multiTool));
-   gPrefs->Flush();
-}
-
-bool ToolsToolBar::IsDown(int tool) const
-{
-   return mTool[tool]->IsDown();
-}
-
-int ToolsToolBar::GetDownTool()
-{
-   int tool;
-
-   for (tool = firstTool; tool <= lastTool; tool++)
-      if (IsDown(tool))
-         return tool;
-
-   return firstTool;  // Should never happen
-}
-
 void ToolsToolBar::OnTool(wxCommandEvent & evt)
 {
-   mCurrentTool = evt.GetId() - firstTool - FirstToolID;
+   // This will cause callback to OnToolChanged
+   auto iTool = evt.GetId() - ToolCodes::firstTool - FirstToolID;
+   auto pButton = mTool[iTool];
+   if (pButton->IsDown())
+      ProjectSettings::Get( mProject ).SetTool( iTool );
+   else
+      // Don't stay up
+      pButton->PushDown();
+}
+
+void ToolsToolBar::OnToolChanged(wxCommandEvent &evt)
+{
+   evt.Skip(); // Let other listeners hear the event too
+   if (evt.GetInt() != ProjectSettings::ChangedTool)
+      return;
+   DoToolChanged();
+   ProjectWindow::Get( mProject ).RedrawProject();
+}
+
+void ToolsToolBar::DoToolChanged()
+{
+   auto &projectSettings = ProjectSettings::Get( mProject );
+   using namespace ToolCodes;
+   mCurrentTool = projectSettings.GetTool() - firstTool;
    for (int i = 0; i < numTools; i++)
       if (i == mCurrentTool)
          mTool[i]->PushDown();
       else
          mTool[i]->PopUp();
 
-   RedrawAllProjects();
-
    gPrefs->Write(wxT("/GUI/ToolBars/Tools/MultiToolActive"),
-                 IsDown(multiTool));
+                 mTool[multiTool]->IsDown());
    gPrefs->Flush();
+}
+
+void ToolsToolBar::Create(wxWindow * parent)
+{
+   ToolBar::Create(parent);
+   UpdatePrefs();
+}
+
+static RegisteredToolbarFactory factory{
+   []( AudacityProject &project ){
+      return ToolBar::Holder{ safenew ToolsToolBar{ project } }; }
+};
+
+namespace {
+AttachedToolBarMenuItem sAttachment{
+   /* i18n-hint: Clicking this menu item shows a toolbar
+      that has some tools in it */
+   ToolsToolBar::ID(), wxT("ShowToolsTB"), XXO("T&ools Toolbar"),
+};
+}
+
+// Following code injects menu items for changing the current tool
+
+#include "../TrackPanel.h"
+
+// private helper classes and functions
+namespace {
+
+/// Called by handlers that set tools.
+void SetTool(AudacityProject &project, int tool)
+{
+   auto toolbar = &ToolsToolBar::Get( project );
+   if (toolbar) {
+      ProjectSettings::Get(project).SetTool(tool);
+      TrackPanel::Get( project ).Refresh(false);
+   }
+}
+
+}
+
+/// Namespace for functions for View Toolbar menu
+namespace {
+
+// Menu handler functions
+
+/// Handler to set the select tool active
+void OnSelectTool(const CommandContext &context)
+{
+   SetTool(context.project, ToolCodes::selectTool);
+}
+
+/// Handler to set the Envelope tool active
+void OnEnvelopeTool(const CommandContext &context)
+{
+   SetTool(context.project, ToolCodes::envelopeTool);
+}
+
+void OnDrawTool(const CommandContext &context)
+{
+   SetTool(context.project, ToolCodes::drawTool);
+}
+
+void OnMultiTool(const CommandContext &context)
+{
+   SetTool(context.project, ToolCodes::multiTool);
+}
+
+void OnPrevTool(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &trackPanel = TrackPanel::Get( project );
+   auto &settings = ProjectSettings::Get( project );
+
+   settings.SetTool(
+      (settings.GetTool() + (ToolCodes::numTools - 1 )) % ToolCodes::numTools);
+   trackPanel.Refresh(false);
+}
+
+void OnNextTool(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &trackPanel = TrackPanel::Get( project );
+   auto &settings = ProjectSettings::Get( project );
+
+   settings.SetTool( (settings.GetTool() + 1) % ToolCodes::numTools );
+   trackPanel.Refresh(false);
+}
+
+using namespace MenuTable;
+BaseItemSharedPtr ExtraToolsMenu()
+{
+   static BaseItemSharedPtr menu{
+   Menu( wxT("Tools"), XXO("T&ools"),
+      Command( wxT("SelectTool"), XXO("&Selection Tool"), OnSelectTool,
+         AlwaysEnabledFlag, wxT("F1") ),
+      Command( wxT("EnvelopeTool"), XXO("&Envelope Tool"),
+         OnEnvelopeTool, AlwaysEnabledFlag, wxT("F2") ),
+      Command( wxT("DrawTool"), XXO("&Draw Tool"), OnDrawTool,
+         AlwaysEnabledFlag, wxT("F3") ),
+      Command( wxT("MultiTool"), XXO("&Multi Tool"), OnMultiTool,
+         AlwaysEnabledFlag, wxT("F6") ),
+      Command( wxT("PrevTool"), XXO("&Previous Tool"), OnPrevTool,
+         AlwaysEnabledFlag, wxT("A") ),
+      Command( wxT("NextTool"), XXO("&Next Tool"), OnNextTool,
+         AlwaysEnabledFlag, wxT("D") )
+   ) };
+   return menu;
+}
+
+AttachedItem sAttachment2{
+   wxT("Optional/Extra/Part1"),
+   Indirect(ExtraToolsMenu())
+};
 }

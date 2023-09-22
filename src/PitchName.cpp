@@ -2,7 +2,7 @@
 
    Audacity: A Digital Audio Editor
    Audacity(R) is copyright (c) 1999-2012 Audacity Team.
-   License: GPL v2.  See License.txt.
+   License: GPL v2 or later.  See License.txt.
 
   PitchName.cpp
   Vaughan Johnson and Dominic Mazzoni.
@@ -17,11 +17,10 @@
 *//*******************************************************************/
 
 
-#include "Audacity.h"
+
 #include "PitchName.h"
 
 #include <math.h>
-#include <stdio.h>
 
 #include "Internat.h"
 
@@ -57,9 +56,9 @@ int PitchOctave(const double dMIDInote)
 }
 
 
-wxString PitchName(const double dMIDInote, const PitchNameChoice choice)
+TranslatableString PitchName(const double dMIDInote, const PitchNameChoice choice)
 {
-   static const wxString sharpnames[12] = {
+   static const TranslatableString sharpnames[12] = {
       /* i18n-hint: Name of a musical note in the 12-tone chromatic scale */
       XO("C"),
       /* i18n-hint: Name of a musical note in the 12-tone chromatic scale */
@@ -86,7 +85,7 @@ wxString PitchName(const double dMIDInote, const PitchNameChoice choice)
       XO("B"),
    };
 
-   static const wxString flatnames[12] = {
+   static const TranslatableString flatnames[12] = {
       /* i18n-hint: Name of a musical note in the 12-tone chromatic scale */
       XO("C"),
       /* i18n-hint: Name of a musical note in the 12-tone chromatic scale */
@@ -113,7 +112,7 @@ wxString PitchName(const double dMIDInote, const PitchNameChoice choice)
       XO("B"),
    };
 
-   static const wxString bothnames[12] = {
+   static const TranslatableString bothnames[12] = {
       /* i18n-hint: Name of a musical note in the 12-tone chromatic scale */
       XO("C"),
      /* i18n-hint: Two, alternate names of a musical note in the 12-tone chromatic scale */
@@ -140,7 +139,7 @@ wxString PitchName(const double dMIDInote, const PitchNameChoice choice)
       XO("B"),
    };
 
-   const wxString *table = nullptr;
+   const TranslatableString *table = nullptr;
    switch ( choice ) {
       case PitchNameChoice::Sharps: table = sharpnames; break;
       case PitchNameChoice::Flats: table = flatnames; break;
@@ -151,11 +150,11 @@ wxString PitchName(const double dMIDInote, const PitchNameChoice choice)
    return table[PitchIndex(dMIDInote)];
 }
 
-wxString PitchName_Absolute(const double dMIDInote, const PitchNameChoice choice)
+TranslatableString PitchName_Absolute(const double dMIDInote, const PitchNameChoice choice)
 {
    // The format string is not localized.  Should it be?
-   return wxString::Format(
-      wxT("%s%d"), PitchName(dMIDInote, choice), PitchOctave(dMIDInote) );
+   return Verbatim( wxT("%s%d") )
+      .Format( PitchName(dMIDInote, choice), PitchOctave(dMIDInote) );
 }
 
 double PitchToMIDInote(const unsigned int nPitchIndex, const int nPitchOctave)

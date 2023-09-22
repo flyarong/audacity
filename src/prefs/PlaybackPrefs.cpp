@@ -18,24 +18,38 @@
 
 *//********************************************************************/
 
-#include "../Audacity.h"
+
 #include "PlaybackPrefs.h"
 
 #include <wx/defs.h>
 #include <wx/textctrl.h>
 
-#include "../ShuttleGui.h"
-#include "../Prefs.h"
-#include "../Internat.h"
+#include "ShuttleGui.h"
+#include "Prefs.h"
 
 PlaybackPrefs::PlaybackPrefs(wxWindow * parent, wxWindowID winid)
-:  PrefsPanel(parent, winid, _("Playback"))
+:  PrefsPanel(parent, winid, XO("Playback"))
 {
    Populate();
 }
 
 PlaybackPrefs::~PlaybackPrefs()
 {
+}
+
+ComponentInterfaceSymbol PlaybackPrefs::GetSymbol() const
+{
+   return PLAYBACK_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString PlaybackPrefs::GetDescription() const
+{
+   return XO("Preferences for Playback");
+}
+
+ManualPageID PlaybackPrefs::HelpPageName()
+{
+   return "Playback_Preferences";
 }
 
 void PlaybackPrefs::Populate()
@@ -63,80 +77,81 @@ namespace {
 
 void PlaybackPrefs::PopulateOrExchange(ShuttleGui & S)
 {
-   wxTextCtrl *w;
+   const auto suffix = XO("seconds");
 
    S.StartScroller();
    S.SetBorder(2);
 
-   S.StartStatic(_("Effects Preview"));
+   S.StartStatic(XO("Effects Preview"));
    {
       S.StartThreeColumn();
       {
-         w = S.TieNumericTextBox(_("&Length:"),
-                                 wxT("/AudioIO/EffectsPreviewLen"),
-                                 6.0,
+         S.NameSuffix(suffix)
+            .TieNumericTextBox(XXO("&Length:"),
+                                 {wxT("/AudioIO/EffectsPreviewLen"),
+                                  6.0},
                                  9);
-         S.AddUnits(_("seconds"));
-         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         S.AddUnits(XO("seconds"));
       }
       S.EndThreeColumn();
    }
    S.EndStatic();
 
    /* i18n-hint: (noun) this is a preview of the cut */
-   S.StartStatic(_("Cut Preview"));
+   S.StartStatic(XO("Cut Preview"));
    {
       S.StartThreeColumn();
       {
-         w = S.TieNumericTextBox(_("&Before cut region:"),
-                                 wxT("/AudioIO/CutPreviewBeforeLen"),
-                                 2.0,
+         S.NameSuffix(suffix)
+            .TieNumericTextBox(XXO("&Before cut region:"),
+                                 {wxT("/AudioIO/CutPreviewBeforeLen"),
+                                  2.0},
                                  9);
-         S.AddUnits(_("seconds"));
-         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         S.AddUnits(XO("seconds"));
 
-         w = S.TieNumericTextBox(_("&After cut region:"),
-                                 wxT("/AudioIO/CutPreviewAfterLen"),
-                                 1.0,
+         S.NameSuffix(suffix)
+            .TieNumericTextBox(XXO("&After cut region:"),
+                                 {wxT("/AudioIO/CutPreviewAfterLen"),
+                                  1.0},
                                  9);
-         S.AddUnits(_("seconds"));
-         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         S.AddUnits(XO("seconds"));
       }
       S.EndThreeColumn();
    }
    S.EndStatic();
 
-   S.StartStatic(_("Seek Time when playing"));
+   S.StartStatic(XO("Seek Time when playing"));
    {
       S.StartThreeColumn();
       {
-         w = S.TieNumericTextBox(_("&Short period:"),
-                                 wxT("/AudioIO/SeekShortPeriod"),
-                                 1.0,
+         S.NameSuffix(suffix)
+            .TieNumericTextBox(XXO("&Short period:"),
+                                 {wxT("/AudioIO/SeekShortPeriod"),
+                                  1.0},
                                  9);
-         S.AddUnits(_("seconds"));
-         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         S.AddUnits(XO("seconds"));
 
-         w = S.TieNumericTextBox(_("Lo&ng period:"),
-                                 wxT("/AudioIO/SeekLongPeriod"),
-                                 15.0,
+         S.NameSuffix(suffix)
+            .TieNumericTextBox(XXO("Lo&ng period:"),
+                                 {wxT("/AudioIO/SeekLongPeriod"),
+                                  15.0},
                                  9);
-         S.AddUnits(_("seconds"));
-         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         S.AddUnits(XO("seconds"));
       }
       S.EndThreeColumn();
    }
    S.EndStatic();
 
-   S.StartStatic(_("Options"));
+   S.StartStatic(XO("Options"));
    {
       S.StartVerticalLay();
       {
-         S.TieCheckBox(_("&Vari-Speed Play"), "/AudioIO/VariSpeedPlay", true);
-         S.TieCheckBox(_("&Micro-fades"), "/AudioIO/Microfades", false);
-         S.TieCheckBox(_("Always scrub un&pinned"),
-            UnpinnedScrubbingPreferenceKey(),
-            UnpinnedScrubbingPreferenceDefault());
+         //Removing Vari-Speed Play from PlaybackPrefs
+         //S.TieCheckBox(XXO("&Vari-Speed Play"), {"/AudioIO/VariSpeedPlay", true});
+         S.TieCheckBox(XXO("&Micro-fades"), {"/AudioIO/Microfades", false});
+         S.TieCheckBox(XXO("Always scrub un&pinned"),
+            {UnpinnedScrubbingPreferenceKey(),
+             UnpinnedScrubbingPreferenceDefault()});
       }
       S.EndVerticalLay();
    }
@@ -168,14 +183,12 @@ bool PlaybackPrefs::Commit()
    return true;
 }
 
-wxString PlaybackPrefs::HelpPageName()
-{
-   return "Playback_Preferences";
+namespace{
+PrefsPanel::Registration sAttachment{ "Playback",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew PlaybackPrefs(parent, winid);
+   }
+};
 }
-
-PrefsPanel *PlaybackPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew PlaybackPrefs(parent, winid);
-}
-

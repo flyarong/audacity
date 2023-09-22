@@ -17,28 +17,28 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "GUIPrefs.h"
 
-#include "../Experimental.h"
-
 #include <wx/defs.h>
+#include <mutex> // once_flag
 
-#include "../AudacityApp.h"
-#include "../Languages.h"
-#include "../Theme.h"
-#include "../Prefs.h"
-#include "../ShuttleGui.h"
+#include "FileNames.h"
+#include "Languages.h"
+#include "Theme.h"
+#include "Prefs.h"
+#include "ShuttleGui.h"
 
-#include "GUISettings.h"
+#include "Decibels.h"
+#include "Beats.h"
 
 #include "ThemePrefs.h"
-#include "../AColor.h"
-#include "../Internat.h"
+#include "AColor.h"
+#include "GUISettings.h"
 
 GUIPrefs::GUIPrefs(wxWindow * parent, wxWindowID winid)
 /* i18n-hint: refers to Audacity's user interface settings */
-:  PrefsPanel(parent, winid, _("Interface"))
+:  PrefsPanel(parent, winid, XC("Interface", "GUI"))
 {
    Populate();
 }
@@ -47,82 +47,65 @@ GUIPrefs::~GUIPrefs()
 {
 }
 
-void GUIPrefs::GetRangeChoices(
-   wxArrayStringEx *pChoices, wxArrayStringEx *pCodes)
+ComponentInterfaceSymbol GUIPrefs::GetSymbol() const
 {
-   if (pCodes) {
-      auto &codes = *pCodes;
-      codes.clear();
-      codes.insert( codes.end(), {
-         wxT("36") ,
-         wxT("48") ,
-         wxT("60") ,
-         wxT("72") ,
-         wxT("84") ,
-         wxT("96") ,
-         wxT("120") ,
-         wxT("145") ,
-      } );
-   }
+   return GUI_PREFS_PLUGIN_SYMBOL;
+}
 
-   if (pChoices) {
-      auto &choices = *pChoices;
-      choices.clear();
-      choices.insert( choices.end(), {
-         _("-36 dB (shallow range for high-amplitude editing)") ,
-         _("-48 dB (PCM range of 8 bit samples)") ,
-         _("-60 dB (PCM range of 10 bit samples)") ,
-         _("-72 dB (PCM range of 12 bit samples)") ,
-         _("-84 dB (PCM range of 14 bit samples)") ,
-         _("-96 dB (PCM range of 16 bit samples)") ,
-         _("-120 dB (approximate limit of human hearing)") ,
-         _("-145 dB (PCM range of 24 bit samples)") ,
-      } );
-   }
+TranslatableString GUIPrefs::GetDescription() const
+{
+   return XO("Preferences for GUI");
+}
+
+ManualPageID GUIPrefs::HelpPageName()
+{
+   return "Interface_Preferences";
+}
+
+void GUIPrefs::GetRangeChoices(
+   TranslatableStrings *pChoices,
+   wxArrayStringEx *pCodes,
+   int *pDefaultRangeIndex
+)
+{
+   static const auto sCodes = {
+      wxT("36") ,
+      wxT("48") ,
+      wxT("60") ,
+      wxT("72") ,
+      wxT("84") ,
+      wxT("96") ,
+      wxT("120") ,
+      wxT("145") ,
+   };
+   if (pCodes)
+      *pCodes = sCodes;
+
+   static const std::initializer_list<TranslatableString> sChoices = {
+      XO("-36 dB (shallow range for high-amplitude editing)") ,
+      XO("-48 dB (PCM range of 8 bit samples)") ,
+      XO("-60 dB (PCM range of 10 bit samples)") ,
+      XO("-72 dB (PCM range of 12 bit samples)") ,
+      XO("-84 dB (PCM range of 14 bit samples)") ,
+      XO("-96 dB (PCM range of 16 bit samples)") ,
+      XO("-120 dB (approximate limit of human hearing)") ,
+      XO("-145 dB (PCM range of 24 bit samples)") ,
+   };
+
+   if (pChoices)
+      *pChoices = sChoices;
+
+   if (pDefaultRangeIndex)
+      *pDefaultRangeIndex = 2; // 60 == ENV_DB_RANGE
 }
 
 void GUIPrefs::Populate()
 {
    // First any pre-processing for constructing the GUI.
-   GetLanguages(mLangCodes, mLangNames);
+   Languages::GetLanguages(
+      FileNames::AudacityPathList(), mLangCodes, mLangNames);
 
-   mHtmlHelpCodes.clear();
-   auto values = {
-      wxT("Local") ,
-      wxT("FromInternet") ,
-   };
-   mHtmlHelpCodes.insert( mHtmlHelpCodes.end(), values );
-
-   mHtmlHelpChoices.clear();
-   auto values2 = {
-      _("Local") ,
-      _("From Internet") ,
-   };
-   mHtmlHelpChoices.insert( mHtmlHelpChoices.end(), values2 );
-
-   mThemeCodes.clear();
-   mThemeCodes.insert( mThemeCodes.end(), {
-       wxT("classic")  ,
-       wxT("light")  ,
-       wxT("dark")  ,
-       wxT("high-contrast")  ,
-       wxT("custom")  ,
-   } );
-
-   mThemeChoices.clear();
-   mThemeChoices.insert( mThemeChoices.end(), {
-      /* i18n-hint: describing the "classic" or traditional appearance of older versions of Audacity */
-       _("Classic")  ,
-      /* i18n-hint: Light meaning opposite of dark */
-       _("Light")  ,
-       _("Dark")  ,
-      /* i18n-hint: greater difference between foreground and background colors */
-       _("High Contrast")  ,
-      /* i18n-hint: user defined */
-       _("Custom")  ,
-   } );
-
-   GetRangeChoices(&mRangeChoices, &mRangeCodes);
+   GetRangeChoices(&mRangeChoices, &mRangeCodes, &mDefaultRangeIndex);
 
 #if 0
    mLangCodes.insert( mLangCodes.end(), {
@@ -148,87 +131,76 @@ void GUIPrefs::Populate()
 
 void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
 {
+   ChoiceSetting LanguageSetting{ wxT("/Locale/Language"),
+      { ByColumns, mLangNames, mLangCodes }
+   };
+   ChoiceSetting DBSetting{ DecibelScaleCutoff,
+      { ByColumns, mRangeChoices, mRangeCodes },
+      mDefaultRangeIndex
+   };
+
    S.SetBorder(2);
    S.StartScroller();
 
-   S.StartStatic(_("Display"));
+   S.StartStatic(XO("Display"));
    {
       S.StartMultiColumn(2);
       {
-
-#ifdef EXPERIMENTAL_DA
-         const wxString defaultTheme = wxT("dark");
-#else
-         const wxString defaultTheme = wxT("light");
-#endif
-         const wxString defaultRange = wxString::Format(wxT("%d"), ENV_DB_RANGE);
-
-         S.TieChoice(_("&Language:"),
-                     wxT("/Locale/Language"),
-                     wxT(""),
-                     mLangNames,
-                     mLangCodes);
-
-         S.TieChoice(_("Location of &Manual:"),
-                     wxT("/GUI/Help"),
-                     wxT("Local"),
-                     mHtmlHelpChoices,
-                     mHtmlHelpCodes);
-
-         S.TieChoice(_("Th&eme:"),
-                     wxT("/GUI/Theme"),
-                     defaultTheme,
-                     mThemeChoices,
-                     mThemeCodes);
-
-         S.TieChoice(_("Meter dB &range:"),
-                     ENV_DB_KEY,
-                     defaultRange,
-                     mRangeChoices,
-                     mRangeCodes);
+         S.TieChoice( XXO("&Language:"), LanguageSetting);
+         // S.TieChoice( XXO("Location of &Manual:"), GUIManualLocation);
+         S.TieChoice( XXO("Th&eme:"), GUITheme());
+         S.TieChoice( XXO("Meter dB &range:"), DBSetting);
       }
       S.EndMultiColumn();
-//      S.AddSpace(10);
-// JKC: This is a silly preference.  Kept here as a reminder that we may
-// later want to have configurable button order.
-//      S.TieCheckBox(_("&Ergonomic order of Transport Toolbar buttons"),
-//                    wxT("/GUI/ErgonomicTransportButtons"),
-//                    true);
-
    }
    S.EndStatic();
 
-   S.StartStatic(_("Options"));
+   S.StartStatic(XO("Options"));
    {
       // Start wording of options with a verb, if possible.
-      S.TieCheckBox(_("Show 'How to Get &Help' at launch"),
-                    wxT("/GUI/ShowSplashScreen"),
-                    true);
-      S.TieCheckBox(_("Show e&xtra menus"),
-                    wxT("/GUI/ShowExtraMenus"),
-                    false);
+      S.TieCheckBox(XXO("Show 'How to Get &Help' at launch"),
+                    {wxT("/GUI/ShowSplashScreen"),
+                     true});
+      S.TieCheckBox(XXO("Show e&xtra menus"),
+                    {wxT("/GUI/ShowExtraMenus"),
+                     false});
 #ifdef EXPERIMENTAL_THEME_PREFS
-      // We do not want to make this option mainstream.  It's a 
+      // We do not want to make this option mainstream.  It's a
       // convenience for developers.
-      S.TieCheckBox(_("Show alternative &styling (Mac vs PC)"),
-                    wxT("/GUI/ShowMac"),
-                    false);
+      S.TieCheckBox(XXO("Show alternative &styling (Mac vs PC)"),
+                    {wxT("/GUI/ShowMac"),
+                     false});
 #endif
-      S.TieCheckBox(_("&Beep on completion of longer activities"),
-                    wxT("/GUI/BeepOnCompletion"),
-                    false);
-      S.TieCheckBox(_("Re&tain labels if selection snaps to a label"),
-                    wxT("/GUI/RetainLabels"),
-                    false);
-      S.TieCheckBox(_("B&lend system and Audacity theme"),
-                    wxT("/GUI/BlendThemes"),
-                    true);
+      S.TieCheckBox(XXO("&Beep on completion of longer activities"),
+                    {wxT("/GUI/BeepOnCompletion"),
+                     false});
+      S.TieCheckBox(XXO("Re&tain labels if selection snaps to a label"),
+                    {wxT("/GUI/RetainLabels"),
+                     false});
+      S.TieCheckBox(XXO("B&lend system and Audacity theme"),
+                     GUIBlendThemes);
 #ifndef __WXMAC__
       /* i18n-hint: RTL stands for 'Right to Left'  */
-      S.TieCheckBox(_("Use mostly Left-to-Right layouts in RTL languages"),
-         "/GUI/RtlWorkaround",
-         true);
+      S.TieCheckBox(XXO("Use mostly Left-to-Right layouts in RTL languages"),
+         {"/GUI/RtlWorkaround",
+          true});
 #endif
+#ifdef EXPERIMENTAL_CEE_NUMBERS_OPTION
+      S.TieCheckBox(XXO("Never use comma as decimal point"),
+                    {wxT("/Locale/CeeNumberFormat"),
+                     false});
+#endif
+   }
+   S.EndStatic();
+
+   S.StartStatic(XO("Timeline"));
+   {
+      S.TieCheckBox(XXO("Show Timeline Tooltips"),
+                    {wxT("/QuickPlay/ToolTips"),
+                     true});
+      S.TieCheckBox(XXO("Show Scrub Ruler"),
+                    {wxT("/QuickPlay/ScrubbingEnabled"),
+                     false});
    }
    S.EndStatic();
 
@@ -242,24 +214,46 @@ bool GUIPrefs::Commit()
 
    // If language has changed, we want to change it now, not on the next reboot.
    wxString lang = gPrefs->Read(wxT("/Locale/Language"), wxT(""));
-   wxString usedLang = wxGetApp().SetLang(lang);
+   wxString usedLang = GUISettings::SetLang(lang);
    // Bug 1523: Previously didn't check no-language (=System Language)
-   if (!(lang.empty()) && (lang != usedLang)) {
+   if (!(lang.empty() || lang == L"System") && (lang != usedLang)) {
       // lang was not usable and is not system language.  We got overridden.
       gPrefs->Write(wxT("/Locale/Language"), usedLang);
       gPrefs->Flush();
    }
 
+   // Reads preference GUITheme
+   {
+      wxBusyCursor busy;
+      theTheme.LoadPreferredTheme();
+      theTheme.DeleteUnusedThemes();
+   }
+   AColor::ApplyUpdatedImages();
+
+   GUIBlendThemes.Invalidate();
+   DecibelScaleCutoff.Invalidate();
+
    return true;
 }
 
-wxString GUIPrefs::HelpPageName()
+int ShowClippingPrefsID()
 {
-   return "Interface_Preferences";
+   static int value = wxNewId();
+   return value;
 }
 
-PrefsPanel *GUIPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
+int ShowTrackNameInWaveformPrefsID()
 {
-   wxASSERT(parent); // to justify safenew
-   return safenew GUIPrefs(parent, winid);
+   static int value = wxNewId();
+   return value;
+}
+
+namespace{
+PrefsPanel::Registration sAttachment{ "GUI",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew GUIPrefs(parent, winid);
+   }
+};
 }

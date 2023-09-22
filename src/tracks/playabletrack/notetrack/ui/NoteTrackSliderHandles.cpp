@@ -8,19 +8,20 @@
 
  **********************************************************************/
 
-#include "../../../../Audacity.h"
-#include "NoteTrackSliderHandles.h"
 
-#include "../../../../Experimental.h"
+#include "NoteTrackSliderHandles.h"
 
 #ifdef EXPERIMENTAL_MIDI_OUT
 
-#include "../../../../HitTestResult.h"
-#include "../../../../Project.h"
+#include "NoteTrackControls.h"
+#include "ProjectHistory.h"
 #include "../../../../RefreshCode.h"
-#include "../../../../TrackPanel.h" // for TrackInfo
-#include "../../../../UndoManager.h"
+#include "../../../../TrackInfo.h"
+#include "../../../../TrackPanel.h"
+#include "../../../../TrackPanelAx.h"
+#include "UndoManager.h"
 #include "../../../../NoteTrack.h"
+#include "ViewInfo.h"
 
 VelocitySliderHandle::VelocitySliderHandle
 ( SliderFn sliderFn, const wxRect &rect,
@@ -32,7 +33,7 @@ VelocitySliderHandle::~VelocitySliderHandle()
 {
 }
 
-std::shared_ptr<NoteTrack> VelocitySliderHandle::GetNoteTrack()
+std::shared_ptr<NoteTrack> VelocitySliderHandle::GetNoteTrack() const
 {
    return std::static_pointer_cast<NoteTrack>(mpTrack.lock());
 }
@@ -61,11 +62,35 @@ UIHandle::Result VelocitySliderHandle::SetValue
 UIHandle::Result VelocitySliderHandle::CommitChanges
 (const wxMouseEvent &, AudacityProject *pProject)
 {
-   pProject->PushState(_("Moved velocity slider"), _("Velocity"), UndoPush::CONSOLIDATE);
+   ProjectHistory::Get( *pProject )
+      .PushState(XO("Moved velocity slider"), XO("Velocity"),
+         UndoPush::CONSOLIDATE);
    return RefreshCode::RefreshCell;
 }
 
+TranslatableString VelocitySliderHandle::Tip(
+   const wxMouseState &, AudacityProject &project) const
+{
+   TranslatableString val;
+   float value = 0;
 
+   auto pTrack = GetNoteTrack();
+   if (pTrack)
+      value = pTrack->GetVelocity();
+
+   // LLL: Can't access the slider since Tip() is a const method and getting the slider
+   //      is not, so duplicate what LWSlider does.
+
+   if (value > 0.0f)
+      // Signed
+      val = Verbatim("%+d").Format((int)value);
+   else
+      // Zero, or signed negative
+      val = Verbatim("%d").Format((int)value);
+
+   /* i18n-hint: An item name followed by a value, with appropriate separating punctuation */
+   return XO("%s: %s").Format(XO("Velocity"), val);
+}
 
 UIHandlePtr VelocitySliderHandle::HitTest
 (std::weak_ptr<VelocitySliderHandle> &holder,
@@ -76,15 +101,15 @@ UIHandlePtr VelocitySliderHandle::HitTest
       return {};
 
    wxRect sliderRect;
-   TrackInfo::GetVelocityRect(rect.GetTopLeft(), sliderRect);
+   NoteTrackControls::GetVelocityRect(rect.GetTopLeft(), sliderRect);
    if ( TrackInfo::HideTopItem( rect, sliderRect, kTrackInfoSliderAllowance ) )
       return {};
    if (sliderRect.Contains(state.m_x, state.m_y)) {
       auto sliderFn =
       []( AudacityProject *pProject, const wxRect &sliderRect, Track *pTrack ) {
-         return TrackInfo::VelocitySlider
+         return NoteTrackControls::VelocitySlider
             (sliderRect, static_cast<NoteTrack*>( pTrack ), true,
-             const_cast<TrackPanel*>(pProject->GetTrackPanel()));
+             &TrackPanel::Get( *pProject ));
       };
       auto result = std::make_shared<VelocitySliderHandle>(
          sliderFn, sliderRect, pTrack );

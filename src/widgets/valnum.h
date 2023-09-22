@@ -11,7 +11,7 @@
 #ifndef _WIDGETS_VALNUM_H_
 #define _WIDGETS_VALNUM_H_
 
-#include "../MemoryX.h"
+#include <memory>
 #include <wx/setup.h> // for wxUSE_* macros
 #include <wx/defs.h>
 
@@ -21,6 +21,8 @@
 #include <wx/validate.h> // to inherit
 
 #include <limits>
+
+class TranslatableString;
 
 // Bit masks used for numeric validator styles.
 enum class NumValidatorStyle : int
@@ -44,7 +46,7 @@ inline int operator & (NumValidatorStyle x, NumValidatorStyle y)
 // Base class for all numeric validators.
 // ----------------------------------------------------------------------------
 
-class NumValidatorBase /* not final */ : public wxValidator
+class AUDACITY_DLL_API NumValidatorBase /* not final */ : public wxValidator
 {
 public:
     // Change the validator style. Usually it's specified during construction.
@@ -116,7 +118,7 @@ private:
     // Do all checks to ensure this is a valid value.
     // Returns 'true' if the control has valid value.
     // Otherwise the cause is indicated in 'errMsg'.
-    virtual bool DoValidateNumber(wxString * errMsg) const = 0;
+    virtual bool DoValidateNumber(TranslatableString * errMsg) const = 0;
 
     // Event handlers.
     void OnChar(wxKeyEvent& event);
@@ -144,7 +146,7 @@ namespace Private
 // variable.
 //
 // The template argument B is the name of the base class which must derive from
-// wxNumValidatorBase and define LongestValueType type and {To,As}String()
+// NumValidatorBase and define LongestValueType type and {To,As}String()
 // methods i.e. basically be one of {Integer,Number}ValidatorBase classes.
 //
 // The template argument T is just the type handled by the validator that will
@@ -275,7 +277,8 @@ private:
 // type-dependent code of wxIntegerValidator<> and always works with values of
 // type LongestValueType. It is not meant to be used directly, please use
 // IntegerValidator<> only instead.
-class IntegerValidatorBase /* not final */ : public NumValidatorBase
+class AUDACITY_DLL_API IntegerValidatorBase /* not final */
+   : public NumValidatorBase
 {
 protected:
     // Define the type we use here, it should be the maximal-sized integer type
@@ -321,7 +324,7 @@ protected:
 
     // Implement NumValidatorBase pure virtual method.
     bool IsCharOk(const wxString& val, int pos, wxChar ch) const override;
-    bool DoValidateNumber(wxString * errMsg) const override;
+    bool DoValidateNumber(TranslatableString * errMsg) const override;
 
 private:
     // Minimal and maximal values accepted (inclusive).
@@ -379,7 +382,8 @@ MakeIntegerValidator(T *value, NumValidatorStyle style = NumValidatorStyle::DEFA
 
 // Similar to IntegerValidatorBase, this class is not meant to be used
 // directly, only FloatingPointValidator<> should be used in the user code.
-class FloatingPointValidatorBase /* not final */ : public NumValidatorBase
+class AUDACITY_DLL_API FloatingPointValidatorBase /* not final */
+   : public NumValidatorBase
 {
 public:
     // Set precision i.e. the number of digits shown (and accepted on input)
@@ -421,7 +425,7 @@ protected:
 
     // Implement NumValidatorBase pure virtual method.
     bool IsCharOk(const wxString& val, int pos, wxChar ch) const override;
-    bool DoValidateNumber(wxString * errMsg) const override;
+    bool DoValidateNumber(TranslatableString * errMsg) const override;
 
     //Checks that it doesn't have too many decimal digits.
     bool ValidatePrecision(const wxString& s) const;
@@ -504,6 +508,10 @@ MakeFloatingPointValidator(int precision, T *value, NumValidatorStyle style = Nu
 {
     return FloatingPointValidator<T>(precision, value, style);
 }
+
+// Sometimes useful for specifying max and min values for validators, when they
+// must have the same precision as the validated value
+AUDACITY_DLL_API double RoundValue(int precision, double value);
 
 #endif // wxUSE_VALIDATORS
 

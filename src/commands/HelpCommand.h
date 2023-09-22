@@ -23,22 +23,48 @@
 #include "CommandType.h"
 #include "Command.h"
 
-#define HELP_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Help") }
-
 class HelpCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+   int mFormat;
+
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return HELP_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Gives help on a command.");};
-   bool DefineParams( ShuttleParams & S ) override;
+   ComponentInterfaceSymbol GetSymbol() const override {return Symbol;};
+   TranslatableString GetDescription() const override {return XO("Gives help on a command.");};
+   template<bool Const> bool VisitSettings( SettingsVisitorBase<Const> &S );
+   bool VisitSettings( SettingsVisitor & S ) override;
+   bool VisitSettings( ConstSettingsVisitor & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
    bool Apply(const CommandContext & context) override;
+   bool ApplyInner(const CommandContext & context);
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#help");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#help";}
 public:
    wxString mCommandName;
+};
+
+class CommentCommand : public AudacityCommand
+{
+public:
+   static const ComponentInterfaceSymbol Symbol;
+   int mFormat;
+
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() const override {return Symbol;};
+   TranslatableString GetDescription() const override {return XO("For comments in a macro.");};
+   template<bool Const> bool VisitSettings( SettingsVisitorBase<Const> &S );
+   bool VisitSettings( SettingsVisitor & S ) override;
+   bool VisitSettings( ConstSettingsVisitor & S ) override;
+   void PopulateOrExchange(ShuttleGui & S) override;
+   bool Apply(const CommandContext & context) override {
+      return true;
+   };
+   // AudacityCommand overrides
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#comment";}
+public:
+   wxString mComment;
 };
 
 

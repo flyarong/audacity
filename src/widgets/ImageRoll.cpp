@@ -94,13 +94,16 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "ImageRoll.h"
 
-#include <wx/wx.h>
 #include <wx/bitmap.h>
 #include <wx/dcmemory.h>
-#include <wx/image.h>
+#include <wx/dcclient.h>
+
+ImageRoll::ImageRoll(const ImageRoll&) = default;
+ImageRoll &ImageRoll::operator =(const ImageRoll&) = default;
+ImageRoll::~ImageRoll() = default;
 
 // static
 ImageArray ImageRoll::SplitH(const wxImage &src, wxColour magicColor)
@@ -266,7 +269,7 @@ void ImageRoll::Init(RollType type, const wxImage &src, wxColour magicColor)
       break;
 
    /* Adding these shuts up some GCC warnings. It is functionally what was
-    * implict here before - Richard */
+    * implicit here before - Richard */
    case Uninitialized:
    break;
 
@@ -416,42 +419,4 @@ void ImageRoll::Draw(wxDC &dc, wxRect rect, int WXUNUSED(logicalFunc))
    break;
 
    } // switch
-}
-
-BEGIN_EVENT_TABLE(ImageRollPanel, wxPanelWrapper)
-   EVT_PAINT(ImageRollPanel::OnPaint)
-   EVT_SIZE(ImageRollPanel::OnSize)
-END_EVENT_TABLE()
-
-IMPLEMENT_CLASS(ImageRollPanel, wxPanelWrapper)
-
-ImageRollPanel::ImageRollPanel(wxWindow *parent,
-                               wxWindowID id,
-                               //ImageRoll &imgRoll,
-                               const wxPoint& pos,
-                               const wxSize& size,
-                               long style):
-   wxPanelWrapper(parent, id, pos, size, style),
-   //mImageRoll(imgRoll),
-   mLogicalFunction(wxCOPY)
-{
-//   SetSizeHints(mImageRoll.GetMinSize(),
-//                mImageRoll.GetMaxSize());
-}
-
-void ImageRollPanel::SetLogicalFunction(int /*wxRasterOperationMode*/ func)
-{
-   mLogicalFunction = func;
-}
-
-void ImageRollPanel::OnPaint(wxPaintEvent & WXUNUSED(event))
-{
-   wxPaintDC dc(this);
-
-//   mImageRoll.Draw(dc, GetClientRect(), mLogicalFunction);
-}
-
-void ImageRollPanel::OnSize(wxSizeEvent & WXUNUSED(event))
-{
-   Refresh(false);
 }

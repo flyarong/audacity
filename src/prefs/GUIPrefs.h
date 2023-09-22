@@ -17,41 +17,43 @@
 
 #include "PrefsPanel.h"
 
+class ChoiceSetting;
 class ShuttleGui;
-class wxArrayStringEx;
 
-class GUIPrefs final : public PrefsPanel
+#define GUI_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("GUI") }
+
+class AUDACITY_DLL_API GUIPrefs final : public PrefsPanel
 {
  public:
    GUIPrefs(wxWindow * parent, wxWindowID winid);
    ~GUIPrefs();
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+
    bool Commit() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    static void GetRangeChoices(
-      wxArrayStringEx *pChoices, wxArrayStringEx *pCodes);
+      TranslatableStrings *pChoices,
+      wxArrayStringEx *pCodes,
+      int *pDefaultRangeIndex = nullptr
+   );
 
  private:
    void Populate();
 
    wxArrayStringEx mLangCodes;
-   wxArrayStringEx mLangNames;
-
-   wxArrayStringEx mHtmlHelpCodes;
-   wxArrayStringEx mHtmlHelpChoices;
-
-   wxArrayStringEx mThemeCodes;
-   wxArrayStringEx mThemeChoices;
+   TranslatableStrings mLangNames;
 
    wxArrayStringEx mRangeCodes;
-   wxArrayStringEx mRangeChoices;
+   TranslatableStrings mRangeChoices;
+   int mDefaultRangeIndex;
 };
 
-/// A PrefsPanelFactory that creates one GUIPrefs panel.
-class GUIPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
+AUDACITY_DLL_API
+int ShowClippingPrefsID();
+AUDACITY_DLL_API
+int ShowTrackNameInWaveformPrefsID();
+
 #endif

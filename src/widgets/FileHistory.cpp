@@ -9,18 +9,22 @@
 *******************************************************************//**
 
 \class FileHistory
-\brief Similar to FileHistory, but customized to our needs.
+\brief Similar to wxFileHistory, but customized to our needs.
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "FileHistory.h"
 
 #include <wx/defs.h>
-#include <wx/fileconf.h>
 #include <wx/menu.h>
 
-#include "../Internat.h"
+#include "Internat.h"
+#include "Prefs.h"
+
+#include "BasicSettings.h"
+
+#include <mutex>
 
 FileHistory::FileHistory(size_t maxfiles, wxWindowID base)
 {
@@ -30,6 +34,19 @@ FileHistory::FileHistory(size_t maxfiles, wxWindowID base)
 
 FileHistory::~FileHistory()
 {
+}
+
+FileHistory &FileHistory::Global()
+{
+   // TODO - read the number of files to store in history from preferences
+   static FileHistory history{
+      ID_RECENT_LAST - ID_RECENT_FIRST + 1, ID_RECENT_CLEAR };
+   static std::once_flag flag;
+   std::call_once( flag, [&]{
+      history.Load(*gPrefs, wxT("RecentFiles"));
+   });
+
+   return history;
 }
 
 // File history management
@@ -57,21 +74,18 @@ void FileHistory::AddFileToHistory(const FilePath & file, bool update)
 
    mHistory.insert(mHistory.begin(), file);
 
-   if (update) {
-      AddFilesToMenu();
-   }
+   if (update)
+      NotifyMenus();
 }
 
-void FileHistory::RemoveFileFromHistory(size_t i, bool update)
+void FileHistory::Remove( size_t i )
 {
    wxASSERT(i < mHistory.size());
 
    if (i < mHistory.size()) {
       mHistory.erase( mHistory.begin() + i );
 
-      if (update) {
-         AddFilesToMenu();
-      }
+      NotifyMenus();
    }
 }
 
@@ -79,24 +93,7 @@ void FileHistory::Clear()
 {
    mHistory.clear();
 
-   AddFilesToMenu();
-}
-
-const FilePath &FileHistory::GetHistoryFile(size_t i) const
-{
-   wxASSERT(i < mHistory.size());
-
-   if (i < mHistory.size()) {
-      return mHistory[i];
-   }
-
-   static const FilePath empty{};
-   return empty;
-}
-
-size_t FileHistory::GetCount()
-{
-   return mHistory.size();
+   NotifyMenus();
 }
 
 void FileHistory::UseMenu(wxMenu *menu)
@@ -112,51 +109,47 @@ void FileHistory::UseMenu(wxMenu *menu)
    else {
       wxASSERT(false);
    }
+
+   NotifyMenu( menu );
 }
 
-void FileHistory::Load(wxConfigBase & config, const wxString & group)
+void FileHistory::Load(audacity::BasicSettings& settings, const wxString & group)
 {
    mHistory.clear();
+   mGroup = group.empty()
+      ? wxString{ "RecentFiles" }
+      : group;
 
-   config.SetPath(group);
-
-   wxString file;
-   long ndx;
-   bool got = config.GetFirstEntry(file, ndx);
-   while (got) {
-      AddFileToHistory(config.Read(file), false);
-      got = config.GetNextEntry(file, ndx);
-   }
-
-   config.SetPath(wxT(".."));
-
-   AddFilesToMenu();
+   const auto localGroup = settings.BeginGroup(mGroup);
+   for(const auto& key : settings.GetChildKeys())
+      AddFileToHistory(settings.Read(key), false);
+   
+   NotifyMenus();
 }
 
-void FileHistory::Save(wxConfigBase & config, const wxString & group)
+void FileHistory::Save(audacity::BasicSettings& settings)
 {
-   config.SetPath(wxT(""));
-   config.DeleteGroup(group);
-   config.SetPath(group);
-
+   auto group = settings.BeginGroup(mGroup);
+   settings.Remove({});
+   
    // Stored in reverse order
    int n = mHistory.size() - 1;
    for (size_t i = 1; i <= mHistory.size(); i++) {
-      config.Write(wxString::Format(wxT("file%02d"), (int)i), mHistory[n--]);
+      settings.Write(wxString::Format(wxT("file%02d"), (int)i), mHistory[n--]);
    }
-
-   config.SetPath(wxT(""));
+   settings.Flush();
 }
 
-void FileHistory::AddFilesToMenu()
+void FileHistory::NotifyMenus()
 {
    Compress();
    for (auto pMenu : mMenus)
       if (pMenu)
-         AddFilesToMenu(pMenu);
+         NotifyMenu(pMenu);
+   Save(*gPrefs);
 }
 
-void FileHistory::AddFilesToMenu(wxMenu *menu)
+void FileHistory::NotifyMenu(wxMenu *menu)
 {
    wxMenuItemList items = menu->GetMenuItems();
    for (auto end = items.end(), iter = items.begin(); iter != end;)

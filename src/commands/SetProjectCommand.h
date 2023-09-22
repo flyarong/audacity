@@ -20,20 +20,22 @@
 #include "Command.h"
 #include "CommandType.h"
 
-#define SET_PROJECT_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Set Project") }
-
 class SetProjectCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    SetProjectCommand();
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SET_PROJECT_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets various values for a project.");};
-   bool DefineParams( ShuttleParams & S ) override;
+   ComponentInterfaceSymbol GetSymbol() const override {return Symbol;};
+   TranslatableString GetDescription() const override {return XO("Sets various values for a project.");};
+   template<bool Const> bool VisitSettings( SettingsVisitorBase<Const> &S );
+   bool VisitSettings( SettingsVisitor & S ) override;
+   bool VisitSettings( ConstSettingsVisitor & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#set_project");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_I#set_project";}
 
    bool Apply(const CommandContext & context) override;
 

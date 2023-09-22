@@ -9,8 +9,6 @@
 
 **********************************************************************/
 
-#include "../Experimental.h"
-
 class wxChoice;
 class wxTextCtrl;
 class ShuttleGui;
@@ -24,16 +22,19 @@ class ShuttleGui;
 
 #include "PrefsPanel.h"
 
-class wxArrayStringEx;
+#define MIDI_IO_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Midi IO") }
 
 class MidiIOPrefs final : public PrefsPanel
 {
  public:
    MidiIOPrefs(wxWindow * parent, wxWindowID winid);
    virtual ~MidiIOPrefs();
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+
    bool Commit() override;
    bool Validate() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
  private:
@@ -43,7 +44,7 @@ class MidiIOPrefs final : public PrefsPanel
    void OnHost(wxCommandEvent & e);
 //   void OnDevice(wxCommandEvent & e);
 
-   wxArrayStringEx mHostNames;
+   TranslatableStrings mHostNames;
    wxArrayStringEx mHostLabels;
 
    wxString mPlayDevice;
@@ -63,12 +64,6 @@ class MidiIOPrefs final : public PrefsPanel
    DECLARE_EVENT_TABLE()
 };
 
-/// A PrefsPanelFactory that creates one MidiIOPrefs panel.
-class MidiIOPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
 #endif
 
 #endif

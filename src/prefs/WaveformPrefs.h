@@ -20,13 +20,18 @@ class WaveTrack;
 class wxCheckBox;
 class wxChoice;
 
-class wxArrayStringEx;
+#define WAVEFORM_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Waveform") }
 
 class WaveformPrefs final : public PrefsPanel
 {
 public:
-   WaveformPrefs(wxWindow * parent, wxWindowID winid, WaveTrack *wt);
+   WaveformPrefs(wxWindow * parent, wxWindowID winid,
+      AudacityProject *pProject, WaveTrack *wt);
    virtual ~WaveformPrefs();
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+   ManualPageID HelpPageName() override;
+
    bool Commit() override;
    bool ShowsPreviewButton() override;
    bool Validate() override;
@@ -42,6 +47,8 @@ private:
 
    void EnableDisableRange();
 
+   AudacityProject *mProject{};
+
    WaveTrack *const mWt;
    bool mDefaulted;
 
@@ -50,21 +57,15 @@ private:
    wxChoice *mRangeChoice;
 
    wxArrayStringEx mRangeCodes;
-   wxArrayStringEx mRangeChoices;
+   TranslatableStrings mRangeChoices;
 
    WaveformSettings mTempSettings;
 
    bool mPopulating;
 };
 
-/// A PrefsPanelFactory that creates one WaveformPrefs panel.
-class WaveformPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   explicit WaveformPrefsFactory(WaveTrack *wt = 0);
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-
-private:
-   WaveTrack *const mWt;
-};
+/// A PrefsPanel::Factory that creates one WaveformPrefs panel.
+/// This factory can be parametrized by a single track, to change settings
+/// non-globally
+extern PrefsPanel::Factory WaveformPrefsFactory(WaveTrack *wt);
 #endif

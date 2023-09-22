@@ -18,6 +18,16 @@
 *  4-Mar-91 | GWL : DOS allows odd inst addrs
 * 10-Oct-94 | nix : posicionador tridimensionale interface
 * 28-Apr-03 |  DM : true->TRUE, false->FALSE
+* 18-May-15 | RBD : The varargs hack to allow arbitrary parameters (only
+*           | limited by total size) passed to cause() breaks down on ia64
+*           | where args are not passed uniformly on the stack. To fix this
+*           | the beautiful cause() that survived 30 years of ports, will 
+*           | finally have to go. The new cause() will take only one
+*           | parameter to pass along to callees. It will be of type
+*           | call_args_node (the same type used by the scheduler to store
+*           | the args.) It will now be up to the caller to pack the real
+*           | args into call_args_node, and up to the callee to unpack.
+*           | (packing/unpacking were previously hidden in moxc.c)
 *****************************************************************************/
 
 #include "switches.h"
@@ -72,7 +82,7 @@ extern char *app_syntax;
 *
 *  EXPORTS:
 *       
-*       cause(delay, routine, p1, p2, ..., p8)
+*       cause(delay, routine, packed_args)
 *       moxcdone -- set to TRUE to quit
 *       eventtime -- ideallized current time
 *
@@ -102,9 +112,9 @@ struct MsgPort pub_port;
 *       Routines local to this module
 *****************************************************************************/
 
-private void callrun();
-private void decode();
-private void moxcterm();
+private void callrun(void);
+private void decode(void);
+private void moxcterm(void);
 
 /****************************************************************************
 *                           callallcancel
@@ -117,7 +127,7 @@ private void moxcterm();
 *             (not necessarily the timebase) and repeat.
 ****************************************************************************/
 
-void callallcancel()
+void callallcancel(void)
 {
     if (moxcdebug) gprintf(GDEBUG, "cancel all calls\n");
     while (timebase_queue) {
@@ -132,7 +142,7 @@ void callallcancel()
 
 /* catchup -- bring current timebase up to date by running its calls */
 /**/
-void catchup()
+void catchup(void)
 {
     register call_type call;
     /* Remember where we're going in virtual time because setting the
@@ -151,7 +161,7 @@ void catchup()
         eventtime = (my_base->next_time) >> 8;
         call = remove_call(my_base);
         virttime = call->u.e.time;
-        (*(call->u.e.routine))(CALLARGS(call));
+        (*(call->u.e.routine))(&(call->u.e.p));
         call_free(call);
     }
     /* now that we've possibly pulled events out of the timebase, adjust
@@ -174,6 +184,7 @@ void catchup()
 ****************************************************************************/
 
 #ifndef DOTS_FOR_ARGS
+THIS CODE IS OBSOLETE
 void cause(delay, routine, p)
     delay_type  delay;
     int (*routine)();
@@ -181,16 +192,10 @@ void cause(delay, routine, p)
 #else
 #include <stdarg.h>
 
-void cause(delay_type delay, ...)
-/* note: the routine parameter is not checked because any routine type can
-   be passed as a parameter, but in the call struct it's an int (*)()
- */
+void cause(delay_type delay, void (*routine)(call_args_type args), call_args_type p)
 #endif
 {
     register call_type call = call_alloc();
-#ifdef DOTS_FOR_ARGS
-    va_list xp;
-#endif
 
     if (!call) {
         gprintf(ERROR, "cause: out of memory\n");
@@ -200,11 +205,10 @@ void cause(delay_type delay, ...)
 #ifdef DOTS_FOR_ARGS
     call->u.e.time = virttime + delay;
     call->u.e.priority = 128; /* default priority */
-    va_start(xp, delay);
-    call->u.e.routine = (int (*)()) va_arg(xp, long *);
-    call->u.e.p = va_arg(xp, call_args_node);
-    va_end(xp);
+    call->u.e.routine = routine;
+    call->u.e.p = *p;
 #else
+    THIS CODE IS OBSOLETE
     call->u.e.time = virttime + delay;
     call->u.e.priority = 128; /* default priority */
     call->u.e.routine = routine;
@@ -214,17 +218,14 @@ void cause(delay_type delay, ...)
     if (call->u.e.routine == 0) {
         gprintf(ERROR,"cause called with NULL routine\n");
         EXIT(1);
-#ifndef DOS     /* IBM allows odd addresses */
-#if (__APPLE__ != 1 || __i386__ != 1) /* Intel Mac allows odd addresses */
+/* Intel (x86 or x86_64) allows odd routine addresses; 
+ * RISC architectures do not.
+ */
+#if (!defined(DOS) && __i386__ != 1 && __x86_64__ != 1)
     } else if (((long) call->u.e.routine) & 1) {
         gprintf(ERROR, "cause called with bad routine address: 0x%lx\n",
                 call->u.e.routine);
-#ifndef GCC_MODEL_CPU
-#define GCC_MODEL_CPU "GCC_MODEL_CPU is undefined for this compilation"
-#endif
-		gprintf(ERROR, GCC_MODEL_CPU);
         EXIT(1);
-#endif
 #endif
     }
 #endif
@@ -248,6 +249,7 @@ void cause(delay_type delay, ...)
 ****************************************************************************/
 
 #ifndef DOTS_FOR_ARGS
+THIS CODE IS OBSOLETE
 void causepri(delay, pri, routine, p)
     delay_type  delay;
     int pri;
@@ -256,13 +258,10 @@ void causepri(delay, pri, routine, p)
 #else
 /* already included stdarg.h */
 
-void causepri(delay_type delay, int pri, ...)
+void causepri(delay_type delay, int pri, void (*routine)(call_args_type args), call_args_type args)
 #endif
 {
     register call_type call = call_alloc();
-#ifdef DOTS_FOR_ARGS
-    va_list xp;
-#endif
 
     if (!call) {
         gprintf(ERROR, "cause: out of memory\n");
@@ -272,10 +271,8 @@ void causepri(delay_type delay, int pri, ...)
 #ifdef DOTS_FOR_ARGS
     call->u.e.time = virttime + delay;
     call->u.e.priority = pri; /* default priority */
-    va_start(xp, pri);
-    call->u.e.routine = (int (*)()) va_arg(xp, long *);
-    call->u.e.p = va_arg(xp, call_args_node);
-    va_end(xp);
+    call->u.e.routine = routine;
+    call->u.e.p = *args;
 #else
     call->u.e.time = virttime + delay;
     call->u.e.priority = pri; /* default priority */
@@ -286,13 +283,14 @@ void causepri(delay_type delay, int pri, ...)
     if (call->u.e.routine == 0) {
         gprintf(ERROR,"cause called with NULL routine\n");
         EXIT(1);
-#ifndef DOS     /* IBM allows odd addresses */
-#if (__APPLE__ != 1 || __i386__ != 1) /* Intel Mac allows odd addresses */
+/* Intel (x86 or x86_64) allows odd routine addresses; 
+ * RISC architectures do not.
+ */
+#if (!defined(DOS) && __i386__ != 1 && __x86_64__ != 1)
     } else if (((long) call->u.e.routine) & 1) {
         gprintf(ERROR, "causepri called with bad routine address: 0x%lx\n",
                 call->u.e.routine);
         EXIT(1);
-#endif
 #endif
     }
 #endif
@@ -312,7 +310,7 @@ void causepri(delay_type delay, int pri, ...)
 *       executes the previously scheduled call call and deallocates it
 ****************************************************************************/
 
-private void callrun()
+private void callrun(void)
 {
     call_type call;
     if (moxcdebug) {
@@ -328,11 +326,11 @@ private void callrun()
 
     /* remove first call from timebase */
     call = remove_call(timebase);
-    if (debug) gprintf(TRANS, "callrun call %lx\n", (ulong)call);
+    if (debug) gprintf(TRANS, "callrun call %p\n", call);
     insert_base(timebase);
     virttime = call->u.e.time;          /* virtual time of the call */
     if (moxcdebug) callshow(call);
-    (*(call->u.e.routine))(CALLARGS(call));
+    (*(call->u.e.routine))(&(call->u.e.p));
     call_free(call);
 }
 
@@ -463,7 +461,7 @@ void moxcwait(dateoftimeout)
 * Effect: dispatch on user inputs, cause calls
 ****************************************************************************/
 
-private void decode()
+private void decode(void)
 {
     /* It is important that midi_data is on a word boundary because we
         copy to it by doing a word transfer.
@@ -660,7 +658,7 @@ void moxcrun()
 
 /* moxcterm -- clean up after moxcinit */
 /**/
-private void moxcterm()
+private void moxcterm(void)
 {
 #ifdef AMIGA
     FreeSignal((long) pub_port_signal);

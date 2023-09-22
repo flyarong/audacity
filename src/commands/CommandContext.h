@@ -11,15 +11,25 @@
 #ifndef __AUDACITY_COMMAND_CONTEXT__
 #define __AUDACITY_COMMAND_CONTEXT__
 
-#include "audacity/Types.h"
-#include "../MemoryX.h"
-#include "Command.h"
+#include <memory>
+#include "Identifier.h"
 
 class AudacityProject;
-class AudacityApp;
 class wxEvent;
 class CommandOutputTargets;
 using CommandParameter = CommandID;
+
+class SelectedRegion;
+class Track;
+
+struct TemporarySelection {
+   TemporarySelection() = default;
+   TemporarySelection(const TemporarySelection&) = default;
+   TemporarySelection &operator= (const TemporarySelection&) = default;
+
+   SelectedRegion *pSelectedRegion = nullptr;
+   Track *pTrack = nullptr;
+};
 
 class AUDACITY_DLL_API CommandContext {
 public:
@@ -56,7 +66,8 @@ public:
    const wxEvent *pEvt;
    int index;
    CommandParameter parameter;
-   AudacityApp *GetApp() const;
-   AudacityProject *GetProject() const;
+
+   // This might depend on a point picked with a context menu
+   TemporarySelection temporarySelection;
 };
 #endif

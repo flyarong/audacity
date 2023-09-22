@@ -21,13 +21,18 @@ capture the more lengthy output from some commands.
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "CommandTargets.h"
 
-#include <wx/string.h>
-#include "../ShuttleGui.h"
-#include "../Project.h"
-#include "../widgets/ErrorDialog.h"
+#include <wx/app.h>
+#include <wx/statusbr.h>
+#include <wx/textctrl.h>
+#include "ShuttleGui.h"
+#include "AudacityMessageBox.h"
+#include "wxPanelWrapper.h"
+
+#include <locale>
+#include <sstream>
 
 void CommandMessageTarget::StartArray()
 {
@@ -60,7 +65,7 @@ void CommandMessageTarget::EndStruct(){
 void CommandMessageTarget::AddItem(const wxString &value, const wxString &name){
    wxString Padding;
    Padding.Pad( mCounts.size() *2 -2);
-   Padding = (( value.length() < 15 ) || (mCounts.back()<=0))  ? "" : wxString("\n") + Padding;
+   Padding = (( value.length() < 15 ) || (mCounts.back()<=0))  ? wxString{} : wxString("\n") + Padding;
    if( name.empty() )
       Update( wxString::Format( "%s%s\"%s\"", (mCounts.back()>0)?", ":"", Padding, Escaped(value)));
    else
@@ -75,11 +80,18 @@ void CommandMessageTarget::AddBool(const bool value,      const wxString &name){
       Update( wxString::Format( "%s\"%s\":\"%s\"", (mCounts.back()>0)?", ":"", name,value?"true":"false"));
    mCounts.back() += 1;
 }
+
 void CommandMessageTarget::AddItem(const double value,    const wxString &name){
+   std::stringstream str;
+   std::locale nolocale("C");
+   str.imbue(nolocale);
+
    if( name.empty() )
-      Update( wxString::Format( "%s%g", (mCounts.back()>0)?", ":"", value));
+      str << ((mCounts.back()>0)? ", " : "") << value;
    else
-      Update( wxString::Format( "%s\"%s\":%g", (mCounts.back()>0)?", ":"", name,value));
+      str << ((mCounts.back()>0)? ", " : "") << "\"" << name << "\"" << ":" << value;
+
+   Update( str.str() );
    mCounts.back() += 1;
 }
 
@@ -113,7 +125,7 @@ void LispyCommandMessageTarget::StartArray()
 {
    wxString Padding;
    Padding.Pad( mCounts.size() *2 -2);
-   Update( wxString::Format( "\n%s(", Padding ));
+   Update( wxString::Format( (mCounts.back()>0)?"\n%s(":"(", Padding ));
    mCounts.back() += 1;
    mCounts.push_back( 0 );
 }
@@ -127,7 +139,7 @@ void LispyCommandMessageTarget::EndArray(){
 void LispyCommandMessageTarget::StartStruct(){
    wxString Padding;
    Padding.Pad( mCounts.size() *2 -2);
-   Update( wxString::Format( "\n%s(", Padding ));
+   Update( wxString::Format( (mCounts.back()>0)?"\n%s(":"(", Padding ));
    mCounts.back() += 1;
    mCounts.push_back( 0 );
 }
@@ -240,7 +252,8 @@ void BriefCommandMessageTarget::EndField(){
 
 void MessageBoxTarget::Update(const wxString &message)
 {
-   AudacityMessageBox(message);
+   // Should these messages be localized?
+   AudacityMessageBox( Verbatim( message ) );
 }
 
 
@@ -293,7 +306,7 @@ class AUDACITY_DLL_API LongMessageDialog /* not final */ : public wxDialogWrappe
 public:
    // constructors and destructors
    LongMessageDialog(wxWindow * parent,
-                const wxString & title,
+                const TranslatableString & title,
                 int type = 0,
                 int flags = wxDEFAULT_DIALOG_STYLE,
                 int additionalButtons = 0);
@@ -326,7 +339,7 @@ BEGIN_EVENT_TABLE(LongMessageDialog, wxDialogWrapper)
 END_EVENT_TABLE()
 
 LongMessageDialog::LongMessageDialog(wxWindow * parent,
-                           const wxString & title,
+                           const TranslatableString & title,
                            int type,
                            int flags,
                            int additionalButtons)
@@ -334,7 +347,11 @@ LongMessageDialog::LongMessageDialog(wxWindow * parent,
 {
    mType = type;
    mAdditionalButtons = additionalButtons;
-   SetName( "Long Message" );
+   SetName(XO("Long Message"));
+   // The long message adds lots of short strings onto this one.
+   // So preallocate to make it faster.
+   // Needs 37Kb for all commands.
+   mText.Alloc(40000);
 }
 
 LongMessageDialog::~LongMessageDialog(){
@@ -357,7 +374,7 @@ bool LongMessageDialog::Init()
 
    Layout();
    Fit();
-   SetMinSize(wxSize(600,700));
+   SetMinSize(wxSize(600,350));
    Center();
    return true;
 }
@@ -375,7 +392,8 @@ void LongMessageDialog::OnCancel(wxCommandEvent & WXUNUSED(evt)){
 void LongMessageDialog::AcceptText( const wxString & Text )
 {
    if( pDlg == NULL ){
-      pDlg = new LongMessageDialog( GetActiveProject(), _( "Long Message" ) );
+      pDlg = new LongMessageDialog(
+         wxTheApp->GetTopWindow(), XO( "Long Message" ) );
       pDlg->Init();
       pDlg->Show();
    }

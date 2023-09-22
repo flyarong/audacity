@@ -6,7 +6,7 @@
 
   Created by Michael Chinen (mchinen) on 8/12/08
   Audacity(R) is copyright (c) 1999-2008 Audacity Team.
-  License: GPL v2.  See License.txt.
+  License: GPL v2 or later.  See License.txt.
 
 ******************************************************************//**
 
@@ -26,10 +26,10 @@ but it will probably work fine if you use it on a high level.
 
 #ifndef __AUDACITY_PROFILER__
 #define __AUDACITY_PROFILER__
-#include "MemoryX.h"
+#include <mutex>
 #include <vector>
 #include <time.h>
-#include "ondemand/ODTaskThread.h"
+#include "MemoryX.h"
 
 
 #define BEGIN_TASK_PROFILING(TASK_DESCRIPTION) Profiler::Instance()->Begin(__FILE__,__LINE__,TASK_DESCRIPTION)
@@ -62,7 +62,7 @@ class Profiler
    //List of current Task to do.
    std::vector<std::unique_ptr<TaskProfile>> mTasks;
    //mutex for above variable
-   ODLock mTasksMutex;
+   std::mutex mTasksMutex;
 
 };
 

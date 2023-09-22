@@ -12,7 +12,6 @@
 #define __AUDACITY_FORMATCLASSIFIER_H_
 
 #include <vector>
-#include "../SampleFormat.h"
 #include "MultiFormatReader.h"
 #include "SpecPowerMeter.h"
 
@@ -25,8 +24,6 @@
 // #define FORMATCLASSIFIER_SIGNAL_DEBUG 1
 
 #ifdef FORMATCLASSIFIER_SIGNAL_DEBUG
-
-#include <cstdio>
 
 class DebugWriter
 {

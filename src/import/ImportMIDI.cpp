@@ -8,29 +8,85 @@
 
 **********************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
+
 #include "ImportMIDI.h"
 
 #include <wx/defs.h>
 #include <wx/ffile.h>
-#include <wx/intl.h>
+#include <wx/frame.h>
 
 #if defined(USE_MIDI)
 
-//#include "allegro.h"
+
+#include "../lib-src/header-substitutes/allegro.h"
+
 //#include "strparse.h"
 //#include "mfmidi.h"
 
-#include "../Internat.h"
+#include "FileNames.h"
 #include "../NoteTrack.h"
-#include "../widgets/ErrorDialog.h"
+#include "Project.h"
+#include "ProjectFileIO.h"
+#include "ProjectHistory.h"
+#include "../ProjectWindow.h"
+#include "ProjectWindows.h"
+#include "SelectFile.h"
+#include "../SelectUtilities.h"
+#include "AudacityMessageBox.h"
+#include "../widgets/FileHistory.h"
+
+// Given an existing project, try to import into it, return true on success
+bool DoImportMIDI( AudacityProject &project, const FilePath &fileName )
+{
+   auto &projectFileIO = ProjectFileIO::Get( project );
+   auto &tracks = TrackList::Get( project );
+   auto newTrack =  std::make_shared<NoteTrack>();
+   bool initiallyEmpty = tracks.empty();
+   
+   if (::ImportMIDI(fileName, newTrack.get())) {
+      
+      SelectUtilities::SelectNone( project );
+      auto pTrack = tracks.Add( newTrack );
+      pTrack->SetSelected(true);
+      
+      // Fix the bug 2109.
+      // In case the project had soloed tracks before importing,
+      // the newly imported track is muted.
+      const bool projectHasSolo =
+         !(tracks.Any<PlayableTrack>() + &PlayableTrack::GetSolo).empty();
+#ifdef EXPERIMENTAL_MIDI_OUT
+      if (projectHasSolo)
+         pTrack->SetMute(true);
+#endif
+
+      ProjectHistory::Get( project )
+         .PushState(
+            XO("Imported MIDI from '%s'").Format( fileName ),
+            XO("Import MIDI")
+         );
+      
+      ProjectWindow::Get( project ).ZoomAfterImport(pTrack);
+      FileHistory::Global().Append(fileName);
+
+      // If the project was clean and temporary (not permanently saved), then set
+      // the filename to the just imported path.
+      if (initiallyEmpty && projectFileIO.IsTemporary()) {
+         wxFileName fn(fileName);
+         project.SetProjectName(fn.GetName());
+         project.SetInitialImportPath(fn.GetPath());
+         projectFileIO.SetProjectTitle();
+      }
+      return true;
+   }
+   else
+      return false;
+}
 
 bool ImportMIDI(const FilePath &fName, NoteTrack * dest)
 {
    if (fName.length() <= 4){
-      AudacityMessageBox( wxString::Format(
-         _("Could not open file %s: Filename too short."), fName
-      ) );
+      AudacityMessageBox(
+         XO("Could not open file %s: Filename too short.").Format( fName ) );
       return false;
    }
 
@@ -38,17 +94,15 @@ bool ImportMIDI(const FilePath &fName, NoteTrack * dest)
    if (fName.Right(4).CmpNoCase(wxT(".mid")) == 0 || fName.Right(5).CmpNoCase(wxT(".midi")) == 0)
       is_midi = true;
    else if(fName.Right(4).CmpNoCase(wxT(".gro")) != 0) {
-      AudacityMessageBox( wxString::Format(
-         _("Could not open file %s: Incorrect filetype."), fName
-      ) );
+      AudacityMessageBox(
+         XO("Could not open file %s: Incorrect filetype.").Format( fName ) );
       return false;
    }
 
    wxFFile mf(fName, wxT("rb"));
    if (!mf.IsOpened()) {
-      AudacityMessageBox( wxString::Format(
-         _("Could not open file %s."), fName
-      ) );
+      AudacityMessageBox(
+         XO("Could not open file %s.").Format( fName ) );
       return false;
    }
 
@@ -57,39 +111,62 @@ bool ImportMIDI(const FilePath &fName, NoteTrack * dest)
 
    //Should we also check if(seq->tracks() == 0) ?
    if(new_seq->get_read_error() == alg_error_open){
-      AudacityMessageBox( wxString::Format(
-         _("Could not open file %s."), fName
-      ) );
+      AudacityMessageBox(
+         XO("Could not open file %s.").Format( fName ) );
       mf.Close();
       return false;
    }
 
    dest->SetSequence(std::move(new_seq));
-   dest->SetOffset(offset);
+   dest->MoveTo(offset);
    wxString trackNameBase = fName.AfterLast(wxFILE_SEP_PATH).BeforeLast('.');
    dest->SetName(trackNameBase);
    mf.Close();
-   // the mean pitch should be somewhere in the middle of the display
-   Alg_iterator iterator( &dest->GetSeq(), false );
-   iterator.begin();
-   // for every event
-   Alg_event_ptr evt;
-   int note_count = 0;
-   int pitch_sum = 0;
-   while (NULL != (evt = iterator.next())) {
-      // if the event is a note
-       if (evt->get_type() == 'n') {
-           Alg_note_ptr note = (Alg_note_ptr) evt;
-           pitch_sum += (int) note->pitch;
-           note_count++;
-       }
-   }
-   int mean_pitch = (note_count > 0 ? pitch_sum / note_count : 60);
-   // initial track is about 27 half-steps high; if bottom note is C,
-   // then middle pitch class is D. Round mean_pitch to the nearest D:
-   int mid_pitch = ((mean_pitch - 2 + 6) / 12) * 12 + 2;
-   dest->SetBottomNote(mid_pitch - 14);
+
+   dest->ZoomAllNotes();
    return true;
 }
 
+// Insert a menu item
+#include "../commands/CommandContext.h"
+#include "../commands/CommandManager.h"
+#include "../CommonCommandFlags.h"
+
+namespace {
+using namespace MenuTable;
+
+void OnImportMIDI(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &window = GetProjectFrame( project );
+
+   wxString fileName = SelectFile(FileNames::Operation::Open,
+      XO("Select a MIDI file"),
+      wxEmptyString,     // Path
+      wxT(""),       // Name
+      wxT(""),       // Extension
+      {
+         { XO("MIDI and Allegro files"),
+           { wxT("mid"), wxT("midi"), wxT("gro"), }, true },
+         { XO("MIDI files"),
+           { wxT("mid"), wxT("midi"), }, true },
+         { XO("Allegro files"),
+           { wxT("gro"), }, true },
+         FileNames::AllFiles
+      },
+      wxRESIZE_BORDER,        // Flags
+      &window);    // Parent
+
+   if (!fileName.empty())
+      DoImportMIDI(project, fileName);
+}
+
+AttachedItem sAttachment{
+   { wxT("File/Import-Export/Import"),
+      { OrderingHint::After, {"ImportAudio"} } },
+   Command( wxT("ImportMIDI"), XXO("&MIDI..."), OnImportMIDI,
+      AudioIONotBusyFlag() )
+};
+
+}
 #endif

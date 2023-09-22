@@ -6,7 +6,7 @@
 
   Created by Michael Chinen (mchinen) on 8/12/08
   Audacity(R) is copyright (c) 1999-2008 Audacity Team.
-  License: GPL v2.  See License.txt.
+  License: GPL v2 or later.  See License.txt.
 
 ******************************************************************//**
 
@@ -20,10 +20,9 @@ but it will probably work fine if you use it on a high level.
 
 *//*******************************************************************/
 
-#include "Audacity.h"
+
 #include "Profiler.h"
 
-#include <stdio.h>
 #include <string.h>
 #include <wx/crt.h>
 
@@ -63,20 +62,18 @@ Profiler::~Profiler()
 ///start the task timer.
 void Profiler::Begin(const char* fileName, int lineNum, const char* taskDescription)
 {
-   mTasksMutex.Lock();
+   std::lock_guard<std::mutex> guard{ mTasksMutex };
    GetOrCreateTaskProfile(fileName,lineNum)->Begin(fileName,lineNum,taskDescription);
-   mTasksMutex.Unlock();
 }
 
 ///end the task timer.
 void Profiler::End(const char* fileName, int lineNum, const char* taskDescription)
 {
-   mTasksMutex.Lock();
+   std::lock_guard<std::mutex> guard{ mTasksMutex };
    TaskProfile* tp;
    tp=GetTaskProfileByDescription(taskDescription);
    if(tp)
       tp->End(fileName,lineNum,taskDescription);
-   mTasksMutex.Unlock();
 }
 
 ///Gets the singleton instance

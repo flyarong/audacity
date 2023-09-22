@@ -17,9 +17,8 @@
 
 **********************************************************************/
 
-#include "Audacity.h"
 
-#include <stdio.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -27,50 +26,29 @@
 #include <initializer_list>
 #endif
 
-
+#include <rapidjson/document.h>
+#include <rapidjson/writer.h>
 
 #include <wx/wx.h>
 #include <wx/bitmap.h>
-#include <wx/filedlg.h>
 #include <wx/filefn.h>
-#include <wx/image.h>
 #include <wx/ffile.h>
 #include <wx/filename.h>
-#include <wx/progdlg.h>
 #include <wx/textfile.h>
 #include <wx/thread.h>
 #include <wx/tooltip.h>
 
-#include "audacity/Types.h"
+#include "Identifier.h"
 
 #include "AColor.h"
-#include "AudacityApp.h"
-#include "AudioIO.h"
-#include "BlockFile.h"
 #include "Diags.h"
-#include "DirManager.h"
 #include "Envelope.h"
 #include "FFT.h"
-#include "FileFormats.h"
-#include "FreqWindow.h"
 #include "ImageManipulation.h"
-#include "Internat.h"
-#include "LabelTrack.h"
 #include "Mix.h"
-#include "NoteTrack.h"
 #include "Prefs.h"
-#include "Project.h"
-#include "SampleFormat.h"
-#include "Sequence.h"
-#include "TimeTrack.h"
-#include "Track.h"
 #include "UndoManager.h"
-#include "ViewInfo.h"
-#include "WaveTrack.h"
 #include "widgets/ASlider.h"
-#include "widgets/ProgressDialog.h"
-#include "widgets/Ruler.h"
-#include "xml/XMLTagHandler.h"
 
 // PRL:  These lines allow you to remove Project.h above.
 // They must be included before the definition of macro NEW below.
@@ -82,7 +60,7 @@
 //    #include <wx/msw/msvcrt.h>      // redefines the NEW() operator
 //#endif
 
-#if __WXMSW__
+#ifdef _MSC_VER
 #ifdef _DEBUG
 #define _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>

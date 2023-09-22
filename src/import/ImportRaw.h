@@ -11,23 +11,19 @@
 #ifndef __AUDACITY_IMPORT_RAW__
 #define __AUDACITY_IMPORT_RAW__
 
-#include "../MemoryX.h"
+#include <memory>
 
-class TrackFactory;
-class WaveTrack;
-class DirManager;
+class AudacityProject;
+class TrackList;
+class WaveTrackFactory;
 class wxString;
 class wxWindow;
 
 #include <vector>
 
-// Newly constructed WaveTracks that are not yet owned by a TrackList
-// are held in unique_ptr not shared_ptr
-using NewChannelGroup = std::vector< std::shared_ptr<WaveTrack> >;
-using TrackHolders = std::vector< NewChannelGroup >;
+using TrackHolders = std::vector<std::shared_ptr<TrackList>>;
 
-
-void ImportRaw(wxWindow *parent, const wxString &fileName,
-   TrackFactory *trackFactory, TrackHolders &outTracks);
+void ImportRaw(const AudacityProject &project, wxWindow *parent, const wxString &fileName,
+   WaveTrackFactory *trackFactory, TrackHolders &outTracks);
 
 #endif

@@ -8,19 +8,19 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+
 #include "TrackSelectHandle.h"
 
-#include "TrackControls.h"
+#include "ChannelView.h"
 #include "../../HitTestResult.h"
-#include "../../Menus.h"
-#include "../../Project.h"
+#include "Project.h"
+#include "ProjectAudioIO.h"
+#include "ProjectHistory.h"
 #include "../../RefreshCode.h"
-#include "../../TrackPanel.h"
+#include "../../SelectUtilities.h"
 #include "../../TrackPanelMouseEvent.h"
-#include "../../WaveTrack.h"
+#include "Track.h"
 
-#include "../../MemoryX.h"
 #include <wx/cursor.h>
 #include <wx/translation.h>
 
@@ -28,24 +28,23 @@ Paul Licameli split from TrackPanel.cpp
 
 #if defined(__WXMAC__)
 /* i18n-hint: Command names a modifier key on Macintosh keyboards */
-#define CTRL_CLICK _("Command-Click")
+#define CTRL_CLICK XO("Command+Click")
 #else
 /* i18n-hint: Ctrl names a modifier key on Windows or Linux keyboards */
-#define CTRL_CLICK _("Ctrl-Click")
+#define CTRL_CLICK XO("Ctrl+Click")
 #endif
 
 namespace {
-   wxString Message(unsigned trackCount) {
+   TranslatableString Message(unsigned trackCount) {
       if (trackCount > 1)
-         // i18n-hint: %s is replaced by (translation of) 'Ctrl-Click' on windows, 'Command-Click' on Mac
-         return wxString::Format(
-            _("%s to select or deselect track. Drag up or down to change track order."),
-            CTRL_CLICK );
+         return XO(
+// i18n-hint: %s is replaced by (translation of) 'Ctrl+Click' on windows, 'Command+Click' on Mac
+"%s to select or deselect track. Drag up or down to change track order.")
+            .Format( CTRL_CLICK );
       else
-         // i18n-hint: %s is replaced by (translation of) 'Ctrl-Click' on windows, 'Command-Click' on Mac
-         return wxString::Format(
-            _("%s to select or deselect track."),
-            CTRL_CLICK );
+         // i18n-hint: %s is replaced by (translation of) 'Ctrl+Click' on windows, 'Command+Click' on Mac
+         return XO("%s to select or deselect track.")
+            .Format( CTRL_CLICK );
    }
 }
 
@@ -86,7 +85,7 @@ UIHandle::Result TrackSelectHandle::Click
    const auto pTrack = mpTrack;
    if (!pTrack)
       return Cancelled;
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
 
    // DM: If they weren't clicking on a particular part of a track label,
    //  deselect other tracks and select this one.
@@ -97,11 +96,11 @@ UIHandle::Result TrackSelectHandle::Click
       result |= Cancelled;
    else {
       mRearrangeCount = 0;
-      CalculateRearrangingThresholds(event);
+      CalculateRearrangingThresholds(event, pProject);
    }
 
-   SelectActions::DoListSelection(*pProject,
-      pTrack.get(), event.ShiftDown(), event.ControlDown(), !unsafe);
+   SelectUtilities::DoListSelection(*pProject,
+      *pTrack, event.ShiftDown(), event.ControlDown(), !unsafe);
 
    mClicked = true;
    return result;
@@ -115,20 +114,20 @@ UIHandle::Result TrackSelectHandle::Drag
 
    const wxMouseEvent &event = evt.event;
 
-   TrackList *const tracks = pProject->GetTracks();
+   auto &tracks = TrackList::Get( *pProject );
 
    // probably harmless during play?  However, we do disallow the click, so check this too.
-   bool unsafe = pProject->IsAudioActive();
+   bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if (unsafe)
       return result;
 
    if (event.m_y < mMoveUpThreshold || event.m_y < 0) {
-      tracks->MoveUp(mpTrack.get());
+      tracks.MoveUp(mpTrack.get());
       --mRearrangeCount;
    }
    else if ( event.m_y > mMoveDownThreshold
       || event.m_y > evt.whole.GetHeight() ) {
-      tracks->MoveDown(mpTrack.get());
+      tracks.MoveDown(mpTrack.get());
       ++mRearrangeCount;
    }
    else
@@ -136,35 +135,46 @@ UIHandle::Result TrackSelectHandle::Drag
 
    // JH: if we moved up or down, recalculate the thresholds and make sure the
    // track is fully on-screen.
-   CalculateRearrangingThresholds(event);
+   CalculateRearrangingThresholds(event, pProject);
 
    result |= EnsureVisible | RefreshAll;
    return result;
 }
 
 HitTestPreview TrackSelectHandle::Preview
-(const TrackPanelMouseState &, const AudacityProject *project)
+(const TrackPanelMouseState &, AudacityProject *project)
 {
-   const auto trackCount = project->GetTrackPanel()->GetTrackCount();
+   static auto disabledCursor =
+      ::MakeCursor(wxCURSOR_NO_ENTRY, DisabledCursorXpm, 16, 16);
+   //static wxCursor rearrangeCursor{ wxCURSOR_HAND };
+   static auto rearrangingCursor =
+      ::MakeCursor(wxCURSOR_HAND, RearrangingCursorXpm, 16, 16);
+   static wxCursor arrowCursor{ wxCURSOR_ARROW };
+
+   //static auto hoverCursor =
+   //   ::MakeCursor(wxCURSOR_HAND, RearrangeCursorXpm, 16, 16);
+   //static auto clickedCursor =
+   //   ::MakeCursor(wxCURSOR_HAND, RearrangingCursorXpm, 16, 16);
+
+   const auto trackCount = TrackList::Get( *project ).Any().size();
    auto message = Message(trackCount);
    if (mClicked) {
-      static auto disabledCursor =
-         ::MakeCursor(wxCURSOR_NO_ENTRY, DisabledCursorXpm, 16, 16);
-      static wxCursor rearrangeCursor{ wxCURSOR_HAND };
-
-      const bool unsafe = GetActiveProject()->IsAudioActive();
+      const bool unsafe =
+         ProjectAudioIO::Get( *project ).IsAudioActive();
+      const bool canMove = TrackList::Get( *project ).Any().size() > 1;
       return {
          message,
          (unsafe
           ? &*disabledCursor
-          : &rearrangeCursor)
+          : canMove
+             ? &*rearrangingCursor
+             : &arrowCursor)
          // , message // Stop showing the tooltip after the click
       };
    }
    else {
       // Only mouse-over
       // Don't test safety, because the click to change selection is allowed
-      static wxCursor arrowCursor{ wxCURSOR_ARROW };
       return {
          message,
          &arrowCursor,
@@ -174,19 +184,16 @@ HitTestPreview TrackSelectHandle::Preview
 }
 
 UIHandle::Result TrackSelectHandle::Release
-(const TrackPanelMouseEvent &, AudacityProject *, wxWindow *)
+(const TrackPanelMouseEvent &, AudacityProject *project, wxWindow *)
 {
    // If we're releasing, surely we are dragging a track?
    wxASSERT( mpTrack );
    if (mRearrangeCount != 0) {
-      AudacityProject *const project = ::GetActiveProject();
-      project->PushState(
-         wxString::Format(
-            /* i18n-hint: will substitute name of track for %s */
-            ( mRearrangeCount < 0 ? _("Moved '%s' up") : _("Moved '%s' down") ),
-            mpTrack->GetName()
-         ),
-         _("Move Track"));
+      ProjectHistory::Get( *project ).PushState(
+         /* i18n-hint: will substitute name of track for %s */
+         ( mRearrangeCount < 0 ? XO("Moved '%s' up") : XO("Moved '%s' down") )
+            .Format( mpTrack->GetName() ),
+         XO("Move Track"));
    }
    // Bug 1677
    // Holding on to the reference to the track was causing it to be released far later
@@ -199,7 +206,7 @@ UIHandle::Result TrackSelectHandle::Release
 
 UIHandle::Result TrackSelectHandle::Cancel(AudacityProject *pProject)
 {
-   pProject->RollbackState();
+   ProjectHistory::Get( *pProject ).RollbackState();
    // Bug 1677
    mpTrack.reset();
    return RefreshCode::RefreshAll;
@@ -207,28 +214,28 @@ UIHandle::Result TrackSelectHandle::Cancel(AudacityProject *pProject)
 
 /// Figure out how far the user must drag the mouse up or down
 /// before the track will swap with the one above or below
-void TrackSelectHandle::CalculateRearrangingThresholds(const wxMouseEvent & event)
+void TrackSelectHandle::CalculateRearrangingThresholds(
+   const wxMouseEvent & event, AudacityProject *project)
 {
    // JH: this will probably need to be tweaked a bit, I'm just
    //   not sure what formula will have the best feel for the
    //   user.
 
-   AudacityProject *const project = ::GetActiveProject();
-   TrackList *const tracks = project->GetTracks();
+   auto &tracks = TrackList::Get( *project );
 
-   if (tracks->CanMoveUp(mpTrack.get()))
+   if (tracks.CanMoveUp(mpTrack.get()))
       mMoveUpThreshold =
          event.m_y -
-            tracks->GetGroupHeight(
-               * -- tracks->FindLeader( mpTrack.get() ) );
+            ChannelView::GetChannelGroupHeight(
+               * -- tracks.Find(mpTrack.get()));
    else
       mMoveUpThreshold = INT_MIN;
 
-   if (tracks->CanMoveDown(mpTrack.get()))
+   if (tracks.CanMoveDown(mpTrack.get()))
       mMoveDownThreshold =
          event.m_y +
-            tracks->GetGroupHeight(
-               * ++ tracks->FindLeader( mpTrack.get() ) );
+            ChannelView::GetChannelGroupHeight(
+               * ++ tracks.Find(mpTrack.get()));
    else
       mMoveDownThreshold = INT_MAX;
 }

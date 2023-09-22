@@ -15,19 +15,35 @@ SetPreferenceCommand classes
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "PreferenceCommands.h"
 
-#include "../Menus.h"
-#include "../Prefs.h"
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
+#include "CommandDispatch.h"
+#include "CommandManager.h"
+#include "../CommonCommandFlags.h"
+#include "LoadCommands.h"
+#include "Prefs.h"
+#include "SettingsVisitor.h"
+#include "ShuttleGui.h"
 #include "../commands/CommandContext.h"
+#include "../prefs/PrefsDialog.h"
 
-bool GetPreferenceCommand::DefineParams( ShuttleParams & S ){
-   S.Define( mName, wxT("Name"),   wxT("") );
+const ComponentInterfaceSymbol GetPreferenceCommand::Symbol
+{ XO("Get Preference") };
+
+namespace{ BuiltinCommandsModule::Registration< GetPreferenceCommand > reg; }
+
+template<bool Const>
+bool GetPreferenceCommand::VisitSettings( SettingsVisitorBase<Const> & S ){
+   S.Define( mName, wxT("Name"),   wxString{} );
    return true;
 }
+
+bool GetPreferenceCommand::VisitSettings( SettingsVisitor & S )
+   { return VisitSettings<false>(S); }
+
+bool GetPreferenceCommand::VisitSettings( ConstSettingsVisitor & S )
+   { return VisitSettings<true>(S); }
 
 void GetPreferenceCommand::PopulateOrExchange(ShuttleGui & S)
 {
@@ -35,7 +51,7 @@ void GetPreferenceCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieTextBox(_("Name:"),mName);
+      S.TieTextBox(XXO("Name:"),mName);
    }
    S.EndMultiColumn();
 }
@@ -51,12 +67,24 @@ bool GetPreferenceCommand::Apply(const CommandContext & context)
    return true;
 }
 
-bool SetPreferenceCommand::DefineParams( ShuttleParams & S ){
-   S.Define(    mName,   wxT("Name"),    wxT("") );
-   S.Define(   mValue,   wxT("Value"),   wxT("") );
+const ComponentInterfaceSymbol SetPreferenceCommand::Symbol
+{ XO("Set Preference") };
+
+namespace{ BuiltinCommandsModule::Registration< SetPreferenceCommand > reg2; }
+
+template<bool Const>
+bool SetPreferenceCommand::VisitSettings( SettingsVisitorBase<Const> & S ){
+   S.Define(    mName,   wxT("Name"),    wxString{} );
+   S.Define(   mValue,   wxT("Value"),   wxString{} );
    S.Define( mbReload,   wxT("Reload"),  false );
    return true;
 }
+
+bool SetPreferenceCommand::VisitSettings( SettingsVisitor & S )
+   { return VisitSettings<false>(S); }
+
+bool SetPreferenceCommand::VisitSettings( ConstSettingsVisitor & S )
+   { return VisitSettings<true>(S); }
 
 void SetPreferenceCommand::PopulateOrExchange(ShuttleGui & S)
 {
@@ -64,9 +92,9 @@ void SetPreferenceCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieTextBox(_("Name:"),mName);
-      S.TieTextBox(_("Value:"),mValue);
-      S.TieCheckBox(_("Reload:"),mbReload);
+      S.TieTextBox(XXO("Name:"),mName);
+      S.TieTextBox(XXO("Value:"),mValue);
+      S.TieCheckBox(XXO("Reload"),mbReload);
    }
    S.EndMultiColumn();
 }
@@ -76,8 +104,27 @@ bool SetPreferenceCommand::Apply(const CommandContext & context)
    bool bOK = gPrefs->Write(mName, mValue) && gPrefs->Flush();
    if( bOK && mbReload ){
       auto &project = context.project;
-      EditActions::DoReloadPreferences( project );
+      DoReloadPreferences( project );
    }
    return bOK;
 }
 
+namespace {
+using namespace MenuTable;
+
+// Register menu items
+
+AttachedItem sAttachment1{
+   wxT("Optional/Extra/Part2/Scriptables1"),
+   Items( wxT(""),
+      // Note that the PLUGIN_SYMBOL must have a space between words,
+      // whereas the short-form used here must not.
+      // (So if you did write "Compare Audio" for the PLUGIN_SYMBOL name, then
+      // you would have to use "CompareAudio" here.)
+      Command( wxT("GetPreference"), XXO("Get Preference..."),
+         CommandDispatch::OnAudacityCommand, AudioIONotBusyFlag() ),
+      Command( wxT("SetPreference"), XXO("Set Preference..."),
+         CommandDispatch::OnAudacityCommand, AudioIONotBusyFlag() )
+   )
+};
+}

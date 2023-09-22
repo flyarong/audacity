@@ -11,12 +11,13 @@
 #ifndef __AUDACITY_FREQ_WINDOW__
 #define __AUDACITY_FREQ_WINDOW__
 
-#include "MemoryX.h"
 #include <vector>
 #include <wx/font.h> // member variable
 #include <wx/statusbr.h> // to inherit
+#include "Prefs.h"
 #include "SampleFormat.h"
-#include "widgets/wxPanelWrapper.h" // to inherit
+#include "SpectrumAnalyst.h"
+#include "wxPanelWrapper.h" // to inherit
 
 class wxMemoryDC;
 class wxScrollBar;
@@ -27,73 +28,11 @@ class wxCheckBox;
 class wxChoice;
 
 class AudacityProject;
-class FreqWindow;
+class FrequencyPlotDialog;
 class FreqGauge;
 class RulerPanel;
 
 DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_FREQWINDOW_RECALC, -1);
-
-class SpectrumAnalyst
-{
-public:
-
-   enum Algorithm {
-      Spectrum,
-      Autocorrelation,
-      CubeRootAutocorrelation,
-      EnhancedAutocorrelation,
-      Cepstrum,
-
-      NumAlgorithms
-   };
-
-   SpectrumAnalyst();
-   ~SpectrumAnalyst();
-
-   // Return true iff successful
-   bool Calculate(Algorithm alg,
-      int windowFunc, // see FFT.h for values
-      size_t windowSize, double rate,
-      const float *data, size_t dataLen,
-      float *pYMin = NULL, float *pYMax = NULL, // outputs
-      FreqGauge *progress = NULL);
-
-   const float *GetProcessed() const;
-   int GetProcessedSize() const;
-
-   float GetProcessedValue(float freq0, float freq1) const;
-   float FindPeak(float xPos, float *pY) const;
-
-private:
-   float CubicInterpolate(float y0, float y1, float y2, float y3, float x) const;
-   float CubicMaximize(float y0, float y1, float y2, float y3, float * max) const;
-
-private:
-   Algorithm mAlg;
-   double mRate;
-   size_t mWindowSize;
-   std::vector<float> mProcessed;
-};
-
-class FreqGauge final : public wxStatusBar
-{
-public:
-   FreqGauge(wxWindow * parent, wxWindowID winid);
-
-   void SetRange(int range, int bar = 12, int gap = 3);
-   void SetValue(int value);
-   void Reset();
-
-private:
-   wxRect mRect;
-   int mRange;
-   int mCur;
-   int mLast;
-   int mInterval;
-   int mBar;
-   int mGap;
-   int mMargin;
-};
 
 class FreqPlot final : public wxWindow
 {
@@ -109,22 +48,26 @@ private:
    void OnMouseEvent(wxMouseEvent & event);
 
 private:
-    FreqWindow *freqWindow;
+    FrequencyPlotDialog *freqWindow;
 
     DECLARE_EVENT_TABLE()
 };
 
-class FreqWindow final : public wxDialogWrapper
+class FrequencyPlotDialog final : public wxDialogWrapper,
+                                  public PrefsListener
 {
 public:
-   FreqWindow(wxWindow *parent, wxWindowID id,
-              const wxString & title, const wxPoint & pos);
-   virtual ~ FreqWindow();
+   FrequencyPlotDialog(wxWindow *parent, wxWindowID id,
+              AudacityProject &project,
+              const TranslatableString & title, const wxPoint & pos);
+   virtual ~ FrequencyPlotDialog();
 
    bool Show( bool show = true ) override;
 
 private:
-   void GetAudio();
+   void Populate();
+
+   bool GetAudio();
 
    void PlotMouseEvent(wxMouseEvent & event);
    void PlotPaint(wxPaintEvent & event);
@@ -149,6 +92,9 @@ private:
    void DrawPlot();
    void DrawBackground(wxMemoryDC & dc);
 
+   // PrefsListener implementation
+   void UpdatePrefs() override;
+
  private:
    bool mDrawGrid;
    int mSize;
@@ -156,7 +102,7 @@ private:
    int mFunc;
    int mAxis;
    int dBRange;
-   AudacityProject *p;
+   AudacityProject *mProject;
 
 #ifdef __WXMSW__
    static const int fontSize = 8;

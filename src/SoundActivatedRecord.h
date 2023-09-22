@@ -16,15 +16,15 @@
 #ifndef __AUDACITY_SOUND_ACTIVATED_RECORD__
 #define __AUDACITY_SOUND_ACTIVATED_RECORD__
 
-#include "widgets/wxPanelWrapper.h" // to inherit
+#include "wxPanelWrapper.h" // to inherit
 
 class ShuttleGui;
 
-class SoundActivatedRecord final : public wxDialogWrapper
+class SoundActivatedRecordDialog final : public wxDialogWrapper
 {
 public:
-   SoundActivatedRecord(wxWindow* parent);
-   ~SoundActivatedRecord();
+   SoundActivatedRecordDialog(wxWindow* parent);
+   ~SoundActivatedRecordDialog();
 
 private:
    void OnOK(wxCommandEvent& event);

@@ -16,17 +16,19 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "GetTrackInfoCommand.h"
 
-#include "../Project.h"
-#include "../Track.h"
-#include "../TrackPanel.h"
-#include "../NoteTrack.h"
-#include "../WaveTrack.h"
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
+#include "LoadCommands.h"
+#include "SettingsVisitor.h"
+#include "ShuttleGui.h"
 #include "CommandContext.h"
+
+const ComponentInterfaceSymbol GetTrackInfoCommand::Symbol
+{ XO("Get Track Info") };
+
+// GET_TRACK_INFO subsumed by GET_INFO
+// namespace{ BuiltinCommandsModule::Registration< GetTrackInfoCommand > reg; }
 
 const int nTypes =3;
 static const EnumValueSymbol kTypes[nTypes] =
@@ -42,11 +44,18 @@ GetTrackInfoCommand::GetTrackInfoCommand()
    mInfoType = 0;
 }
 
-bool GetTrackInfoCommand::DefineParams( ShuttleParams & S ){ 
+template<bool Const>
+bool GetTrackInfoCommand::VisitSettings( SettingsVisitorBase<Const> & S ){
    S.DefineEnum( mInfoType, wxT("Type"), 0, kTypes, nTypes );
    
    return true;
 }
+
+bool GetTrackInfoCommand::VisitSettings( SettingsVisitor & S )
+   { return VisitSettings<false>(S); }
+
+bool GetTrackInfoCommand::VisitSettings( ConstSettingsVisitor & S )
+   { return VisitSettings<true>(S); }
 
 void GetTrackInfoCommand::PopulateOrExchange(ShuttleGui & S)
 {
@@ -54,7 +63,7 @@ void GetTrackInfoCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieChoice( _("Types:"), mInfoType, LocalizedStrings( kTypes, nTypes ));
+      S.TieChoice( XXO("Types:"), mInfoType, Msgids( kTypes, nTypes ));
    }
    S.EndMultiColumn();
 }

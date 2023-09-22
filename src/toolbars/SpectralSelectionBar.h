@@ -14,7 +14,6 @@ Paul Licameli
 #include <wx/defs.h>
 
 #include "ToolBar.h"
-#include "../widgets/NumericTextCtrl.h"
 
 class wxChoice;
 class wxComboBox;
@@ -22,6 +21,7 @@ class wxCommandEvent;
 class wxDC;
 class wxSizeEvent;
 
+class AudacityProject;
 class SpectralSelectionBarListener;
 class NumericTextCtrl;
 
@@ -29,8 +29,16 @@ class SpectralSelectionBar final : public ToolBar {
 
 public:
 
-   SpectralSelectionBar();
+   static Identifier ID();
+
+   SpectralSelectionBar( AudacityProject &project );
    virtual ~SpectralSelectionBar();
+
+   bool ShownByDefault() const override;
+   DockID DefaultDockID() const override;
+
+   static SpectralSelectionBar &Get( AudacityProject &project );
+   static const SpectralSelectionBar &Get( const AudacityProject &project );
 
    void Create(wxWindow *parent) override;
 
@@ -53,6 +61,7 @@ private:
    void OnUpdate(wxCommandEvent &evt);
    void OnCtrl(wxCommandEvent &evt);
    void OnChoice(wxCommandEvent &evt);
+   void OnIdle( wxIdleEvent &evt );
 
    void OnSize(wxSizeEvent &evt);
 

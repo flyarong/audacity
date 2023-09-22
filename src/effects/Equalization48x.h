@@ -11,11 +11,14 @@ Intrinsics (SSE/AVX) and Threaded Equalization
 #ifndef __AUDACITY_EFFECT_EQUALIZATION48X__
 #define __AUDACITY_EFFECT_EQUALIZATION48X__
 
-#include "../Experimental.h"
-
 #ifdef EXPERIMENTAL_EQ_SSE_THREADED
 
-#include "../MemoryX.h"
+#include <memory>
+
+#include <wx/thread.h> // to inherit
+#include <audacity/Types.h>
+class WaveTrack;
+using fft_type = float;
 
 #ifdef __AVX_ENABLED
 #define __MAXBUFFERCOUNT 8
@@ -129,7 +132,7 @@ public:
 private:
    bool RunFunctionSelect(int flags, int count, WaveTrack * t, sampleCount start, sampleCount len);
    bool TrackCompare();
-   bool DeltaTrack(WaveTrack * t, WaveTrack * t2, sampleCount start, sampleCount len);
+   bool DeltaTrack(WaveTrack * t, const WaveTrack * t2, sampleCount start, sampleCount len);
    bool AllocateBuffersWorkers(int nThreads);
    bool FreeBuffersWorkers();
 

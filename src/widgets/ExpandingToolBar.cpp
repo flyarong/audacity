@@ -51,7 +51,7 @@ modeless presentation.
 *//****************************************************************//**
 
 \class ToolBarArea
-\brief An alterantive to ToolBarFrame which can contain an
+\brief An alternative to ToolBarFrame which can contain an
 ExpandingToolBar.  ToolBarArea is used for a 'docked' ToolBar,
 ToolBarFrame for a floating one.
 
@@ -65,10 +65,6 @@ ExpandingToolBar.
 
 #include "ExpandingToolBar.h"
 
-#include "../Experimental.h"
-
-#include "../Theme.h"
-
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
 
@@ -79,13 +75,12 @@ ExpandingToolBar.
 #include <wx/wx.h>
 #include <wx/dcmemory.h>
 #include <wx/log.h>
-#include <wx/dialog.h>
 
 #include "AButton.h"
-#include "../AllThemeResources.h"
+#include "AllThemeResources.h"
 
 const int kToggleButtonHeight = 8;
-const int kTimerInterval = 50; // every 50 ms -> ~20 updates per second
+const int kMyTimerInterval = 50; // every 50 ms -> ~20 updates per second
 const wxRect kDummyRect = wxRect(-9999, -9999, 0, 0);
 
 enum {
@@ -382,14 +377,15 @@ void ExpandingToolBar::Fit()
       mCurrentDrawerSize = wxSize(mExtraSize.x, 0);
       mCurrentTotalSize = baseWindowSize;
 
-      SetSizeHints(mCurrentTotalSize, mCurrentTotalSize);
+      SetMinSize(mCurrentTotalSize);
+      SetMaxSize(mCurrentTotalSize);
       SetSize(mCurrentTotalSize);
    }
 
    // wxTimers seem to be a little unreliable - sometimes they stop for
    // no good reason, so this "primes" it every now and then...
    mTimer.Stop();
-   mTimer.Start(kTimerInterval);
+   mTimer.Start(kMyTimerInterval);
 }
 
 bool ExpandingToolBar::IsCursorInWindow()
@@ -436,7 +432,8 @@ void ExpandingToolBar::MoveDrawer(wxSize prevSize)
    if (mFrameParent) {
       // If we're in a tool window
 
-      SetSizeHints(mCurrentTotalSize, mCurrentTotalSize);
+      SetMinSize(mCurrentTotalSize);
+      SetMaxSize(mCurrentTotalSize);
       SetSize(mCurrentTotalSize);
 
       GetParent()->Fit();
@@ -445,7 +442,8 @@ void ExpandingToolBar::MoveDrawer(wxSize prevSize)
    if (mDialogParent) {
       // If we're in a dialog
 
-      SetSizeHints(mCurrentTotalSize, mCurrentTotalSize);
+      SetMinSize(mCurrentTotalSize);
+      SetMaxSize(mCurrentTotalSize);
       SetSize(mCurrentTotalSize);
 
       GetParent()->Fit();
@@ -459,7 +457,8 @@ void ExpandingToolBar::MoveDrawer(wxSize prevSize)
          mExtraPanel->Show();
       }
 
-      mExtraPanel->SetSizeHints(mCurrentDrawerSize, mCurrentDrawerSize);
+      mExtraPanel->SetMinSize(mCurrentDrawerSize);
+      mExtraPanel->SetMaxSize(mCurrentDrawerSize);
       mExtraPanel->SetSize(mCurrentDrawerSize);
 
       if (mCurrentDrawerSize.y == 0)
@@ -544,11 +543,10 @@ void ExpandingToolBar::StartMoving()
 //   ImageRoll tgtImageRoll = ImageRoll(ImageRoll::VerticalRoll,
 //                                      tgtImage,
 //                                      magicColor);
-   mTargetPanel = safenew ImageRollPanel(mAreaParent, -1, //tgtImageRoll,
+   mTargetPanel = safenew wxPanelWrapper(mAreaParent, -1, //tgtImageRoll,
                                      wxDefaultPosition,
                                      wxDefaultSize,
                                      wxTRANSPARENT_WINDOW);
-   mTargetPanel->SetLogicalFunction(wxXOR);
    mTargetPanel->SetSize(mDropTarget);
 
    // This gives time for wx to finish redrawing the window that way.
@@ -647,7 +645,7 @@ void ExpandingToolBar::FinishMoving()
 
    mTopLevelParent->Refresh(true);
 
-   mTimer.Start(kTimerInterval);
+   mTimer.Start(kMyTimerInterval);
 }
 
 //
@@ -682,8 +680,8 @@ ToolBarGrabber::ToolBarGrabber(wxWindow *parent,
                              images[1],
                              magicColor);
 
-   SetSizeHints(mImageRoll[0].GetMinSize(),
-                mImageRoll[1].GetMaxSize());
+   SetMinSize(mImageRoll[0].GetMinSize());
+   SetMaxSize(mImageRoll[1].GetMaxSize());
 #endif
    mState = 0;
 }
@@ -692,7 +690,7 @@ void ToolBarGrabber::OnMouse(wxMouseEvent &event)
 {
    int prevState = mState;
 
-   // Handle hilighting the image if the mouse is over it
+   // Handle highlighting the image if the mouse is over it
 
    if (event.Entering())
       mState = 1;
@@ -738,7 +736,7 @@ IMPLEMENT_CLASS(ToolBarDialog, wxDialogWrapper)
 
 ToolBarDialog::ToolBarDialog(wxWindow* parent,
                            wxWindowID id,
-                           const wxString& name,
+                           const TranslatableString& name,
                            const wxPoint& pos):
    wxDialogWrapper(parent, id, name, pos, wxSize(1, 1),
 // Workaround for bug in __WXMSW__.  No close box on a wxDialog unless wxSYSTEM_MENU is used.
@@ -1096,7 +1094,8 @@ void ToolBarArea::Fit(bool horizontal, bool vertical)
        maxSize != mMaxSize) {
       mMinSize = minSize;
       mMaxSize = maxSize;
-      SetSizeHints(mMinSize, mMaxSize);
+      SetMinSize(mMinSize);
+      SetMaxSize(mMaxSize);
    }
    if (actualSize != mActualSize) {
       mActualSize = actualSize;

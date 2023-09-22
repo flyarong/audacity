@@ -8,17 +8,15 @@ Paul Licameli
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+
 #include "ButtonHandle.h"
 
-#include "../../MemoryX.h"
-
 #include "../../HitTestResult.h"
-#include "../../Project.h"
 #include "../../RefreshCode.h"
-#include "../../Track.h"
+#include "Track.h"
 #include "../../TrackPanelMouseEvent.h"
-#include "../ui/TrackControls.h"
+
+#include <wx/event.h>
 
 ButtonHandle::ButtonHandle
 ( const std::shared_ptr<Track> &pTrack, const wxRect &rect )
@@ -31,7 +29,7 @@ ButtonHandle::~ButtonHandle()
 {
 }
 
-void ButtonHandle::Enter(bool)
+void ButtonHandle::Enter(bool, AudacityProject *)
 {
    mChangeHighlight = RefreshCode::RefreshCell;
 }
@@ -40,7 +38,7 @@ UIHandle::Result ButtonHandle::Click
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
    using namespace RefreshCode;
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto pTrack = TrackList::Get( *pProject ).Lock(mpTrack);
    if ( !pTrack )
       return Cancelled;
 
@@ -64,7 +62,7 @@ UIHandle::Result ButtonHandle::Drag
 {
    const wxMouseEvent &event = evt.event;
    using namespace RefreshCode;
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto pTrack = TrackList::Get( *pProject ).Lock(mpTrack);
    if (!pTrack)
       return Cancelled;
 
@@ -75,10 +73,12 @@ UIHandle::Result ButtonHandle::Drag
 }
 
 HitTestPreview ButtonHandle::Preview
-(const TrackPanelMouseState &st, const AudacityProject *)
+(const TrackPanelMouseState &st, AudacityProject *project)
 {
    // No special cursor
-   auto message = Tip(st.state);
+   TranslatableString message;
+   if (project)
+      message = Tip(st.state, *project);
    return { message, {}, message };
 }
 
@@ -87,7 +87,7 @@ UIHandle::Result ButtonHandle::Release
  wxWindow *pParent)
 {
    using namespace RefreshCode;
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto pTrack = TrackList::Get( *pProject ).Lock(mpTrack);
    if (!pTrack)
       return Cancelled;
 

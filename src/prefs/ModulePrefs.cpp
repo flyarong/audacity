@@ -11,32 +11,49 @@
 \class ModulePrefs
 \brief A PrefsPanel to enable/disable certain modules.  'Modules' are 
 dynamically linked libraries that modify Audacity.  They are plug-ins 
-with names like mnod-script-pipe that add NEW features.
+with names like mod-script-pipe that add NEW features.
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "ModulePrefs.h"
+
+
 
 #include <wx/defs.h>
 #include <wx/filename.h>
 
-#include "../ShuttleGui.h"
+#include "ShuttleGui.h"
 
-#include "../Prefs.h"
-#include "../Internat.h"
+#include "Prefs.h"
+#include "ModuleSettings.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/* i18n-hint: Modules are optional extensions to Audacity that add NEW features.*/
 ModulePrefs::ModulePrefs(wxWindow * parent, wxWindowID winid)
-:  PrefsPanel(parent, winid, _("Modules"))
+/* i18n-hint: Modules are optional extensions to Audacity that add NEW features.*/
+:  PrefsPanel(parent, winid, XO("Modules"))
 {
    Populate();
 }
 
 ModulePrefs::~ModulePrefs()
 {
+}
+
+ComponentInterfaceSymbol ModulePrefs::GetSymbol() const
+{
+   return MODULE_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString ModulePrefs::GetDescription() const
+{
+   return XO("Preferences for Module");
+}
+
+ManualPageID ModulePrefs::HelpPageName()
+{
+   return "Modules_Preferences";
 }
 
 void ModulePrefs::GetAllModuleStatuses(){
@@ -46,7 +63,6 @@ void ModulePrefs::GetAllModuleStatuses(){
    // Modules could for example be:
    //    mod-script-pipe
    //    mod-nyq-bench
-   //    mod-track-panel
    //    mod-menu-munger
    //    mod-theming
 
@@ -59,13 +75,13 @@ void ModulePrefs::GetAllModuleStatuses(){
 
    // Iterate through all Modules listed in prefs.
    // Get their names and values.
-   gPrefs->SetPath( wxT("Module/") );
-   bool bCont = gPrefs->GetFirstEntry(str, dummy);
-   while ( bCont ) {
+   auto moduleGroup = gPrefs->BeginGroup("Module");
+   for(const auto& key : gPrefs->GetChildKeys())
+   {
       int iStatus;
-      gPrefs->Read( str, &iStatus, kModuleDisabled );
+      gPrefs->Read( str, &iStatus, static_cast<decltype(iStatus)>(kModuleDisabled) );
       wxString fname;
-      gPrefs->Read( wxString( wxT("/ModulePath/") ) + str, &fname, wxEmptyString );
+      gPrefs->Read(wxT("/ModulePath/") + str, &fname, {} );
       if( !fname.empty() && wxFileExists( fname ) ){
          if( iStatus > kModuleNew ){
             iStatus = kModuleNew;
@@ -76,9 +92,7 @@ void ModulePrefs::GetAllModuleStatuses(){
          mStatuses.push_back( iStatus );
          mPaths.push_back( fname );
       }
-      bCont = gPrefs->GetNextEntry(str, dummy);
    }
-   gPrefs->SetPath( wxT("") );
 }
 
 void ModulePrefs::Populate()
@@ -100,30 +114,38 @@ void ModulePrefs::PopulateOrExchange(ShuttleGui & S)
 
    S.StartStatic( {} );
    {
-      S.AddFixedText(_("These are experimental modules. Enable them only if you've read the Audacity Manual\nand know what you are doing.") );
-      S.AddFixedText(wxString(wxT("  ")) + _("'Ask' means Audacity will ask if you want to load the module each time it starts.") );
-      S.AddFixedText(wxString(wxT("  ")) + _("'Failed' means Audacity thinks the module is broken and won't run it.") );
-      S.AddFixedText(wxString(wxT("  ")) + _("'New' means no choice has been made yet.") );
-      S.AddFixedText(_("Changes to these settings only take effect when Audacity starts up."));
+      S.AddFixedText(XO(
+"These are experimental modules. Enable them only if you've read the Audacity Manual\nand know what you are doing.") );
+      S.AddFixedText(XO(
+/* i18n-hint preserve the leading spaces */
+"  'Ask' means Audacity will ask if you want to load the module each time it starts.") );
+      S.AddFixedText(XO(
+/* i18n-hint preserve the leading spaces */
+"  'Failed' means Audacity thinks the module is broken and won't run it.") );
+      S.AddFixedText(XO(
+/* i18n-hint preserve the leading spaces */
+"  'New' means no choice has been made yet.") );
+      S.AddFixedText(XO(
+"Changes to these settings only take effect when Audacity starts up."));
       {
         S.StartMultiColumn( 2 );
         int i;
         for(i=0;i<(int)mModules.size();i++)
-           S.TieChoice( mModules[i],
+           S.TieChoice( Verbatim( mModules[i] ),
               mStatuses[i],
               {
-                 _("Disabled" ) ,
-                 _("Enabled" ) ,
-                 _("Ask" ) ,
-                 _("Failed" ) ,
-                 _("New" ) ,
+                 XO("Disabled" ) ,
+                 XO("Enabled" ) ,
+                 XO("Ask" ) ,
+                 XO("Failed" ) ,
+                 XO("New" ) ,
               }
            );
         S.EndMultiColumn();
       }
       if( mModules.size() < 1 )
       {
-        S.AddFixedText( _("No modules were found") );
+        S.AddFixedText( XO("No modules were found") );
       }
    }
    S.EndStatic();
@@ -136,42 +158,22 @@ bool ModulePrefs::Commit()
    PopulateOrExchange(S);
    int i;
    for(i=0;i<(int)mPaths.size();i++)
-      SetModuleStatus( mPaths[i], mStatuses[i] );
+      ModuleSettings::SetModuleStatus( mPaths[i], mStatuses[i] );
    return true;
 }
 
-
-// static function that tells us about a module.
-int ModulePrefs::GetModuleStatus(const FilePath &fname){
-   // Default status is NEW module, and we will ask once.
-   int iStatus = kModuleNew;
-
-   wxString ShortName = wxFileName( fname ).GetName();
-   wxString PrefName = wxString( wxT("/Module/") ) + ShortName.Lower();
-
-   gPrefs->Read( PrefName, &iStatus, kModuleNew );
-   // fix up a bad status.
-   if( iStatus > kModuleNew )
-      iStatus=kModuleNew;
-   return iStatus;
+#ifdef EXPERIMENTAL_MODULE_PREFS
+namespace{
+PrefsPanel::Registration sAttachment{ "Module",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew ModulePrefs(parent, winid);
+   },
+   false,
+   // Register with an explicit ordering hint because this one is
+   // only conditionally compiled
+   { "", { Registry::OrderingHint::After, "Mouse" } }
+};
 }
-
-void ModulePrefs::SetModuleStatus(const FilePath &fname, int iStatus){
-   wxString ShortName = wxFileName( fname ).GetName();
-   wxString PrefName = wxString( wxT("/Module/") ) + ShortName.Lower();
-   gPrefs->Write( PrefName, iStatus );
-   PrefName = wxString( wxT("/ModulePath/") ) + ShortName.Lower();
-   gPrefs->Write( PrefName, fname );
-   gPrefs->Flush();
-}
-
-wxString ModulePrefs::HelpPageName()
-{
-   return "Modules_Preferences";
-}
-
-PrefsPanel *ModulePrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew ModulePrefs(parent, winid);
-}
+#endif

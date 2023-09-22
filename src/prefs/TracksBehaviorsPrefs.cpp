@@ -14,18 +14,22 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "TracksBehaviorsPrefs.h"
+#include "ViewInfo.h"
 
-#include "../Experimental.h"
+#include <wx/stattext.h>
+#include <wx/radiobut.h>
+#include <wx/statbox.h>
 
-#include "../Prefs.h"
-#include "../ShuttleGui.h"
-#include "../Internat.h"
+#include "Prefs.h"
+#include "ShuttleGui.h"
+#include "WaveTrack.h"
+#include "WindowAccessible.h"
 
 TracksBehaviorsPrefs::TracksBehaviorsPrefs(wxWindow * parent, wxWindowID winid)
-/* i18n-hint: two nouns */
-:  PrefsPanel(parent, winid, _("Tracks Behaviors"))
+/* i18n-hint: i.e. the behaviors of tracks */
+:  PrefsPanel(parent, winid, XO("Tracks Behaviors"))
 {
    Populate();
 }
@@ -34,22 +38,23 @@ TracksBehaviorsPrefs::~TracksBehaviorsPrefs()
 {
 }
 
-const wxChar *TracksBehaviorsPrefs::ScrollingPreferenceKey()
+ComponentInterfaceSymbol TracksBehaviorsPrefs::GetSymbol() const
 {
-   static auto string = wxT("/GUI/ScrollBeyondZero");
-   return string;
+   return TRACKS_BEHAVIORS_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString TracksBehaviorsPrefs::GetDescription() const
+{
+   return XO("Preferences for TracksBehaviors");
+}
+
+ManualPageID TracksBehaviorsPrefs::HelpPageName()
+{
+   return "Tracks_Behaviors_Preferences";
 }
 
 void TracksBehaviorsPrefs::Populate()
 {
-   mSoloCodes.push_back(wxT("Simple"));
-   mSoloCodes.push_back(wxT("Multi"));
-   mSoloCodes.push_back(wxT("None"));
-
-   mSoloChoices.push_back(_("Simple"));
-   mSoloChoices.push_back(_("Multi-track"));
-   mSoloChoices.push_back(_("None"));
-
    //------------------------- Main section --------------------
    // Now construct the GUI itself.
    ShuttleGui S(this, eIsCreatingFromPrefs);
@@ -57,57 +62,117 @@ void TracksBehaviorsPrefs::Populate()
    // ----------------------- End of main section --------------
 }
 
+namespace
+{
+   const TranslatableString audioPasteModeText[] = {
+      XO("Smart clip.\n"
+         "The entire source clip will be pasted into your project, allowing you to access\ntrimmed audio data anytime."),
+      XO("Selected audio only.\n"
+         "Only the selected portion of the source clip will be pasted."),
+      XO("Ask me each time.\n"
+         "Show dialog each time audio is pasted."),
+   };
+}
+
+ChoiceSetting TracksBehaviorsAudioTrackPastePolicy {
+   wxT("/GUI/AudioTrackPastePolicy"),
+   {
+      ByColumns,
+      { {}, {}, {} },
+      { wxT("Keep"), wxT("Discard"),  wxT("Ask") }
+   },
+   2, // "Ask"
+};
+
 void TracksBehaviorsPrefs::PopulateOrExchange(ShuttleGui & S)
 {
    S.SetBorder(2);
    S.StartScroller();
 
-   S.StartStatic(_("Behaviors"));
+   S.StartStatic(XO("Behaviors"));
    {
-      S.TieCheckBox(_("&Select all audio, if selection required"),
-                    wxT("/GUI/SelectAllOnNone"),
-                    false);
+      S.TieCheckBox(XXO("&Select all audio, if selection required"),
+                    {wxT("/GUI/SelectAllOnNone"),
+                     false});
       /* i18n-hint: Cut-lines are lines that can expand to show the cut audio.*/
-      S.TieCheckBox(_("Enable cut &lines"),
-                    wxT("/GUI/EnableCutLines"),
-                    false);
-      S.TieCheckBox(_("Enable &dragging selection edges"),
-                    wxT("/GUI/AdjustSelectionEdges"),
-                    true);
-      S.TieCheckBox(_("Editing a clip can &move other clips"),
-                    wxT("/GUI/EditClipCanMove"),
-                    true);
-      S.TieCheckBox(_("\"Move track focus\" c&ycles repeatedly through tracks"),
-                    wxT("/GUI/CircularTrackNavigation"),
-                    false);
-      S.TieCheckBox(_("&Type to create a label"),
-                    wxT("/GUI/TypeToCreateLabel"),
-                    true);
-      S.TieCheckBox(_("Use dialog for the &name of a new label"),
-                    wxT("/GUI/DialogForNameNewLabel"),
-                    false);
+      S.TieCheckBox(XXO("Enable cut &lines"),
+                    {wxT("/GUI/EnableCutLines"),
+                     false});
+      S.TieCheckBox(XXO("Enable &dragging selection edges"),
+                    {wxT("/GUI/AdjustSelectionEdges"),
+                     true});
+      S
+         .TieCheckBox(XXO("Editing a clip can &move other clips"),
+            EditClipsCanMove);
+      S.TieCheckBox(XXO("\"Move track focus\" c&ycles repeatedly through tracks"),
+                    {wxT("/GUI/CircularTrackNavigation"),
+                     false});
+      S.TieCheckBox(XXO("&Type to create a label"),
+                    {wxT("/GUI/TypeToCreateLabel"),
+                     false});
+      S.TieCheckBox(XXO("Use dialog for the &name of a new label"),
+                    {wxT("/GUI/DialogForNameNewLabel"),
+                     false});
 #ifdef EXPERIMENTAL_SCROLLING_LIMITS
-      S.TieCheckBox(_("Enable scrolling left of &zero"),
-                    ScrollingPreferenceKey(),
-                    ScrollingPreferenceDefault());
+      S.TieCheckBox(XXO("Enable scrolling left of &zero"),
+                    ScrollingPreference);
 #endif
-      S.TieCheckBox(_("Advanced &vertical zooming"),
-                    wxT("/GUI/VerticalZooming"),
-                    false);
+      S.TieCheckBox(XXO("Advanced &vertical zooming"),
+                    {wxT("/GUI/VerticalZooming"),
+                     false});
 
       S.AddSpace(10);
 
       S.StartMultiColumn(2);
       {
-         S.TieChoice(_("Solo &Button:"),
-                     wxT("/GUI/Solo"),
-                     wxT("Standard"),
-                     mSoloChoices,
-                     mSoloCodes);
+         S.TieChoice( XXO("Solo &Button:"), TracksBehaviorsSolo);
       }
       S.EndMultiColumn();
    }
    S.EndStatic();
+   auto pastedAudioBox = S.StartStatic(XO("Pasted audio"));
+   {
+      const auto header = S.AddVariableText(XO("Paste audio from other Audacity project as"));
+#if wxUSE_ACCESSIBILITY
+      if(pastedAudioBox != nullptr)
+      {
+         pastedAudioBox->SetName(header->GetLabel());
+         safenew WindowAccessible(pastedAudioBox);
+      }
+#endif
+      S.StartRadioButtonGroup(TracksBehaviorsAudioTrackPastePolicy);
+      for(int i = 0;
+         i < TracksBehaviorsAudioTrackPastePolicy.GetSymbols().size();
+         ++i)
+      {
+         S.StartHorizontalLay(wxALIGN_LEFT);
+         {
+            wxRadioButton* radioButton{};
+            S.StartVerticalLay(0);
+            {
+               radioButton =
+                  S.Name(audioPasteModeText[i]).TieRadioButton();
+               S.AddSpace(0, 0, 1);
+            }
+            S.EndVerticalLay();
+
+            if (auto pText = S.AddVariableText(audioPasteModeText[i])) {
+               pText->Bind(
+                  wxEVT_LEFT_UP, [=](auto)
+                  {
+                     radioButton->SetValue(true);
+                  });
+            }
+   #if wxUSE_ACCESSIBILITY
+            safenew WindowAccessible(radioButton);
+   #endif
+         }
+         S.EndHorizontalLay();
+      }
+      S.EndRadioButtonGroup();
+   }
+   S.EndStatic();
+   
    S.EndScroller();
 }
 
@@ -115,21 +180,21 @@ bool TracksBehaviorsPrefs::Commit()
 {
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
+   EditClipsCanMove.Invalidate();
+   ScrollingPreference.Invalidate();
 
    return true;
 }
 
-wxString TracksBehaviorsPrefs::HelpPageName()
-{
-   return "Tracks_Behaviors_Preferences";
-}
-
-TracksBehaviorsPrefsFactory::TracksBehaviorsPrefsFactory()
-{
-}
-
-PrefsPanel *TracksBehaviorsPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew TracksBehaviorsPrefs(parent, winid);
+namespace{
+PrefsPanel::Registration sAttachment{ "TracksBehaviors",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew TracksBehaviorsPrefs(parent, winid);
+   },
+   false,
+   // Place it at a lower tree level
+   { "Tracks" }
+};
 }

@@ -9,10 +9,9 @@
 #ifndef __AUDACITY_CONTRAST_DIALOG__
 #define __AUDACITY_CONTRAST_DIALOG__
 
-#include "../widgets/wxPanelWrapper.h" // to inherit
+#include "wxPanelWrapper.h" // to inherit
 
 class wxButton;
-class wxString;
 class wxTextCtrl;
 
 class Envelope;
@@ -30,7 +29,7 @@ class ContrastDialog final : public wxDialogWrapper
 public:
    // constructors and destructors
    ContrastDialog(wxWindow * parent, wxWindowID id,
-              const wxString & title, const wxPoint & pos);
+              const TranslatableString & title, const wxPoint & pos);
 
    wxButton * m_pButton_UseCurrentF;
    wxButton * m_pButton_UseCurrentB;
@@ -54,6 +53,7 @@ public:
 
 private:
    // handlers
+   void OnChar(wxKeyEvent &event);
    void OnGetURL(wxCommandEvent &event);
    void OnExport(wxCommandEvent &event);
    void OnGetForeground(wxCommandEvent & event);

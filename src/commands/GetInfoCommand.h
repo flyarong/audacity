@@ -26,19 +26,21 @@ channel.
 class wxMenuBar;
 class wxPoint;
 
-#define GET_INFO_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Get Info") }
-
 class GetInfoCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return GET_INFO_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Gets information in JSON format.");};
-   bool DefineParams( ShuttleParams & S ) override;
+   ComponentInterfaceSymbol GetSymbol() const override {return Symbol;};
+   TranslatableString GetDescription() const override {return XO("Gets information in JSON format.");};
+   template<bool Const> bool VisitSettings( SettingsVisitorBase<Const> &S );
+   bool VisitSettings( SettingsVisitor & S ) override;
+   bool VisitSettings( ConstSettingsVisitor & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#get_info");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#get_info";}
    bool Apply(const CommandContext &context) override;
    bool ApplyInner(const CommandContext &context);
 
@@ -58,7 +60,7 @@ private:
 
    void ExploreMenu( const CommandContext &context, wxMenu * pMenu, int Id, int depth );
    void ExploreTrackPanel( const CommandContext & context,
-      wxPoint P, wxWindow * pWin, int Id, int depth );
+      wxPoint P, int depth );
    void ExploreAdornments( const CommandContext & context,
       wxPoint P, wxWindow * pWin, int Id, int depth );
    void ExploreWindows( const CommandContext & context,

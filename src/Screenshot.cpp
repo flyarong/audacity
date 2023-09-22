@@ -8,8 +8,8 @@
 
 *******************************************************************//**
 
-\class ScreenFrame
-\brief ScreenFrame provides an alternative Gui for ScreenshotCommand.
+\class ScreenshotBigDialog
+\brief ScreenshotBigDialog provides an alternative Gui for ScreenshotCommand.
 It adds a timer that allows a delay before taking a screenshot,
 provides lots of one-click buttons, options to resize the screen.
 It forwards the actual work of doing the commands to the ScreenshotCommand.
@@ -17,20 +17,16 @@ It forwards the actual work of doing the commands to the ScreenshotCommand.
 ***********************************************************************/
 
 #include "Screenshot.h"
-#include "MemoryX.h"
 #include "commands/ScreenshotCommand.h"
 #include "commands/CommandTargets.h"
 #include "commands/CommandContext.h"
+#include <wx/app.h>
 #include <wx/defs.h>
-#include <wx/event.h>
 #include <wx/frame.h>
 
 #include "ShuttleGui.h"
-#include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/dirdlg.h>
-#include <wx/image.h>
-#include <wx/intl.h>
 #include <wx/panel.h>
 #include <wx/sizer.h>
 #include <wx/statusbr.h>
@@ -39,23 +35,35 @@ It forwards the actual work of doing the commands to the ScreenshotCommand.
 #include <wx/tglbtn.h>
 #include <wx/window.h>
 
-#include "AudacityApp.h"
+#include "prefs/GUISettings.h" // for RTL_WORKAROUND
 #include "Project.h"
+#include "ProjectStatus.h"
+#include "ProjectWindow.h"
+#include "ProjectWindows.h"
 #include "Prefs.h"
 #include "toolbars/ToolManager.h"
+#include "tracks/ui/ChannelView.h"
+#include "HelpSystem.h"
 
+#include "ViewInfo.h"
 #include "WaveTrack.h"
 
 class OldStyleCommandType;
+class ScreenFrameTimer;
 
 ////////////////////////////////////////////////////////////////////////////////
+#define ScreenCaptureFrameTitle XO("Screen Capture Frame")
 
-class ScreenFrame final : public wxFrame
+// ANSWER-ME: Should this derive from wxDialogWrapper instead?
+class ScreenshotBigDialog final : public wxFrame,
+                                  public PrefsListener
 {
  public:
+
    // constructors and destructors
-   ScreenFrame(wxWindow *parent, wxWindowID id);
-   virtual ~ScreenFrame();
+   ScreenshotBigDialog(
+      wxWindow *parent, wxWindowID id, AudacityProject &project);
+   virtual ~ScreenshotBigDialog();
 
    bool ProcessEvent(wxEvent & event) override;
 
@@ -66,6 +74,9 @@ class ScreenFrame final : public wxFrame
    void OnCloseWindow(wxCloseEvent & event);
    void OnUIUpdate(wxUpdateUIEvent & event);
    void OnDirChoose(wxCommandEvent & event);
+   void OnGetURL(wxCommandEvent & event);
+   void OnClose(wxCommandEvent & event );
+
 
    void SizeMainWindow(int w, int h);
    void OnMainWindowSmall(wxCommandEvent & event);
@@ -88,6 +99,11 @@ class ScreenFrame final : public wxFrame
    void OnMedTracks(wxCommandEvent & event);
    void OnTallTracks(wxCommandEvent & event);
 
+   // PrefsListener implementation
+   void UpdatePrefs() override;
+
+   AudacityProject &mProject;
+
    std::unique_ptr<ScreenshotCommand> CreateCommand();
 
    wxCheckBox *mDelayCheckBox;
@@ -96,38 +112,38 @@ class ScreenFrame final : public wxFrame
    wxToggleButton *mWhite;
    wxStatusBar *mStatus;
 
+   std::unique_ptr<ScreenFrameTimer> mTimer;
+
    std::unique_ptr<ScreenshotCommand> mCommand;
-   CommandContext mContext;
+   const CommandContext mContext;
+
+   int mFirstUnusedId = 0;
 
    DECLARE_EVENT_TABLE()
 };
 
-// Static pointer to the unique ScreenFrame window.
-// Formerly it was parentless, therefore this was a Destroy_ptr<ScreenFrame>
+// Static pointer to the unique ScreenshotBigDialog window.
+// Formerly it was parentless, therefore this was a Destroy_ptr<ScreenshotBigDialog>
 // But now the window is owned, so just use a bare pointer, and null it when
 // the unique window is destroyed.
-using ScreenFramePtr = ScreenFrame*;
-ScreenFramePtr mFrame;
+using ScreenshotBigDialogPtr = ScreenshotBigDialog*;
+ScreenshotBigDialogPtr mFrame;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void OpenScreenshotTools()
+static void OpenScreenshotTools( AudacityProject &project )
 {
    if (!mFrame) {
-      auto parent = wxGetApp().GetTopWindow();
+      auto parent = wxTheApp->GetTopWindow();
       if (!parent) {
          wxASSERT(false);
          return;
       }
-      mFrame = ScreenFramePtr{ safenew ScreenFrame(parent, -1) };
+      mFrame = ScreenshotBigDialogPtr{
+         safenew ScreenshotBigDialog(parent, -1, project) };
    }
    mFrame->Show();
    mFrame->Raise();
-}
-
-void CloseScreenshotTools()
-{
-   mFrame = nullptr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -135,11 +151,19 @@ void CloseScreenshotTools()
 class ScreenFrameTimer final : public wxTimer
 {
  public:
-   ScreenFrameTimer(ScreenFrame *frame,
+   ScreenFrameTimer(ScreenshotBigDialog *frame,
                     wxEvent & event)
    {
       screenFrame = frame;
       evt.reset(event.Clone());
+   }
+
+   virtual ~ScreenFrameTimer()
+   {
+      if (IsRunning())
+      {
+         Stop();
+      }
    }
 
    void Notify() override
@@ -147,11 +171,10 @@ class ScreenFrameTimer final : public wxTimer
       // Process timer notification just once, then destroy self
       evt->SetEventObject(NULL);
       screenFrame->ProcessEvent(*evt);
-      delete this;
    }
 
  private:
-   ScreenFrame *screenFrame;
+   ScreenshotBigDialog *screenFrame;
    std::unique_ptr<wxEvent> evt;
 };
 
@@ -177,11 +200,16 @@ enum
 
    IdDelayCheckBox,
 
+   IdToggleBackgroundBlue,
+   IdToggleBackgroundWhite,
+
    IdCaptureFirst,
+
    // No point delaying the capture of sets of things.
    IdCaptureEffects= IdCaptureFirst,
    IdCaptureScriptables,
    IdCapturePreferences,
+
    IdCaptureToolbars,
 
    // Put all events that need delay between AllDelayed and LastDelayed.
@@ -190,19 +218,6 @@ enum
    IdCaptureFullWindow,
    IdCaptureWindowPlus,
    IdCaptureFullScreen,
-  
-   IdCaptureSelectionBar,
-   IdCaptureSpectralSelection,
-   IdCaptureTools,
-   IdCaptureTransport,
-   IdCaptureMixer,
-   IdCaptureMeter,
-   IdCapturePlayMeter,
-   IdCaptureRecordMeter,
-   IdCaptureEdit,
-   IdCaptureDevice,
-   IdCaptureTranscription,
-   IdCaptureScrub,
 
    IdCaptureTrackPanel,
    IdCaptureRuler,
@@ -211,39 +226,38 @@ enum
    IdCaptureSecondTrack,
    IdCaptureLast = IdCaptureSecondTrack,
 
-   IdLastDelayedEvent,
-
-   IdToggleBackgroundBlue,
-   IdToggleBackgroundWhite,
-
+   // Reserved values for an unspecified number of toolbars
+   IdFirstToolbar,
 };
 
-BEGIN_EVENT_TABLE(ScreenFrame, wxFrame)
-   EVT_CLOSE(ScreenFrame::OnCloseWindow)
+BEGIN_EVENT_TABLE(ScreenshotBigDialog, wxFrame)
+   EVT_CLOSE(ScreenshotBigDialog::OnCloseWindow)
+   EVT_BUTTON(wxID_HELP, ScreenshotBigDialog::OnGetURL)
+   EVT_BUTTON(wxID_CANCEL, ScreenshotBigDialog::OnClose)
 
-   EVT_UPDATE_UI(IdCaptureFullScreen,   ScreenFrame::OnUIUpdate)
+   EVT_UPDATE_UI(IdCaptureFullScreen,   ScreenshotBigDialog::OnUIUpdate)
 
-   EVT_BUTTON(IdMainWindowSmall,        ScreenFrame::OnMainWindowSmall)
-   EVT_BUTTON(IdMainWindowLarge,        ScreenFrame::OnMainWindowLarge)
-   EVT_TOGGLEBUTTON(IdToggleBackgroundBlue,   ScreenFrame::OnToggleBackgroundBlue)
-   EVT_TOGGLEBUTTON(IdToggleBackgroundWhite,  ScreenFrame::OnToggleBackgroundWhite)
-   EVT_COMMAND_RANGE(IdCaptureFirst, IdCaptureLast, wxEVT_COMMAND_BUTTON_CLICKED, ScreenFrame::OnCaptureSomething)
+   EVT_BUTTON(IdMainWindowSmall,        ScreenshotBigDialog::OnMainWindowSmall)
+   EVT_BUTTON(IdMainWindowLarge,        ScreenshotBigDialog::OnMainWindowLarge)
+   EVT_TOGGLEBUTTON(IdToggleBackgroundBlue,   ScreenshotBigDialog::OnToggleBackgroundBlue)
+   EVT_TOGGLEBUTTON(IdToggleBackgroundWhite,  ScreenshotBigDialog::OnToggleBackgroundWhite)
+   EVT_COMMAND_RANGE(IdCaptureFirst, IdCaptureLast, wxEVT_COMMAND_BUTTON_CLICKED, ScreenshotBigDialog::OnCaptureSomething)
 
-   EVT_BUTTON(IdOneSec,                 ScreenFrame::OnOneSec)
-   EVT_BUTTON(IdTenSec,                 ScreenFrame::OnTenSec)
-   EVT_BUTTON(IdOneMin,                 ScreenFrame::OnOneMin)
-   EVT_BUTTON(IdFiveMin,                ScreenFrame::OnFiveMin)
-   EVT_BUTTON(IdOneHour,                ScreenFrame::OnOneHour)
+   EVT_BUTTON(IdOneSec,                 ScreenshotBigDialog::OnOneSec)
+   EVT_BUTTON(IdTenSec,                 ScreenshotBigDialog::OnTenSec)
+   EVT_BUTTON(IdOneMin,                 ScreenshotBigDialog::OnOneMin)
+   EVT_BUTTON(IdFiveMin,                ScreenshotBigDialog::OnFiveMin)
+   EVT_BUTTON(IdOneHour,                ScreenshotBigDialog::OnOneHour)
 
-   EVT_BUTTON(IdShortTracks,            ScreenFrame::OnShortTracks)
-   EVT_BUTTON(IdMedTracks,              ScreenFrame::OnMedTracks)
-   EVT_BUTTON(IdTallTracks,             ScreenFrame::OnTallTracks)
+   EVT_BUTTON(IdShortTracks,            ScreenshotBigDialog::OnShortTracks)
+   EVT_BUTTON(IdMedTracks,              ScreenshotBigDialog::OnMedTracks)
+   EVT_BUTTON(IdTallTracks,             ScreenshotBigDialog::OnTallTracks)
 
-   EVT_BUTTON(IdDirChoose,              ScreenFrame::OnDirChoose)
+   EVT_BUTTON(IdDirChoose,              ScreenshotBigDialog::OnDirChoose)
 END_EVENT_TABLE();
 
 // Must not be called before CreateStatusBar!
-std::unique_ptr<ScreenshotCommand> ScreenFrame::CreateCommand()
+std::unique_ptr<ScreenshotCommand> ScreenshotBigDialog::CreateCommand()
 {
    wxASSERT(mStatus != NULL);
    auto output =
@@ -253,8 +267,9 @@ std::unique_ptr<ScreenshotCommand> ScreenFrame::CreateCommand()
    return std::make_unique<ScreenshotCommand>();//*type, std::move(output), this);
 }
 
-ScreenFrame::ScreenFrame(wxWindow * parent, wxWindowID id)
-:  wxFrame(parent, id, _("Screen Capture Frame"),
+ScreenshotBigDialog::ScreenshotBigDialog(
+   wxWindow * parent, wxWindowID id, AudacityProject &project)
+:  wxFrame(parent, id, ScreenCaptureFrameTitle.Translation(),
            wxDefaultPosition, wxDefaultSize,
 
 #if !defined(__WXMSW__)
@@ -269,8 +284,9 @@ ScreenFrame::ScreenFrame(wxWindow * parent, wxWindowID id)
 
 #endif
 
-           wxSYSTEM_MENU|wxCAPTION|wxCLOSE_BOX),
-   mContext( *GetActiveProject() )
+           wxSYSTEM_MENU|wxCAPTION|wxCLOSE_BOX)
+   , mProject{ project }
+   , mContext( project )
 {
    mDelayCheckBox = NULL;
    mDirectoryTextBox = NULL;
@@ -286,11 +302,11 @@ ScreenFrame::ScreenFrame(wxWindow * parent, wxWindowID id)
    // because we've switched monitor mid play.
    // Bug 383 - Resetting the toolbars is not wanted.
    // Any that are invisible will be amde visible as/when needed.
-   //mContext.GetProject()->GetToolManager()->Reset();
+   //ToolManager::Get( mContext.project ).Reset();
    Center();
 }
 
-ScreenFrame::~ScreenFrame()
+ScreenshotBigDialog::~ScreenshotBigDialog()
 {
    if (this == mFrame)
       mFrame = nullptr;
@@ -299,53 +315,53 @@ ScreenFrame::~ScreenFrame()
       wxASSERT(false);
 }
 
-void ScreenFrame::Populate()
+void ScreenshotBigDialog::Populate()
 {
    ShuttleGui S(this, eIsCreating);
    PopulateOrExchange(S);
 }
 
-void ScreenFrame::PopulateOrExchange(ShuttleGui & S)
+void ScreenshotBigDialog::PopulateOrExchange(ShuttleGui & S)
 {
    wxPanel *p = S.StartPanel();
    RTL_WORKAROUND(p);
    {
       S.SetBorder(3);
 
-      S.StartStatic(_("Choose location to save files"));
+      S.StartStatic(XO("Choose location to save files"));
       {
          S.StartMultiColumn(3, wxEXPAND);
          {
             S.SetStretchyCol(1);
 
-            wxString dir =
-               gPrefs->Read(wxT("/ScreenshotPath"),
-                            wxFileName::GetHomeDir());
             mDirectoryTextBox =
-               S.Id(IdDirectory).AddTextBox(_("Save images to:"),
-                                            dir, 30);
-            S.Id(IdDirChoose).AddButton(_("Choose..."));
+            S.Id(IdDirectory).AddTextBox(
+               XXO("Save images to:"),
+               gPrefs->Read(wxT("/ScreenshotPath"), wxFileName::GetHomeDir()),
+               30
+            );
+            S.Id(IdDirChoose).AddButton(XXO("Choose..."));
          }
          S.EndMultiColumn();
       }
       S.EndStatic();
 
-      S.StartStatic(_("Capture entire window or screen"));
+      S.StartStatic(XO("Capture entire window or screen"));
       {
          S.StartHorizontalLay();
          {
-            S.Id(IdMainWindowSmall).AddButton(_("Resize Small"));
-            S.Id(IdMainWindowLarge).AddButton(_("Resize Large"));
-            /* i18n-hint: Bkgnd is short for background and appears on a small button
-             * It is OK to just translate this item as if it said 'Blue' */
+            S.Id(IdMainWindowSmall).AddButton(XXO("Resize Small"));
+            S.Id(IdMainWindowLarge).AddButton(XXO("Resize Large"));
             mBlue = safenew wxToggleButton(S.GetParent(),
                                        IdToggleBackgroundBlue,
+            /* i18n-hint: Bkgnd is short for background and appears on a small button
+             * It is OK to just translate this item as if it said 'Blue' */
                                        _("Blue Bkgnd"));
             S.AddWindow(mBlue);
-            /* i18n-hint: Bkgnd is short for background and appears on a small button
-             * It is OK to just translate this item as if it said 'White' */
             mWhite = safenew wxToggleButton(S.GetParent(),
                                         IdToggleBackgroundWhite,
+            /* i18n-hint: Bkgnd is short for background and appears on a small button
+             * It is OK to just translate this item as if it said 'White' */
                                         _("White Bkgnd"));
             S.AddWindow(mWhite);
          }
@@ -353,99 +369,104 @@ void ScreenFrame::PopulateOrExchange(ShuttleGui & S)
 
          S.StartHorizontalLay();
          {
-            S.Id(IdCaptureWindowContents).AddButton(_("Capture Window Only"));
-            S.Id(IdCaptureFullWindow).AddButton(_("Capture Full Window"));
-            S.Id(IdCaptureWindowPlus).AddButton(_("Capture Window Plus"));
+            S.Id(IdCaptureWindowContents).AddButton(XXO("Capture Window Only"));
+            S.Id(IdCaptureFullWindow).AddButton(XXO("Capture Full Window"));
+            S.Id(IdCaptureWindowPlus).AddButton(XXO("Capture Window Plus"));
          }
          S.EndHorizontalLay();
 
          S.StartHorizontalLay();
          {
-            S.Id(IdCaptureFullScreen).AddButton(_("Capture Full Screen"));
+            S.Id(IdCaptureFullScreen).AddButton(XXO("Capture Full Screen"));
          }
          S.EndHorizontalLay();
 
          S.StartHorizontalLay();
          {
-            mDelayCheckBox = S.Id(IdDelayCheckBox).AddCheckBox
-               (_("Wait 5 seconds and capture frontmost window/dialog"),
+            mDelayCheckBox = S.Id(IdDelayCheckBox).AddCheckBox(
+               XXO("Wait 5 seconds and capture frontmost window/dialog"),
                 false);
          }
          S.EndHorizontalLay();
       }
       S.EndStatic();
 
-      S.StartStatic(_("Capture part of a project window"));
+      S.StartStatic(XO("Capture part of a project window"));
       {
          S.StartHorizontalLay();
          {
-            S.Id(IdCaptureToolbars).AddButton(_("All Toolbars"));
-            S.Id(IdCaptureEffects).AddButton(_("All Effects"));
-            S.Id(IdCaptureScriptables).AddButton(_("All Scriptables"));
-            S.Id(IdCapturePreferences).AddButton(_("All Preferences"));
+            S.Id(IdCaptureToolbars).AddButton(XXO("All Toolbars"));
+            S.Id(IdCaptureEffects).AddButton(XXO("All Effects"));
+            S.Id(IdCaptureScriptables).AddButton(XXO("All Scriptables"));
+            S.Id(IdCapturePreferences).AddButton(XXO("All Preferences"));
          }
          S.EndHorizontalLay();
 
-         S.StartHorizontalLay();
          {
-            S.Id(IdCaptureSelectionBar).AddButton(_("SelectionBar"));
-            S.Id(IdCaptureSpectralSelection).AddButton(_("Spectral Selection"));
-            S.Id(IdCaptureTools).AddButton(_("Tools"));
-            S.Id(IdCaptureTransport).AddButton(_("Transport"));
+            // Discover the available toolbars and make rows of buttons
+            int id = IdFirstToolbar;
+            size_t ii = 0;
+            S.StartHorizontalLay();
+            std::vector<ToolBar *> bars;
+            ToolManager::Get(mProject).ForEach([&](ToolBar *pBar){
+               bars.emplace_back(pBar);
+            });
+            // Sort by translation, for determinacy (per language) of the
+            // sequence
+            static const auto comp = [](ToolBar *a, ToolBar *b){
+               return a->GetLabel().Translation() < b->GetLabel().Translation();
+            };
+            sort(bars.begin(), bars.end(), comp);
+            for_each(bars.begin(), bars.end(), [&](ToolBar *pBar){
+               S.Id(id).AddButton(pBar->GetLabel());
+               Bind(wxEVT_BUTTON,
+                  &ScreenshotBigDialog::OnCaptureSomething, this, id);
+               ++id;
+               // Start a new row at every fourth one
+               if (++ii == 4) {
+                  ii = 0;
+                  S.EndHorizontalLay();
+                  S.StartHorizontalLay();
+               }
+            });
+            mFirstUnusedId = id;
+            S.EndHorizontalLay();
          }
-         S.EndHorizontalLay();
 
          S.StartHorizontalLay();
          {
-            S.Id(IdCaptureMixer).AddButton(_("Mixer"));
-            S.Id(IdCaptureMeter).AddButton(_("Meter"));
-            S.Id(IdCapturePlayMeter).AddButton(_("Play Meter"));
-            S.Id(IdCaptureRecordMeter).AddButton(_("Record Meter"));
-         }
-         S.EndHorizontalLay();
-
-         S.StartHorizontalLay();
-         {
-            S.Id(IdCaptureEdit).AddButton(_("Edit"));
-            S.Id(IdCaptureDevice).AddButton(_("Device"));
-            S.Id(IdCaptureTranscription).AddButton(_("Play-at-Speed"));
-            S.Id(IdCaptureScrub).AddButton(_("Scrub"));
-         }
-         S.EndHorizontalLay();
-
-         S.StartHorizontalLay();
-         {
-            S.Id(IdCaptureTrackPanel).AddButton(_("Track Panel"));
-            S.Id(IdCaptureRuler).AddButton(_("Ruler"));
-            S.Id(IdCaptureTracks).AddButton(_("Tracks"));
-            S.Id(IdCaptureFirstTrack).AddButton(_("First Track"));
-            S.Id(IdCaptureSecondTrack).AddButton(_("Second Track"));
+            S.Id(IdCaptureTrackPanel).AddButton(XXO("Track Panel"));
+            S.Id(IdCaptureRuler).AddButton(XXO("Ruler"));
+            S.Id(IdCaptureTracks).AddButton(XXO("Tracks"));
+            S.Id(IdCaptureFirstTrack).AddButton(XXO("First Track"));
+            S.Id(IdCaptureSecondTrack).AddButton(XXO("Second Track"));
          }
          S.EndHorizontalLay();
       }
       S.EndStatic();
 
-      S.StartStatic(_("Scale"));
+      S.StartStatic(XO("Scale"));
       {
          S.StartHorizontalLay();
          {
-            S.Id(IdOneSec).AddButton(_("One Sec"));
-            S.Id(IdTenSec).AddButton(_("Ten Sec"));
-            S.Id(IdOneMin).AddButton(_("One Min"));
-            S.Id(IdFiveMin).AddButton(_("Five Min"));
-            S.Id(IdOneHour).AddButton(_("One Hour"));
+            S.Id(IdOneSec).AddButton(XXO("One Sec"));
+            S.Id(IdTenSec).AddButton(XXO("Ten Sec"));
+            S.Id(IdOneMin).AddButton(XXO("One Min"));
+            S.Id(IdFiveMin).AddButton(XXO("Five Min"));
+            S.Id(IdOneHour).AddButton(XXO("One Hour"));
          }
          S.EndHorizontalLay();
 
          S.StartHorizontalLay();
          {
-            S.Id(IdShortTracks).AddButton(_("Short Tracks"));
-            S.Id(IdMedTracks).AddButton(_("Medium Tracks"));
-            S.Id(IdTallTracks).AddButton(_("Tall Tracks"));
+            S.Id(IdShortTracks).AddButton(XXO("Short Tracks"));
+            S.Id(IdMedTracks).AddButton(XXO("Medium Tracks"));
+            S.Id(IdTallTracks).AddButton(XXO("Tall Tracks"));
          }
          S.EndHorizontalLay();
       }
       S.EndStatic();
+      S.AddStandardButtons(eCloseButton |eHelpButton);
    }
    S.EndPanel();
 
@@ -471,44 +492,67 @@ void ScreenFrame::PopulateOrExchange(ShuttleGui & S)
       CentreOnParent();
    }
 
-   SetIcon(mContext.GetProject()->GetIcon());
+   SetIcon( GetProjectFrame( mContext.project ).GetIcon() );
 }
 
-bool ScreenFrame::ProcessEvent(wxEvent & e)
+bool ScreenshotBigDialog::ProcessEvent(wxEvent & e)
 {
-   int id = e.GetId();
-
-   // If split into two parts to make for easier breakpoint
-   // when testing timer.
-   if (mDelayCheckBox &&
-       mDelayCheckBox->GetValue() &&
-       e.IsCommandEvent() &&
-       e.GetEventType() == wxEVT_COMMAND_BUTTON_CLICKED)
+   if (!IsFrozen())
    {
-      if( id >= IdAllDelayedEvents && id <= IdLastDelayedEvent &&
-       e.GetEventObject() != NULL) {
-         // safenew because it's a one-shot that deletes itself
-         ScreenFrameTimer *timer = safenew ScreenFrameTimer(this, e);
-         timer->Start(5000, true);
-         return true;
+      int id = e.GetId();
+
+      // If split into two parts to make for easier breakpoint
+      // when testing timer.
+      if (mDelayCheckBox &&
+          mDelayCheckBox->GetValue() &&
+          e.IsCommandEvent() &&
+          e.GetEventType() == wxEVT_COMMAND_BUTTON_CLICKED)
+      {
+         if( id >= IdAllDelayedEvents &&
+          e.GetEventObject() != NULL) {
+            mTimer = std::make_unique<ScreenFrameTimer>(this, e);
+            mTimer->Start(5000, true);
+            return true;
+         }
+      }
+
+      if (e.IsCommandEvent() && e.GetEventObject() == NULL) {
+         e.SetEventObject(this);
       }
    }
 
-   if (e.IsCommandEvent() && e.GetEventObject() == NULL) {
-      e.SetEventObject(this);
-   }
    return wxFrame::ProcessEvent(e);
 }
 
-void ScreenFrame::OnCloseWindow(wxCloseEvent &  WXUNUSED(event))
+void ScreenshotBigDialog::OnCloseWindow(wxCloseEvent &  WXUNUSED(event))
 {
+   if (mDirectoryTextBox->IsModified()) {
+      gPrefs->Write(wxT("/ScreenshotPath"), mDirectoryTextBox->GetValue());
+      gPrefs->Flush();
+   }
+
    Destroy();
 }
 
-void ScreenFrame::OnUIUpdate(wxUpdateUIEvent &  WXUNUSED(event))
+void ScreenshotBigDialog::OnClose(wxCommandEvent &  WXUNUSED(event))
+{
+   if (mDirectoryTextBox->IsModified()) {
+      gPrefs->Write(wxT("/ScreenshotPath"), mDirectoryTextBox->GetValue());
+      gPrefs->Flush();
+   }
+
+   Destroy();
+}
+
+void ScreenshotBigDialog::OnGetURL(wxCommandEvent & WXUNUSED(event))
+{
+   HelpSystem::ShowHelp(this, L"Screenshot");
+}
+
+void ScreenshotBigDialog::OnUIUpdate(wxUpdateUIEvent &  WXUNUSED(event))
 {
 #ifdef __WXMAC__
-   wxTopLevelWindow *top = mCommand->GetFrontWindow(GetActiveProject());
+   wxTopLevelWindow *top = mCommand->GetFrontWindow(&mProject);
    bool needupdate = false;
    bool enable = false;
 
@@ -522,7 +566,9 @@ void ScreenFrame::OnUIUpdate(wxUpdateUIEvent &  WXUNUSED(event))
    }
 
    if (needupdate) {
-      for (int i = IdMainWindowSmall; i < IdLastDelayedEvent; i++) {
+      for (int i = IdMainWindowSmall; i < mFirstUnusedId; i++) {
+         if (i == IdToggleBackgroundBlue || i == IdToggleBackgroundWhite)
+            continue;
          wxWindow *w = wxWindow::FindWindowById(i, this);
          if (w) {
             w->Enable(enable);
@@ -532,13 +578,13 @@ void ScreenFrame::OnUIUpdate(wxUpdateUIEvent &  WXUNUSED(event))
 #endif
 }
 
-void ScreenFrame::OnDirChoose(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnDirChoose(wxCommandEvent & WXUNUSED(event))
 {
    wxString current = mDirectoryTextBox->GetValue();
 
    wxDirDialogWrapper dlog(this,
-                    _("Choose a location to save screenshot images"),
-                    current);
+      XO("Choose a location to save screenshot images"),
+      current);
 
    dlog.ShowModal();
    if (!dlog.GetPath().empty()) {
@@ -552,39 +598,41 @@ void ScreenFrame::OnDirChoose(wxCommandEvent & WXUNUSED(event))
    }
 }
 
-void ScreenFrame::OnToggleBackgroundBlue(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnToggleBackgroundBlue(wxCommandEvent & WXUNUSED(event))
 {
    mWhite->SetValue(false);
 }
 
-void ScreenFrame::OnToggleBackgroundWhite(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnToggleBackgroundWhite(wxCommandEvent & WXUNUSED(event))
 {
    mBlue->SetValue(false);
 }
 
-void ScreenFrame::SizeMainWindow(int w, int h)
+void ScreenshotBigDialog::SizeMainWindow(int w, int h)
 {
    int top = 20;
 
-   mContext.GetProject()->Maximize(false);
-   mContext.GetProject()->SetSize(16, 16 + top, w, h);
+   auto &window = GetProjectFrame( mContext.project );
+   window.Maximize(false);
+   window.SetSize(16, 16 + top, w, h);
    //Bug383 - Toolbar Resets not wanted.
-   //mContext.GetProject()->GetToolManager()->Reset();
+   //ToolManager::Get( mContext.project ).Reset();
 }
 
-void ScreenFrame::OnMainWindowSmall(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnMainWindowSmall(wxCommandEvent & WXUNUSED(event))
 {
    SizeMainWindow(680, 450);
 }
 
-void ScreenFrame::OnMainWindowLarge(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnMainWindowLarge(wxCommandEvent & WXUNUSED(event))
 {
    SizeMainWindow(900, 600);
 }
 
-void ScreenFrame::DoCapture(int captureMode)
+void ScreenshotBigDialog::DoCapture(int captureMode)
 {
    Hide();
+   wxYieldIfNeeded();
    //mCommand->SetParameter(wxT("FilePath"), mDirectoryTextBox->GetValue());
    //mCommand->SetParameter(wxT("CaptureMode"), captureMode);
    mCommand->mBack = mWhite->GetValue()
@@ -595,12 +643,26 @@ void ScreenFrame::DoCapture(int captureMode)
    mCommand->mWhat = captureMode;
    if (!mCommand->Apply(mContext))
       mStatus->SetStatusText(_("Capture failed!"), mainStatusBarField);
+
+   // Bug 2323: (100% hackage alert) Since the command target dialog is not
+   // accessible from outside the command, this seems to be the only way we
+   // can get the window on top of this dialog. 
+   auto w = static_cast<wxDialogWrapper *>(wxFindWindowByLabel(XO("Long Message").Translation()));
+   if (w) {
+      auto endmodal = [w](wxCommandEvent &evt)
+      {
+         w->EndModal(0);
+      };
+      w->Bind(wxEVT_BUTTON, endmodal);
+      w->ShowModal();
+   }
+
    Show();
 }
 
-void ScreenFrame::OnCaptureSomething(wxCommandEvent &  event)
+void ScreenshotBigDialog::OnCaptureSomething(wxCommandEvent &  event)
 {
-   int i = event.GetId() - IdCaptureFirst;
+   int i = event.GetId();
 
    /*
    IdCaptureEffects= IdCaptureFirst,
@@ -614,7 +676,7 @@ void ScreenFrame::OnCaptureSomething(wxCommandEvent &  event)
    IdCaptureFullWindow,
    IdCaptureWindowPlus,
    IdCaptureFullScreen,
-  
+
    IdCaptureSelectionBar,
    IdCaptureSpectralSelection,
    IdCaptureTools,
@@ -646,18 +708,6 @@ void ScreenFrame::OnCaptureSomething(wxCommandEvent &  event)
       ScreenshotCommand::kfullwindow,
       ScreenshotCommand::kwindowplus,
       ScreenshotCommand::kfullscreen,
-      ScreenshotCommand::kselectionbar,
-      ScreenshotCommand::kspectralselection,
-      ScreenshotCommand::ktools,
-      ScreenshotCommand::ktransport,
-      ScreenshotCommand::kmixer,
-      ScreenshotCommand::kmeter,
-      ScreenshotCommand::kplaymeter,
-      ScreenshotCommand::krecordmeter,
-      ScreenshotCommand::kedit,
-      ScreenshotCommand::kdevice,
-      ScreenshotCommand::ktranscription,
-      ScreenshotCommand::kscrub,
       ScreenshotCommand::ktrackpanel,
       ScreenshotCommand::kruler,
       ScreenshotCommand::ktracks,
@@ -665,43 +715,50 @@ void ScreenFrame::OnCaptureSomething(wxCommandEvent &  event)
       ScreenshotCommand::ksecondtrack,
    };
 
-   DoCapture(codes[i]);
+   int code;
+   if (i >= IdFirstToolbar)
+      code = ScreenshotCommand::nCaptureWhats + (i - IdFirstToolbar);
+   else
+      code = codes[i - IdCaptureFirst];
+   DoCapture(code);
 }
 
-void ScreenFrame::TimeZoom(double seconds)
+void ScreenshotBigDialog::TimeZoom(double seconds)
 {
+   auto &viewInfo = ViewInfo::Get( mContext.project );
+   auto &window = ProjectWindow::Get( mContext.project );
    int width, height;
-   mContext.GetProject()->GetClientSize(&width, &height);
-   mContext.GetProject()->mViewInfo.SetZoom((0.75 * width) / seconds);
-   mContext.GetProject()->RedrawProject();
+   window.GetClientSize(&width, &height);
+   viewInfo.SetZoom((0.75 * width) / seconds);
+   window.RedrawProject();
 }
 
-void ScreenFrame::OnOneSec(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnOneSec(wxCommandEvent & WXUNUSED(event))
 {
    TimeZoom(1.0);
 }
 
-void ScreenFrame::OnTenSec(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnTenSec(wxCommandEvent & WXUNUSED(event))
 {
    TimeZoom(10.0);
 }
 
-void ScreenFrame::OnOneMin(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnOneMin(wxCommandEvent & WXUNUSED(event))
 {
    TimeZoom(60.0);
 }
 
-void ScreenFrame::OnFiveMin(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnFiveMin(wxCommandEvent & WXUNUSED(event))
 {
    TimeZoom(300.0);
 }
 
-void ScreenFrame::OnOneHour(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnOneHour(wxCommandEvent & WXUNUSED(event))
 {
    TimeZoom(3600.0);
 }
 
-void ScreenFrame::SizeTracks(int h)
+void ScreenshotBigDialog::SizeTracks(int h)
 {
    // h is the height for a channel
    // Set the height of a mono track twice as high
@@ -710,31 +767,70 @@ void ScreenFrame::SizeTracks(int h)
    // If there should be more-than-stereo tracks, this makes
    // each channel as high as for a stereo channel
 
-   auto tracks = mContext.GetProject()->GetTracks();
-   for (auto t : tracks->Leaders<WaveTrack>()) {
-      auto channels = TrackList::Channels(t);
+   auto &tracks = TrackList::Get( mContext.project );
+   for (auto t : tracks.Any<WaveTrack>()) {
+      auto channels = t->Channels();
       auto nChannels = channels.size();
       auto height = nChannels == 1 ? 2 * h : h;
-      for (auto channel : channels)
-         channel->SetHeight(height);
+      for (auto pChannel : channels)
+         ChannelView::Get(*pChannel).SetExpandedHeight(height);
    }
-   mContext.GetProject()->RedrawProject();
+   ProjectWindow::Get( mContext.project ).RedrawProject();
 }
 
-void ScreenFrame::OnShortTracks(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnShortTracks(wxCommandEvent & WXUNUSED(event))
 {
-   for (auto t : mContext.GetProject()->GetTracks()->Any<WaveTrack>())
-      t->SetHeight(t->GetMinimizedHeight());
+   for (auto t : TrackList::Get(mContext.project).Any<WaveTrack>()) {
+      for (auto pChannel : t->Channels()) {
+         auto &view = ChannelView::Get(*pChannel);
+         view.SetExpandedHeight(view.GetMinimizedHeight());
+      }
+   }
 
-   mContext.GetProject()->RedrawProject();
+   ProjectWindow::Get( mContext.project ).RedrawProject();
 }
 
-void ScreenFrame::OnMedTracks(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnMedTracks(wxCommandEvent & WXUNUSED(event))
 {
    SizeTracks(60);
 }
 
-void ScreenFrame::OnTallTracks(wxCommandEvent & WXUNUSED(event))
+void ScreenshotBigDialog::OnTallTracks(wxCommandEvent & WXUNUSED(event))
 {
    SizeTracks(85);
+}
+
+void ScreenshotBigDialog::UpdatePrefs()
+{
+   Freeze();
+
+   SetSizer(nullptr);
+   DestroyChildren();
+
+   SetTitle(ScreenCaptureFrameTitle.Translation());
+   Populate();
+
+   Thaw();
+}
+
+#include "CommonCommandFlags.h"
+#include "commands/CommandManager.h"
+
+namespace {
+void OnScreenshot(const CommandContext &context )
+{
+   // Register Screenshot as Last Tool
+   CommandManager::Get(context.project).RegisterLastTool(context);
+   OpenScreenshotTools( context.project );
+}
+
+// Menu definitions
+
+using namespace MenuTable;
+AttachedItem sAttachment{
+   { wxT("Tools/Other"), { OrderingHint::After, wxT("ConfigReset") } },
+   Command( wxT("FancyScreenshot"), XXO("&Screenshot..."),
+      OnScreenshot, AudioIONotBusyFlag() )
+};
+
 }

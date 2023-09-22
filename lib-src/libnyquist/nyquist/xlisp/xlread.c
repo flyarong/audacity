@@ -37,11 +37,13 @@ extern LVAL k_sescape,k_mescape;
 extern char buf[];
 
 /* external routines */
-extern FILE *osaopen();
+extern FILE *osaopen(const char *name, const char *mode);
 /* on the NeXT, atof is a macro in stdlib.h */
-#if !defined(atof) && !defined(_WIN32) 
-   extern double atof();
-#endif
+/* Is this a mistake? atof is declared in stdlib.h, but it is never a macro:
+  #if !defined(atof) && !defined(_WIN32)
+     extern double atof(const char *);
+  #endif
+*/
 #ifndef __MWERKS__
 #if !defined(ITYPE) && !defined(_WIN32) 
    extern ITYPE;
@@ -173,7 +175,7 @@ int xlload(const char *fname, int vflag, int pflag)
 
     /* print the information line */
     if (vflag)
-        { sprintf(buf,"; loading \"%s\"\n",fullname); stdputstr(buf); }
+        { snprintf(buf, STRMAX, "; loading \"%s\"\n", fullname); stdputstr(buf); }
 
 #ifdef DEBUG_INPUT
 	if (read_by_xlisp) {
@@ -183,13 +185,14 @@ int xlload(const char *fname, int vflag, int pflag)
 
     /* read, evaluate and possibly print each expression in the file */
     xlbegin(&cntxt,CF_ERROR,s_true);
-    if (_setjmp(cntxt.c_jmpbuf))
+    if (_setjmp(cntxt.c_jmpbuf)) {
         sts = FALSE;
         #ifdef DEBUG_INPUT
             if (read_by_xlisp) {
 		fprintf(read_by_xlisp, ";;;;xlload: catch longjump, back to %s\n", fullname);
             }
         #endif
+    }
     else {
         #ifdef DEBUG_INPUT
             if (read_by_xlisp) {
@@ -275,14 +278,14 @@ int xlread(LVAL fptr, LVAL *pval, int rflag)
     int sts;
 
     /* read an expression */
-    while ((sts = readone(fptr,pval)) == FALSE)
+    while ((sts = readone(fptr,pval)) == FALSE) {
 #ifdef DEBUG_INPUT
     if (debug_input_fp) {
         int c = getc(debug_input_fp);
         ungetc(c, debug_input_fp);
     }
 #endif
-        ;
+    }
 
     /* return status */
     return (sts == EOF ? FALSE : TRUE);
@@ -886,14 +889,17 @@ int xlisnumber(char *str, LVAL *pval)
         p++;
 
     /* check for a string of digits */
-    while (isdigit(*p))
-        p++, dl++;
-
+    while (isdigit(*p)) {
+        p++;
+        dl++;
+    }
     /* check for a decimal point */
     if (*p == '.') {
         p++;
-        while (isdigit(*p))
-            p++, dr++;
+        while (isdigit(*p)) {
+            p++;
+            dr++;
+        }
     }
 
     /* check for an exponent */
@@ -905,8 +911,10 @@ int xlisnumber(char *str, LVAL *pval)
             p++;
 
         /* check for a string of digits */
-        while (isdigit(*p))
-            p++, dr++;
+        while (isdigit(*p)) {
+            p++;
+            dr++;
+        }
     }
 
     /* make sure there was at least one digit and this is the end */

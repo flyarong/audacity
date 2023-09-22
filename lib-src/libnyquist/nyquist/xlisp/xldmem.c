@@ -11,10 +11,11 @@
  */
 
 
-/* #define DEBUG_MEM 1 */
+// #define DEBUG_MEM 1
 
 #include "stdlib.h"
 #include "string.h"
+#include "limits.h"
 #include "xlisp.h"
 
 #ifdef WIN32
@@ -50,6 +51,8 @@ FORWARD LOCAL unsigned char *stralloc(int size);
 FORWARD LOCAL int addseg(void);
 FORWARD void mark(LVAL ptr);
 FORWARD LOCAL void sweep(void);
+
+extern void freeimage(void);
 
 #ifdef DEBUG_GC
 static long dbg_gc_n = 0;	/* counts save operations */
@@ -107,10 +110,14 @@ LVAL cvstring(const char *str)
 {
     LVAL val;
     xlsave1(val);
+    size_t len = strlen(str) + 1;
+    if (len > 0x7FFFFFFF) {
+        xlfail("string too long");
+    }
     val = newnode(STRING);
-    val->n_strlen = strlen(str) + 1;
+    val->n_strlen = (int) len;
     val->n_string = stralloc(getslength(val));
-    strcpy((char *) getstring(val),str);
+    strcpy((char *) getstring(val), str);
     xlpop();
     return (val);
 }
@@ -138,7 +145,10 @@ LVAL cvsymbol(const char *pname)
      * The bug is fixed by copying pname to the stack.
      */
     LVAL val;
-    int len = strlen(pname) + 1; /* don't forget the terminating zero */
+    size_t len = strlen(pname) + 1; /* don't forget the terminating zero */
+    if (len > 0x7FFFFFFF) {  /* how much can we put on stack? */
+        xlfail("string too long");
+    }
     char *local_pname_copy = (char *) alloca(len);
     memcpy(local_pname_copy, pname, len);
     xlsave1(val);
@@ -241,6 +251,9 @@ LVAL newvector(int size)
     xlsave1(vect);
     vect = newnode(VECTOR);
     vect->n_vsize = 0;
+    if (size < 0) xlfail("negative vector size requested");
+    if (size > INT_MAX / sizeof(LVAL))
+        xlfail("too large vector size requested");
     if ((bsize = size * sizeof(LVAL))) {
         if ((vect->n_vdata = (LVAL *)calloc(1,bsize)) == NULL) {
             findmem();
@@ -479,7 +492,7 @@ LOCAL void sweep(void)
             if (xldmem_trace &&
                   ntype(p) == EXTERN &&
                   xldmem_trace == getinst(p)) {
-                printf("sweep: EXTERN node %lx is %smarked, points to %lx\n",
+                printf("sweep: EXTERN node %p is %smarked, points to %p\n",
                        p, (p->n_flags & MARK ? "" : "un"), getinst(p));
             }
 #endif
@@ -517,9 +530,17 @@ LOCAL void sweep(void)
                 rplacd(p,fnodes);
                 fnodes = p;
                 nfree += 1L;
-            }
-            else
+            } else {
+#ifdef DEBUG_MEM
+                /* added to find why sample blocks are not being freed - who's got them? */
+                if (ntype(p) == EXTERN && strcmp(getdesc(p)->type_name, "SOUND") == 0) {
+                    long snd_list_len(void *);
+                    printf("gc found but did not free extern %p sound_type %p list len %ld\n",
+                           p, getinst(p), snd_list_len(getinst(p)));
+                }
+#endif
                 p->n_flags &= ~MARK;
+            }
         }
     }
 }
@@ -607,7 +628,7 @@ LVAL xexpand(void)
     /* get the new number to allocate */
     if (moreargs()) {
         num = xlgafixnum();
-        n = getfixnum(num);
+        n = (int) getfixnum(num);
     }
     else
         n = 1;
@@ -630,7 +651,7 @@ LVAL xalloc(void)
 
     /* get the new number to allocate */
     num = xlgafixnum();
-    n = getfixnum(num);
+    n = (int) getfixnum(num);
 
     /* make sure there aren't any more arguments */
     xllastarg();
@@ -705,6 +726,9 @@ LVAL xrestore(void)
 }
 #endif
 
+static unsigned char registered_xlmshutdown = 0;
+static void xlmshutdown(void);
+
 /* xlminit - initialize the dynamic memory module */
 void xlminit(void)
 {
@@ -758,5 +782,26 @@ void xlminit(void)
     xlargstktop = xlargstkbase + ADEPTH;
     xlfp = xlsp = xlargstkbase;
     *xlsp++ = NIL;
+
+    /* Guarantee graceful cleanup of memory */
+    if (!registered_xlmshutdown) {
+        atexit(xlmshutdown);
+        registered_xlmshutdown = 1;
+    }
 }
 
+static void xlmshutdown(void)
+{
+    /* This function deallocates all memory used by xlisp.  Should it 
+       become non-static, allowing the client to shut down and init 
+       again for a "hard" restart? */
+ 
+    /* Free all lisp objects, and free the free-store */
+    freeimage();
+
+    /* Free the stacks */
+    free(xlstkbase);
+    xlstkbase = NULL;
+    free(xlargstkbase);
+    xlargstkbase = NULL;
+}

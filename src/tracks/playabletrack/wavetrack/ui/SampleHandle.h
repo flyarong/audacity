@@ -12,8 +12,7 @@ Paul Licameli
 #define __AUDACITY_SAMPLE_HANDLE__
 
 #include "../../../../UIHandle.h"
-#include "audacity/Types.h"
-#include "../../../../MemoryX.h"
+#include "SampleCount.h"
 
 class wxMouseEvent;
 class wxMouseState;
@@ -45,7 +44,7 @@ public:
 
    std::shared_ptr<WaveTrack> GetTrack() const { return mClickedTrack; }
 
-   void Enter(bool forward) override;
+   void Enter(bool forward, AudacityProject *) override;
 
    Result Click
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
@@ -54,7 +53,7 @@ public:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release

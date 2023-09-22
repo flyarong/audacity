@@ -13,18 +13,33 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "MessageCommand.h"
 
-#include "CommandType.h"
+#include "CommandDispatch.h"
+#include "CommandManager.h"
+#include "../CommonCommandFlags.h"
+#include "LoadCommands.h"
 #include "CommandContext.h"
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
+#include "SettingsVisitor.h"
+#include "ShuttleGui.h"
 
-bool MessageCommand::DefineParams( ShuttleParams & S ){
-   S.Define( mMessage, wxT("Text"),  "Some message" );
+const ComponentInterfaceSymbol MessageCommand::Symbol
+{ XO("Message") };
+
+namespace{ BuiltinCommandsModule::Registration< MessageCommand > reg; }
+
+template<bool Const>
+bool MessageCommand::VisitSettings( SettingsVisitorBase<Const> & S ){
+   S.Define( mMessage, wxT("Text"), wxString{"Some message"} );
    return true;
 }
+
+bool MessageCommand::VisitSettings( SettingsVisitor & S )
+   { return VisitSettings<false>(S); }
+
+bool MessageCommand::VisitSettings( ConstSettingsVisitor & S )
+   { return VisitSettings<true>(S); }
 
 void MessageCommand::PopulateOrExchange(ShuttleGui & S)
 {
@@ -32,7 +47,7 @@ void MessageCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieTextBox(_("Text:"),mMessage,60);
+      S.TieTextBox(XXO("Text:"),mMessage,60);
    }
    S.EndMultiColumn();
 }
@@ -40,4 +55,21 @@ void MessageCommand::PopulateOrExchange(ShuttleGui & S)
 bool MessageCommand::Apply(const CommandContext & context){
    context.Status( mMessage );
    return true;
+}
+
+namespace {
+using namespace MenuTable;
+
+// Register menu items
+
+AttachedItem sAttachment{
+   wxT("Optional/Extra/Part2/Scriptables2"),
+   // Note that the PLUGIN_SYMBOL must have a space between words,
+   // whereas the short-form used here must not.
+   // (So if you did write "Compare Audio" for the PLUGIN_SYMBOL name, then
+   // you would have to use "CompareAudio" here.)
+   Command( wxT("Message"), XXO("Message..."),
+      CommandDispatch::OnAudacityCommand, AudioIONotBusyFlag() )
+};
+
 }

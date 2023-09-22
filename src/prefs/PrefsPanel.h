@@ -22,21 +22,20 @@ MousePrefs, QualityPrefs, SpectrumPrefs and ThemePrefs.
   To actually add the new panel, edit the PrefsDialog constructor
   to append the panel to its list of panels.
 
-*******************************************************************//**
-
-\class PrefsPanelFactory
-\brief Base class for factories such as GUIPrefsFactory that produce a
-PrefsPanel.
-
 *//*******************************************************************/
 
 #ifndef __AUDACITY_PREFS_PANEL__
 #define __AUDACITY_PREFS_PANEL__
 
-#include "../widgets/wxPanelWrapper.h" // to inherit
+#include <functional>
+#include "wxPanelWrapper.h" // to inherit
+#include "ComponentInterface.h"
+#include "Registry.h"
 
 /* A few constants for an attempt at semi-uniformity */
 #define PREFS_FONT_SIZE     8
+
+#define BUILTIN_PREFS_PANEL_PREFIX wxT("Built-in PrefsPanel: ")
 
 /* these are spacing guidelines: ie. radio buttons should have a 5 pixel
  * border on each side */
@@ -44,12 +43,56 @@ PrefsPanel.
 #define TOP_LEVEL_BORDER       5
 #define GENERIC_CONTROL_BORDER 5
 
+class AudacityProject;
 class ShuttleGui;
 
-class PrefsPanel /* not final */ : public wxPanelWrapper
+class AUDACITY_DLL_API PrefsPanel /* not final */
+   : public wxPanelWrapper, ComponentInterface
 {
+   struct PrefsItem;
+
  public:
-   PrefsPanel(wxWindow * parent, wxWindowID winid, const wxString &title)
+    // An array of PrefsNode specifies the tree of pages in pre-order traversal.
+    struct PrefsNode {
+       using Factory =
+         std::function< PrefsPanel * (
+            wxWindow *parent, wxWindowID winid, AudacityProject *) >;
+       Factory factory;
+       size_t nChildren{ 0 };
+       bool expanded{ false };
+       mutable bool enabled{ true };
+
+       PrefsNode(const Factory &factory_,
+          unsigned nChildren_ = 0,
+          bool expanded_ = true)
+          : factory(factory_), nChildren(nChildren_), expanded(expanded_)
+       {}
+    };
+
+   using Factories = std::vector<PrefsPanel::PrefsNode>;
+   static Factories &DefaultFactories();
+
+   // \brief Type alias for factories such as GUIPrefsFactory that produce a
+   // PrefsPanel, used by the Preferences dialog in a treebook.
+   // The project pointer may be null.  Usually it's not needed because
+   // preferences are global.  But sometimes you need a project, such as to
+   // preview the preference changes for spectrograms.
+   using Factory =
+      std::function< PrefsPanel * (
+         wxWindow *parent, wxWindowID winid, AudacityProject *) >;
+
+   // Typically you make a static object of this type in the .cpp file that
+   // also implements the PrefsPanel subclass.
+   struct AUDACITY_DLL_API Registration final
+      : public Registry::RegisteredItem<PrefsItem>
+   {
+      Registration( const wxString &name, const Factory &factory,
+         bool expanded = true,
+         const Registry::Placement &placement = { wxEmptyString, {} });
+   };
+
+   PrefsPanel(wxWindow * parent,
+      wxWindowID winid, const TranslatableString &title)
    :  wxPanelWrapper(parent, winid)
    {
       SetLabel(title);     // Provide visual label
@@ -62,23 +105,39 @@ class PrefsPanel /* not final */ : public wxPanelWrapper
    virtual void Preview() {} // Make tentative changes
    virtual bool Commit() = 0; // used to be called "Apply"
 
+
+   virtual PluginPath GetPath() const override;
+   virtual VendorSymbol GetVendor() const override;
+   virtual wxString GetVersion() const override;
+
+   //virtual ComponentInterfaceSymbol GetSymbol();
+   //virtual wxString GetDescription();
+
+
    // If it returns True, the Preview button is added below the panel
    // Default returns false
    virtual bool ShowsPreviewButton();
    virtual void PopulateOrExchange( ShuttleGui & WXUNUSED(S) ){};
 
-   // If not empty string, the Help button is added below the panel
-   // Default returns empty string.
-   virtual wxString HelpPageName();
+   //! If not empty string, the Help button is added below the panel
+   /*! Default returns empty string. */
+   virtual ManualPageID HelpPageName();
 
    virtual void Cancel();
-};
 
-class PrefsPanelFactory /* not final */
-{
-public:
-   // Precondition: parent != NULL
-   virtual PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) = 0;
+ private:
+   struct AUDACITY_DLL_API PrefsItem final
+      : Registry::GroupItem<Registry::DefaultTraits> {
+      PrefsPanel::Factory factory;
+      bool expanded{ false };
+
+      static Registry::GroupItemBase &Registry();
+
+      PrefsItem(const wxString &name,
+         const PrefsPanel::Factory &factory, bool expanded);
+
+      struct Visitor;
+   };
 };
 
 #endif

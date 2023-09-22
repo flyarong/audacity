@@ -13,12 +13,18 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "BatchEvalCommand.h"
 
 #include "CommandContext.h"
+#include "CommandDirectory.h"
+#include "Project.h"
 
-ComponentInterfaceSymbol BatchEvalCommandType::BuildName()
+static CommandDirectory::RegisterType sRegisterType{
+   std::make_unique<BatchEvalCommandType>()
+};
+
+ComponentInterfaceSymbol BatchEvalCommandType::BuildName() const
 {
    return { wxT("BatchCommand"), XO("Batch Command") };
 }
@@ -33,9 +39,10 @@ void BatchEvalCommandType::BuildSignature(CommandSignature &signature)
    signature.AddParameter(wxT("MacroName"), wxT(""), std::move(macroValidator));
 }
 
-OldStyleCommandPointer BatchEvalCommandType::Create(std::unique_ptr<CommandOutputTargets> && WXUNUSED(target))
+OldStyleCommandPointer BatchEvalCommandType::Create( AudacityProject &project,
+   std::unique_ptr<CommandOutputTargets> && WXUNUSED(target))
 {
-   return std::make_shared<BatchEvalCommand>(*this);
+   return std::make_shared<BatchEvalCommand>(project, *this);
 }
 
 bool BatchEvalCommand::Apply(const CommandContext & context)
@@ -43,25 +50,28 @@ bool BatchEvalCommand::Apply(const CommandContext & context)
    // Uh oh, I need to build a catalog, expensively
    // Maybe it can be built in one long-lived place and shared among command
    // objects instead?
+   // The catalog though may change during a session, as it includes the 
+   // names of macro commands - so the long-lived copy will need to 
+   // be refreshed after macros are added/deleted.
    MacroCommandsCatalog catalog(&context.project);
 
    wxString macroName = GetString(wxT("MacroName"));
    if (!macroName.empty())
    {
-      MacroCommands batch;
+      MacroCommands batch{ context.project };
       batch.ReadMacro(macroName);
       return batch.ApplyMacro(catalog);
    }
 
-   wxString cmdName = GetString(wxT("CommandName"));
+   auto cmdName = GetString(wxT("CommandName"));
    wxString cmdParams = GetString(wxT("ParamString"));
    auto iter = catalog.ByCommandId(cmdName);
-   const wxString &friendly = (iter == catalog.end())
-      ? cmdName // Expose internal name to user, in default of a better one!
-      : iter->name.Translated();
+   const auto friendly = (iter == catalog.end())
+      ? Verbatim( cmdName ) // Expose internal name to user, in default of a better one!
+      : iter->name.Msgid().Stripped();
 
    // Create a Batch that will have just one command in it...
-   MacroCommands Batch;
+   MacroCommands Batch{ context.project };
    bool bResult = Batch.ApplyCommandInBatchMode(friendly, cmdName, cmdParams, &context);
    // Relay messages, if any.
    wxString Message = Batch.GetMessage();

@@ -11,10 +11,14 @@ Paul Licameli
 #ifndef __AUDACITY_TRACK_PANEL_CELL__
 #define __AUDACITY_TRACK_PANEL_CELL__
 
-#include "MemoryX.h"
+
+
+#include <memory>
+#include "TrackPanelDrawable.h" // to inherit
 
 class AudacityProject;
 struct HitTestPreview;
+struct TrackPanelDrawingContext;
 struct TrackPanelMouseEvent;
 struct TrackPanelMouseState;
 class ViewInfo;
@@ -29,16 +33,16 @@ using UIHandlePtr = std::shared_ptr<UIHandle>;
 #include <vector>
 
 /// \brief The TrackPanel is built up of nodes, subtrees of the CellularPanel's area
-/// This class itself has almost nothing in it.  Other classes derived from it
-/// build up the capabilities.
+/// Common base class for TrackPanelCell (leaf) and TrackPanelGroup (nonleaf)
 class AUDACITY_DLL_API /* not final */ TrackPanelNode
+   : public TrackPanelDrawable
 {
 public:
    TrackPanelNode();
    virtual ~TrackPanelNode() = 0;
 };
 
-// A node of the TrackPanel that contins other nodes.
+// A node of the TrackPanel that contains other nodes.
 class AUDACITY_DLL_API TrackPanelGroup /* not final */ : public TrackPanelNode
 {
 public:
@@ -69,6 +73,10 @@ public:
 class AUDACITY_DLL_API TrackPanelCell /* not final */ : public TrackPanelNode
 {
 public:
+   TrackPanelCell() = default;
+   TrackPanelCell( const TrackPanelCell & ) = delete;
+   TrackPanelCell &operator=( const TrackPanelCell & ) = delete;
+
    virtual ~TrackPanelCell () = 0;
 
    // May supply default cursor, status message, and tooltip, when there is no
@@ -101,27 +109,36 @@ public:
    // Default implementation does nothing
    virtual unsigned DoContextMenu
       (const wxRect &rect,
-       wxWindow *pParent, wxPoint *pPosition);
+       wxWindow *pParent, const wxPoint *pPosition, AudacityProject *pProject);
 
    // Return value is a bitwise OR of RefreshCode values
    // Default skips the event and does nothing
    virtual unsigned CaptureKey
-      (wxKeyEvent &event, ViewInfo &viewInfo, wxWindow *pParent);
+      (wxKeyEvent &event, ViewInfo &viewInfo, wxWindow *pParent,
+       AudacityProject *project);
 
    // Return value is a bitwise OR of RefreshCode values
    // Default skips the event and does nothing
    virtual unsigned KeyDown
-      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent);
+      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent,
+       AudacityProject *project);
 
    // Return value is a bitwise OR of RefreshCode values
    // Default skips the event and does nothing
    virtual unsigned KeyUp
-      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent);
+      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent,
+       AudacityProject *project);
 
    // Return value is a bitwise OR of RefreshCode values
    // Default skips the event and does nothing
    virtual unsigned Char
-      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent);
+      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent,
+       AudacityProject *project);
+
+   // Return value is a bitwise OR of RefreshCode values
+   // Notification to the focused cell that the CellularPanel is losing focus
+   // Default does nothing, returns RefreshCode::RefreshNone
+   virtual unsigned LoseFocus(AudacityProject *project);
 };
 
 #endif

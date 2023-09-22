@@ -13,14 +13,21 @@
 #ifndef __AUDACITY_TOOLMANAGER__
 #define __AUDACITY_TOOLMANAGER__
 
-#include "../MemoryX.h"
+#include <functional>
+
 #include <wx/defs.h>
 #include <wx/eventfilter.h> // to inherit
 #include <wx/frame.h> // to inherit
 #include <wx/timer.h> // member variable
 
+#include "ClientData.h"
+#include "GlobalVariable.h"
+#include "Observer.h"
 #include "ToolDock.h"
-#include "ToolBar.h"
+
+#include "../commands/CommandFunctors.h"
+#include "../commands/CommandManager.h"
+
 
 class wxCommandEvent;
 class wxFrame;
@@ -35,47 +42,85 @@ class wxTimerEvent;
 class wxWindow;
 
 class AudacityProject;
+class ProjectWindow;
 class ToolFrame;
 
 ////////////////////////////////////////////////////////////
 /// class ToolManager
 ////////////////////////////////////////////////////////////
 
-class ToolManager final : public wxEvtHandler, public wxEventFilter
+class AUDACITY_DLL_API ToolManager final
+   : public wxEvtHandler
+   , public wxEventFilter
+   , public ClientData::Base
 {
 
  public:
+   // a hook function to break dependency of ToolManager on ProjectWindow
+   struct AUDACITY_DLL_API TopPanelHook : GlobalHook<TopPanelHook,
+      wxWindow*( wxWindow& )
+   >{};
 
-   ToolManager( AudacityProject *parent, wxWindow *topDockParent );
+   static ToolManager &Get( AudacityProject &project );
+   static const ToolManager &Get( const AudacityProject &project );
+
+   ToolManager( AudacityProject *parent );
+   ToolManager( const ToolManager & ) = delete;
+   ToolManager &operator=( const ToolManager & ) = delete;
    ~ToolManager();
 
+   void CreateWindows();
+
    void LayoutToolBars();
-   void UpdatePrefs();
 
-   bool IsDocked( int type );
+   bool IsDocked( Identifier type ) const;
 
-   bool IsVisible( int type );
+   bool IsVisible( Identifier type ) const;
 
-   void ShowHide( int type );
+   void ShowHide( Identifier type );
 
-   void Expose( int type, bool show );
+   void Expose( Identifier type, bool show );
 
-   ToolBar *GetToolBar( int type ) const;
+   ToolBar *GetToolBar(const Identifier &type) const;
 
    ToolDock *GetTopDock();
+   const ToolDock *GetTopDock() const;
    ToolDock *GetBotDock();
+   const ToolDock *GetBotDock() const;
 
    void Reset();
+   static void OnResetToolBars(const CommandContext &context);
+
+   void Destroy();
    void RegenerateTooltips();
 
    int FilterEvent(wxEvent &event) override;
 
    bool RestoreFocus();
 
+   //! Visit bars, lexicographically by their textual ids
+   template< typename F >
+   void ForEach(F &&fun)
+   {
+      std::for_each(std::begin(mBars), std::end(mBars), [&fun](auto &pair){
+         fun(pair.second.get());
+      });
+   }
+
+   size_t CountBars() const
+   {
+      return mBars.size();
+   }
+
+   static void ModifyToolbarMenus(AudacityProject &project);
+   // Calls ModifyToolbarMenus() on all projects
+   static void ModifyAllProjectToolbarMenus();
+
  private:
 
    ToolBar *Float( ToolBar *t, wxPoint & pos );
 
+   void OnMenuUpdate(struct MenuUpdateMessage);
    void OnTimer( wxTimerEvent & event );
    void OnMouse( wxMouseEvent & event );
    void OnCaptureLost( wxMouseCaptureLostEvent & event );
@@ -91,6 +136,7 @@ class ToolManager final : public wxEvtHandler, public wxEventFilter
    void WriteConfig();
    void Updated();
 
+   Observer::Subscription mMenuManagerSubscription;
    AudacityProject *mParent;
    wxWindowRef mLastFocus{};
 
@@ -115,10 +161,11 @@ class ToolManager final : public wxEvtHandler, public wxEventFilter
    bool mTransition;
 #endif
 
-   ToolDock *mTopDock;
-   ToolDock *mBotDock;
+   ToolDock *mTopDock{};
+   ToolDock *mBotDock{};
 
-   ToolBar::Holder mBars[ ToolBarCount ];
+   //! map not unordered_map, for the promise made by ForEach
+   std::map<Identifier, ToolBar::Holder> mBars;
 
    wxPoint mPrevPosition {};
    ToolDock *mPrevDock {};
@@ -149,6 +196,7 @@ public:
 
    ToolBar *GetBar() { return mBar; }
    void ClearBar() { mBar = nullptr; }
+   void LockInMinSize(ToolBar * pBar);
 
    //
    // Transition a toolbar from float to dragging
@@ -179,8 +227,6 @@ public:
 
    void Resize( const wxSize &size );
 
-   AudacityProject *GetParent() const { return mParent; }
-
 private:
 
    AudacityProject *const mParent;
@@ -195,5 +241,22 @@ public:
    DECLARE_EVENT_TABLE()
 };
 
+
+
+// Construct a static instance of this class to add a menu item that shows and
+// hides a toolbar
+struct AUDACITY_DLL_API AttachedToolBarMenuItem : CommandHandlerObject {
+   AttachedToolBarMenuItem(
+      Identifier id, const CommandID &name, const TranslatableString &label_in,
+      const Registry::OrderingHint &hint = {},
+      // IDs of other toolbars not to be shown simultaneously with this one:
+      std::vector< Identifier > excludeIds = {} );
+
+   void OnShowToolBar(const CommandContext &context);
+
+   const Identifier mId;
+   const MenuTable::AttachedItem mAttachedItem;
+   const std::vector< Identifier > mExcludeIds;
+};
 
 #endif

@@ -11,7 +11,7 @@
 
 *//*********************************************************************/
 
-#include "../Audacity.h"
+
 #include "KeyView.h"
 
 #include <wx/setup.h> // for wxUSE_* macros
@@ -19,14 +19,12 @@
 #include <wx/settings.h>
 #include <wx/vlbox.h>
 
-#include "../AColor.h"
-#include "../ShuttleGui.h"
+#include "AColor.h"
+#include "ShuttleGui.h"
 #include "../commands/CommandManager.h"
-#include "../commands/Keyboard.h"
 
 #include <wx/dc.h>
 #include <wx/menu.h>
-#include "../Internat.h"
 
 #if wxUSE_ACCESSIBILITY
 #include "WindowAccessible.h"
@@ -148,7 +146,7 @@ BEGIN_EVENT_TABLE(KeyView, wxVListBox)
    EVT_SCROLLWIN(KeyView::OnScroll)
 END_EVENT_TABLE();
 
-wxString    KeyView::CommandTranslated="Command";
+static wxString CommandTranslated = "Command";
 
 
 // ============================================================================
@@ -252,7 +250,7 @@ KeyView::GetIndexByName(const CommandID & name) const
    // Search the nodes for the key
    for (int i = 0; i < cnt; i++)
    {
-      if (name.CmpNoCase(mNodes[i].name) == 0)
+      if (name == mNodes[i].name)
       {
          return mNodes[i].index;
       }
@@ -288,7 +286,7 @@ KeyView::GetNameByKey(const NormalizedKeyString & key) const
    // Search the nodes for the key
    for (int i = 0; i < cnt; i++)
    {
-      if (key.NoCaseEqual( mNodes[i].key))
+      if ( key == mNodes[i].key )
       {
          return mNodes[i].name;
       }
@@ -308,7 +306,7 @@ KeyView::GetIndexByKey(const NormalizedKeyString & key) const
    // Search the nodes for the key
    for (int i = 0; i < cnt; i++)
    {
-      if (key.NoCaseEqual( mNodes[i].key))
+      if ( key == mNodes[i].key )
       {
          return mNodes[i].index;
       }
@@ -457,6 +455,13 @@ KeyView::SetView(ViewByType type)
       SelectNode(index);
    }
 
+   // ensure that a node is selected so that when the keyview is the focus,
+   // this is indicated visually, and the Narrator screen reader reads it.
+   if ((GetSelection() == wxNOT_FOUND))
+   {
+      SelectNode(LineToIndex(0));
+   }
+
    return;
 }
 
@@ -481,6 +486,13 @@ KeyView::SetFilter(const wxString & filter)
    if (index != wxNOT_FOUND)
    {
       SelectNode(index);
+   }
+
+   // ensure that a node is selected so that when the keyview is the focus,
+   // this is indicated visually, and the Narrator screen reader reads it.
+   if ((GetSelection() == wxNOT_FOUND))
+   {
+      SelectNode(LineToIndex(0));
    }
 }
 
@@ -622,9 +634,9 @@ KeyView::UpdateHScroll()
 //
 void
 KeyView::RefreshBindings(const CommandIDs & names,
-                         const wxArrayString & categories,
-                         const wxArrayString & prefixes,
-                         const wxArrayString & labels,
+                         const TranslatableStrings & categories,
+                         const TranslatableStrings & prefixes,
+                         const TranslatableStrings & labels,
                          const std::vector<NormalizedKeyString> & keys,
                          bool bSort
                          )
@@ -644,6 +656,9 @@ KeyView::RefreshBindings(const CommandIDs & names,
    bool incat = false;
    bool inpfx = false;
 
+   // lookup translation once only
+   CommandTranslated = _("Command");
+
    // Examine all names...all arrays passed have the same indexes
    int cnt = (int) names.size();
    for (int i = 0; i < cnt; i++)
@@ -652,11 +667,11 @@ KeyView::RefreshBindings(const CommandIDs & names,
       int x, y;
 
       // Remove any menu code from the category and prefix
-      wxString cat = wxMenuItem::GetLabelText(categories[i]);
-      wxString pfx = wxMenuItem::GetLabelText(prefixes[i]);
+      wxString cat = categories[i].Translation();
+      wxString pfx = prefixes[i].Translation();
 
       // Append "Menu" this node is for a menu title
-      if (cat != wxT("Command"))
+      if (cat != CommandTranslated)
       {
          cat.Append(wxT(" "));
          cat += _("Menu");
@@ -764,8 +779,8 @@ KeyView::RefreshBindings(const CommandIDs & names,
       }
       else
       {
-         // Strip any menu codes from label
-         node.label = wxMenuItem::GetLabelText(labels[i].BeforeFirst(wxT('\t')));
+         auto label = labels[i];
+         node.label = label.Strip().Translation();
       }
 
       // Fill in remaining info
@@ -980,7 +995,7 @@ KeyView::RefreshLines(bool bSort)
             node.line = linecnt++;
             mLines.push_back(&node);
 
-            // If this node is not open, then skip all of it's decendants
+            // If this node is not open, then skip all of its descendants
             if (!node.isopen)
             {
                bool iscat = node.iscat;
@@ -1101,7 +1116,7 @@ KeyView::SelectNode(int index)
 
    // Always send an event to let parent know of selection change
    //
-   // Must do this ourselves becuase we want to send notifications
+   // Must do this ourselves because we want to send notifications
    // even if there isn't an item selected and SendSelectedEvent()
    // doesn't allow sending an event for indexes not in the listbox.
    wxCommandEvent event(wxEVT_COMMAND_LISTBOX_SELECTED, GetId());
@@ -1333,32 +1348,18 @@ KeyView::OnSetFocus(wxFocusEvent & event)
    // Allow further processing
    event.Skip();
 
+   // Refresh the selected line to pull in any changes while
+   // focus was away...like when setting a NEW key value.  This
+   // will also refresh the visual (highlighted) state.
    if (GetSelection() != wxNOT_FOUND)
    {
-      // Refresh the selected line to pull in any changes while
-      // focus was away...like when setting a NEW key value.  This
-      // will also refresh the visual (highlighted) state.
 	   RefreshRow(GetSelection());
-#if wxUSE_ACCESSIBILITY
-      // Tell accessibility of the change
-      mAx->SetCurrentLine(GetSelection());
-#endif
    }
-   else
-   {
-      if (mLines.size() > 0)
-      {
-         // if no selection, select first line, if there is one
-         SelectNode(LineToIndex(0));
-      }
-      else
-      {
+
 #if wxUSE_ACCESSIBILITY
-         // Tell accessibility, since there may have been a change
-         mAx->SetCurrentLine(wxNOT_FOUND);
+   // Tell accessibility of the change
+   mAx->SetCurrentLine(GetSelection());
 #endif
-      }
-   }
 }
 
 //
@@ -1658,6 +1659,14 @@ KeyView::OnLeftDown(wxMouseEvent & event)
 
          // And make sure current line is still selected
          SelectNode(LineToIndex(line));
+
+         // If a node is closed near the bottom of the tree,
+         // the node may move down, and no longer be at the
+         // mouse pointer position. So don't allow further processing as this
+         // selects the line at the mouse position. Bug 1723.
+         // So we need to set the focus.
+         SetFocus();
+         return;
       }
    }
 
@@ -1672,7 +1681,7 @@ KeyView::OnLeftDown(wxMouseEvent & event)
 // order as they appear in the menus.  But, we want to sort the
 // "command" nodes.
 //
-// To accomplish this, we prepend each label with it's line number
+// To accomplish this, we prepend each label with its line number
 // (in hex) for "menu" nodes.  This ensures they will remain in
 // their original order.
 //
@@ -1737,7 +1746,7 @@ KeyView::CmpKeyNodeByName(KeyNode *t1, KeyNode *t2)
 // at the top of the list and all nodes without assignment to appear in
 // ascending order at the bottom of the list.
 //
-// We accomplish this by by prefixing all non-assigned entries with 0xff.
+// We accomplish this by prefixing all non-assigned entries with 0xff.
 // This will force them to the end, but still allow them to be sorted in
 // ascending order.
 //
@@ -1933,10 +1942,12 @@ KeyViewAx::SetCurrentLine(int line)
       LineToId(line, mLastId);
 
       // Send notifications that the line has focus
-      NotifyEvent(wxACC_EVENT_OBJECT_FOCUS,
-                  mView,
-                  wxOBJID_CLIENT,
-                  mLastId);
+      if (mView == wxWindow::FindFocus()) {
+         NotifyEvent(wxACC_EVENT_OBJECT_FOCUS,
+                     mView,
+                     wxOBJID_CLIENT,
+                     mLastId);
+      }
 
       // And is selected
       NotifyEvent(wxACC_EVENT_OBJECT_SELECTION,

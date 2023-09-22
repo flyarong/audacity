@@ -11,7 +11,10 @@
 #ifndef __AUDACITY_EFFECT_NYQUIST__
 #define __AUDACITY_EFFECT_NYQUIST__
 
-#include "../Effect.h"
+#include "../StatefulEffect.h"
+#include "FileNames.h"
+#include "SampleCount.h"
+#include "wxPanelWrapper.h"
 
 #include "nyx.h"
 
@@ -20,15 +23,9 @@ class wxFileName;
 class wxCheckBox;
 class wxTextCtrl;
 
-#define NYQUISTEFFECTS_VERSION wxT("1.0.0.0")
-/* i18n-hint: "Nyquist" is an embedded interpreted programming language in
- Audacity, named in honor of the Swedish-American Harry Nyquist (or Nyqvist).
- In the translations of this and other strings, you may transliterate the
- name into another alphabet.  */
-#define NYQUISTEFFECTS_FAMILY ( EffectFamilySymbol{ XO("Nyquist") } )
+class EffectOutputTracks;
 
-#define NYQUIST_PROMPT_ID wxT("Nyquist Prompt")
-#define NYQUIST_WORKER_ID wxT("Nyquist Worker")
+#define NYQUISTEFFECTS_VERSION wxT("1.0.0.0")
 
 enum NyqControlType
 {
@@ -57,6 +54,7 @@ public:
    wxString name;
    wxString label;
    std::vector<EnumValueSymbol> choices;
+   FileNames::FileTypes fileTypes;
    wxString valStr;
    wxString lowStr;
    wxString highStr;
@@ -66,8 +64,17 @@ public:
    int ticks;
 };
 
+struct NyquistSettings {
+   // other settings, for the Nyquist prompt; else null
+   EffectSettings proxySettings;
+   bool proxyDebug{ false };
+   std::vector<NyqControl> controls;
 
-class AUDACITY_DLL_API NyquistEffect final : public Effect
+   // Other fields, to do
+};
+
+class AUDACITY_DLL_API NyquistEffect final
+   : public EffectWithSettings<NyquistSettings, StatefulEffect>
 {
 public:
 
@@ -79,38 +86,51 @@ public:
 
    // ComponentInterface implementation
 
-   PluginPath GetPath() override;
-   ComponentInterfaceSymbol GetSymbol() override;
-   VendorSymbol GetVendor() override;
-   wxString GetVersion() override;
-   wxString GetDescription() override;
+   PluginPath GetPath() const override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   VendorSymbol GetVendor() const override;
+   wxString GetVersion() const override;
+   TranslatableString GetDescription() const override;
    
-   wxString ManualPage() override;
-   wxString HelpPage() override;
+   ManualPageID ManualPage() const override;
+   FilePath HelpPage() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-   EffectType GetClassification() override;
-   EffectFamilySymbol GetFamily() override;
-   bool IsInteractive() override;
-   bool IsDefault() override;
+   EffectType GetType() const override;
+   EffectType GetClassification() const override;
+   EffectFamilySymbol GetFamily() const override;
+   bool IsInteractive() const override;
+   bool IsDefault() const override;
+   bool EnablesDebug() const override;
 
-   // EffectClientInterface implementation
+   bool SaveSettings(
+      const EffectSettings &settings, CommandParameters & parms) const override;
+   bool LoadSettings(
+      const CommandParameters & parms, EffectSettings &settings) const override;
+   bool DoLoadSettings(
+      const CommandParameters & parms, EffectSettings &settings);
 
-   bool DefineParams( ShuttleParams & S ) override;
-   bool GetAutomationParameters(CommandParameters & parms) override;
-   bool SetAutomationParameters(CommandParameters & parms) override;
+   bool VisitSettings(SettingsVisitor &visitor, EffectSettings &settings)
+      override;
+   bool VisitSettings(
+      ConstSettingsVisitor &visitor, const EffectSettings &settings)
+      const override;
+   int SetLispVarsFromParameters(const CommandParameters & parms, bool bTestOnly);
 
    // Effect implementation
 
    bool Init() override;
-   bool CheckWhetherSkipEffect() override;
-   bool Process() override;
-   bool ShowInterface(wxWindow *parent, bool forceModal = false) override;
-   void PopulateOrExchange(ShuttleGui & S) override;
-   bool TransferDataToWindow() override;
-   bool TransferDataFromWindow() override;
+   bool Process(EffectInstance &instance, EffectSettings &settings) override;
+   int ShowHostInterface(EffectBase &plugin, wxWindow &parent,
+      const EffectDialogFactory &factory,
+      std::shared_ptr<EffectInstance> &pInstance, EffectSettingsAccess &access,
+      bool forceModal = false) override;
+   std::unique_ptr<EffectEditor> PopulateOrExchange(
+      ShuttleGui & S, EffectInstance &instance,
+      EffectSettingsAccess &access, const EffectOutputs *pOutputs) override;
+   bool TransferDataToWindow(const EffectSettings &settings) override;
+   bool TransferDataFromWindow(EffectSettings &settings) override;
 
    // NyquistEffect implementation
    // For Nyquist Workbench support
@@ -121,10 +141,13 @@ public:
    void Stop();
 
 private:
+   wxWeakRef<wxWindow> mUIParent{};
+
    static int mReentryCount;
    // NyquistEffect implementation
 
-   bool ProcessOne();
+   struct NyxContext;
+   bool ProcessOne(NyxContext &nyxContext, EffectOutputTracks *pOutputs);
 
    void BuildPromptWindow(ShuttleGui & S);
    void BuildEffectWindow(ShuttleGui & S);
@@ -136,7 +159,7 @@ private:
    bool TransferDataFromEffectWindow();
 
    bool IsOk();
-   const wxString &InitializationError() const { return mInitError; }
+   const TranslatableString &InitializationError() const { return mInitError; }
 
    static FilePaths GetNyquistSearchPath();
 
@@ -144,19 +167,13 @@ private:
    wxString EscapeString(const wxString & inStr);
    static std::vector<EnumValueSymbol> ParseChoice(const wxString & text);
 
-   static int StaticGetCallback(float *buffer, int channel,
-                                long start, long len, long totlen,
-                                void *userdata);
-   static int StaticPutCallback(float *buffer, int channel,
-                                long start, long len, long totlen,
-                                void *userdata);
+   FileExtensions ParseFileExtensions(const wxString & text);
+   FileNames::FileType ParseFileType(const wxString & text);
+   FileNames::FileTypes ParseFileTypes(const wxString & text);
+
    static void StaticOutputCallback(int c, void *userdata);
    static void StaticOSCallback(void *userdata);
 
-   int GetCallback(float *buffer, int channel,
-                   long start, long len, long totlen);
-   int PutCallback(float *buffer, int channel,
-                   long start, long len, long totlen);
    void OutputCallback(int c);
    void OSCallback();
 
@@ -168,7 +185,7 @@ private:
       bool q { false };
       int paren{ 0 };
       wxString tok;
-      wxArrayString tokens;
+      wxArrayStringEx tokens;
 
       bool Tokenize(
          const wxString &line, bool eof,
@@ -176,9 +193,11 @@ private:
    };
    bool Parse(Tokenizer &tokenizer, const wxString &line, bool eof, bool first);
 
+   static TranslatableString UnQuoteMsgid(const wxString &s, bool allowParens = true,
+                           wxString *pExtraString = nullptr);
    static wxString UnQuote(const wxString &s, bool allowParens = true,
                            wxString *pExtraString = nullptr);
-   double GetCtrlValue(const wxString &s);
+   static double GetCtrlValue(const wxString &s);
 
    void OnLoad(wxCommandEvent & evt);
    void OnSave(wxCommandEvent & evt);
@@ -190,9 +209,11 @@ private:
    void OnTime(wxCommandEvent & evt);
    void OnFileButton(wxCommandEvent & evt);
 
-   void resolveFilePath(wxString & path, wxString extension = {});
+   static void resolveFilePath(wxString & path, FileExtension extension = {});
    bool validatePath(wxString path);
    wxString ToTimeFormat(double t);
+
+   std::pair<bool, FilePath> CheckHelpPage() const;
 
 private:
 
@@ -216,24 +237,26 @@ private:
     * the "Nyquist Effect Prompt", or "Nyquist Prompt", false for all other effects (lisp code read from
     * files)
     */
-   bool              mIsPrompt;
+   const bool        mIsPrompt;
    bool              mOK;
-   wxString          mInitError;
+   TranslatableString mInitError;
    wxString          mInputCmd; // history: exactly what the user typed
+   wxString          mParameters; // The parameters of to be fed to a nested prompt
    wxString          mCmd;      // the command to be processed
-   wxString          mName;   ///< Name of the Effect (untranslated)
-   wxString          mPromptName; // If a prompt, we need to remember original name.
-   wxString          mAction; // translatable
-   wxString          mInfo;   // translatable
-   wxString          mAuthor;
+   TranslatableString mName;   ///< Name of the Effect (untranslated)
+   TranslatableString mPromptName; // If a prompt, we need to remember original name.
+   TranslatableString mAction;
+   TranslatableString mInfo;
+   TranslatableString mAuthor;
    // Version number of the specific plug-in (not to be confused with mVersion)
    // For shipped plug-ins this will be the same as the Audacity release version
    // when the plug-in was last modified.
-   wxString          mReleaseVersion;
-   wxString          mCopyright;
+   TranslatableString mReleaseVersion;
+   TranslatableString mCopyright;
    wxString          mManPage;   // ONLY use if a help page exists in the manual.
    wxString          mHelpFile;
    bool              mHelpFileExists;
+   FilePath          mHelpPage;
    EffectType        mType;
    EffectType        mPromptType; // If a prompt, need to remember original type.
 
@@ -243,31 +266,18 @@ private:
    bool              mDebug;        // When true, debug window is shown.
    bool              mRedirectOutput;
    bool              mProjectChanged;
-   wxString          mDebugOutput;
+   wxString          mDebugOutputStr;
+   TranslatableString mDebugOutput;
 
    int               mVersion;   // Syntactic version of Nyquist plug-in (not to be confused with mReleaseVersion)
    std::vector<NyqControl>   mControls;
 
-   unsigned          mCurNumChannels;
-   WaveTrack         *mCurTrack[2];
-   sampleCount       mCurStart[2];
-   sampleCount       mCurLen;
    sampleCount       mMaxLen;
    int               mTrackIndex;
    bool              mFirstInGroup;
    double            mOutputTime;
    unsigned          mCount;
    unsigned          mNumSelectedChannels;
-   double            mProgressIn;
-   double            mProgressOut;
-   double            mProgressTot;
-   double            mScale;
-
-   SampleBuffer      mCurBuffer[2];
-   sampleCount       mCurBufferStart[2];
-   size_t            mCurBufferLen[2];
-
-   WaveTrack        *mOutputTrack[2];
 
    wxArrayString     mCategories;
 
@@ -278,9 +288,6 @@ private:
    int               mMergeClips;
 
    wxTextCtrl *mCommandText;
-   wxCheckBox *mVersionCheckBox;
-
-   std::exception_ptr mpException {};
 
    DECLARE_EVENT_TABLE()
 
@@ -291,9 +298,9 @@ class NyquistOutputDialog final : public wxDialogWrapper
 {
 public:
    NyquistOutputDialog(wxWindow * parent, wxWindowID id,
-                       const wxString & title,
-                       const wxString & prompt,
-                       const wxString &message);
+                       const TranslatableString & title,
+                       const TranslatableString & prompt,
+                       const TranslatableString &message);
 
 private:
    void OnOk(wxCommandEvent & event);

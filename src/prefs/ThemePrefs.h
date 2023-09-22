@@ -20,12 +20,19 @@
 
 class ShuttleGui;
 
+#define THEME_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Theme") }
+
 class ThemePrefs final : public PrefsPanel
 {
  public:
    ThemePrefs(wxWindow * parent, wxWindowID winid);
    ~ThemePrefs(void);
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+
    bool Commit() override;
+   void Cancel() override;
+   ManualPageID HelpPageName() override;
 
  private:
    void Populate();
@@ -40,10 +47,4 @@ class ThemePrefs final : public PrefsPanel
    DECLARE_EVENT_TABLE()
 };
 
-/// A PrefsPanelFactory that creates one ThemePrefs panel.
-class ThemePrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
 #endif

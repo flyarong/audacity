@@ -14,7 +14,7 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../ui/ButtonHandle.h"
 class wxMouseState;
 
-class MuteButtonHandle final : public ButtonHandle
+class AUDACITY_DLL_API MuteButtonHandle final : public ButtonHandle
 {
    MuteButtonHandle(const MuteButtonHandle&) = delete;
 
@@ -31,7 +31,8 @@ protected:
       (const wxMouseEvent &event, AudacityProject *pProject, wxWindow *pParent)
       override;
 
-   wxString Tip(const wxMouseState &state) const override;
+   TranslatableString Tip(
+      const wxMouseState &state, AudacityProject &) const override;
 
    bool StopsOnKeystroke () override { return true; }
 
@@ -44,7 +45,7 @@ public:
 
 ////////////////////////////////////////////////////////////////////////////////
 
-class SoloButtonHandle final : public ButtonHandle
+class AUDACITY_DLL_API SoloButtonHandle final : public ButtonHandle
 {
    SoloButtonHandle(const SoloButtonHandle&) = delete;
 
@@ -61,13 +62,45 @@ protected:
       (const wxMouseEvent &event, AudacityProject *pProject, wxWindow *pParent)
       override;
 
-   wxString Tip(const wxMouseState &state) const override;
+   TranslatableString Tip(
+      const wxMouseState &state, AudacityProject &) const override;
 
    bool StopsOnKeystroke () override { return true; }
 
 public:
    static UIHandlePtr HitTest
       (std::weak_ptr<SoloButtonHandle> &holder,
+       const wxMouseState &state, const wxRect &rect,
+       const AudacityProject *pProject, const std::shared_ptr<Track> &pTrack);
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+class EffectsButtonHandle final : public ButtonHandle
+{
+   EffectsButtonHandle(const EffectsButtonHandle&) = delete;
+
+public:
+   explicit EffectsButtonHandle
+      ( const std::shared_ptr<Track> &pTrack, const wxRect &rect );
+
+   EffectsButtonHandle &operator=(const EffectsButtonHandle&) = default;
+
+   virtual ~EffectsButtonHandle();
+
+protected:
+   Result CommitChanges
+      (const wxMouseEvent &event, AudacityProject *pProject, wxWindow *pParent)
+      override;
+
+   TranslatableString Tip(
+      const wxMouseState &state, AudacityProject &) const override;
+
+   bool StopsOnKeystroke () override { return true; }
+
+public:
+   static UIHandlePtr HitTest
+      (std::weak_ptr<EffectsButtonHandle> &holder,
        const wxMouseState &state, const wxRect &rect,
        const AudacityProject *pProject, const std::shared_ptr<Track> &pTrack);
 };

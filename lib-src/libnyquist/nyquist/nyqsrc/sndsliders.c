@@ -14,7 +14,7 @@
 LVAL xslider_read(void)
 {
     LVAL arg = xlgafixnum();
-    int index = getfixnum(arg);
+    int index = (int) getfixnum(arg);
     xllastarg();
     if (index >= 0 && index < SLIDERS_MAX) {
         return cvflonum(slider_array[index]);
@@ -46,12 +46,12 @@ LVAL xosc_enable(void)
 }
 
 
-void slider_free();
+void slider_free(snd_susp_type a_susp);
 
 
 typedef struct slider_susp_struct {
     snd_susp_node susp;
-    long terminate_cnt;
+    int64_t terminate_cnt;
 
     int index;
 } slider_susp_node, *slider_susp_type;
@@ -86,7 +86,7 @@ void slider__fetch(snd_susp_type a_susp, snd_list_type snd_list)
         /* don't run past terminate time */
         if (susp->terminate_cnt != UNKNOWN &&
             susp->terminate_cnt <= susp->susp.current + cnt + togo) {
-            togo = susp->terminate_cnt - (susp->susp.current + cnt);
+            togo = (int) (susp->terminate_cnt - (susp->susp.current + cnt));
             if (togo == 0) break;
         }
 
@@ -130,13 +130,13 @@ sound_type snd_make_slider(int index, time_type t0, rate_type sr, time_type d)
     /* t0 specified as input parameter */
     sample_type scale_factor = 1.0F;
     if (index < 0 || index >= SLIDERS_MAX) {
-        xlerror("slider index out of range", NIL);
+        xlfail("slider index out of range");
     }
     falloc_generic(susp, slider_susp_node, "snd_make_slider");
     susp->susp.fetch = slider__fetch;
     susp->index = index;
 
-    susp->terminate_cnt = round((d) * sr);
+    susp->terminate_cnt = ROUNDBIG((d) * sr);
     /* initialize susp state */
     susp->susp.free = slider_free;
     susp->susp.sr = sr;

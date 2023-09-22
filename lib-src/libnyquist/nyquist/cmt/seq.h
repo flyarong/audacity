@@ -71,12 +71,17 @@ struct seti_struct {
 
 
 #define SEQ_MAX_PARMS 8
+
+typedef struct seq_arg_struct {
+    long a[SEQ_MAX_PARMS];
+} seq_arg_t;
+
+typedef int (*seq_cmd_fn)(seq_arg_t args);
+
 struct cause_struct {
-    int (*routine)();
+    seq_cmd_fn routine;
     /* make a structure so we can copy by value */
-    struct seq_arg_struct {
-        long a[SEQ_MAX_PARMS];
-    } args;
+    seq_arg_t args;
 };
 
 
@@ -173,7 +178,7 @@ typedef struct seq_struct {
     void (*midi_ctrl_fn)(struct seq_struct * seq, int voice, int ctrl, int value);
     void (*midi_program_fn)(struct seq_struct * seq, int voice, int prog);
     void (*midi_touch_fn)(struct seq_struct * seq, int voice, int value);
-    void (*noteoff_fn)(struct seq_struct * seq, int voice, int pitch);
+    void (*noteoff_fn)(call_args_type args);
     void (*noteon_fn)(struct seq_struct * seq, int chan, int pitch, int vel);
     void (*free_fn)(struct seq_struct * seq);
     void (*reset_fn)(struct seq_struct * seq);
@@ -215,8 +220,8 @@ chunk_type chunk_create(boolean first_flag);
         (*(((seq_type) seq)->midi_program_fn))(seq, voice, prog)
 #define seq_midi_touch(seq, voice, value) \
         (*(((seq_type) seq)->midi_touch_fn))(seq, voice, value)
-#define seq_noteoff(seq, voice, pitch) \
-        (*(((seq_type) seq)->noteoff_fn))(seq, voice, pitch)
+#define seq_noteoff(seq, args) \
+        (*(((seq_type) seq)->noteoff_fn))(args)
 #define seq_noteon(seq, voice, pitch, vel) \
         (*(((seq_type) seq)->noteon_fn))(seq, voice, pitch, vel)
 #define seq_free(seq) (*(((seq_type) seq)->free_fn))(seq)
@@ -228,16 +233,16 @@ chunk_type chunk_create(boolean first_flag);
 extern boolean seq_print;       /* debugging switch */
 
 void seq_extensions(void);      /* to be defined outside of seq -- user dependent */
-event_type insert_call(seq_type seq, time_type ctime, int cline,
-                       int voice, int (*addr)(), long value[], int n);
+event_type insert_call(seq_type seq, time_type ctime, int cline, int voice,
+        int (*addr)(seq_arg_t args), long value[SEQ_MAX_PARMS], int n);
 event_type insert_clock(seq_type seq, time_type ctime, int cline,
                         time_type ticksize);
 event_type insert_ctrl(seq_type seq, time_type ctime, int cline, int ctrl,
                        int voice, int value);
- /* LISP: (SEQ-INSERT-CTRL SEQ FIXNUM FIXNUM FIXNUM FIXNUM FIXNUM) */
+ /* LISP: (SEQ-INSERT-CTRL SEQ LONG LONG LONG LONG LONG) */
 event_type insert_ctrlramp(seq_type seq, time_type rtime, int rline, int voice,
                       time_type step, time_type dur, int ctrl, int v1, int v2);
- /* LISP: (SEQ-INSERT-RAMP SEQ FIXNUM FIXNUM FIXNUM FIXNUM FIXNUM FIXNUM FIXNUM FIXNUM) */
+ /* LISP: (SEQ-INSERT-RAMP SEQ LONG LONG LONG LONG LONG LONG LONG LONG) */
 def_type insert_def(seq_type seq, char *symbol, unsigned char *definition,
                     int deflen);
 event_type insert_deframp(seq_type seq, time_type rtime, int rline, int voice,
@@ -245,12 +250,12 @@ event_type insert_deframp(seq_type seq, time_type rtime, int rline, int voice,
                      int nparms, short parms[], int parm_num, int to_value);
 event_type insert_macctrl(seq_type seq, time_type ctime, int cline, int ctrl,
                           int voice, int value);
- /* LISP: (SEQ-INSERT-MACCTRL SEQ FIXNUM FIXNUM FIXNUM FIXNUM FIXNUM) */
+ /* LISP: (SEQ-INSERT-MACCTRL SEQ LONG LONG LONG LONG LONG) */
 event_type insert_macro(seq_type seq, time_type ctime, int cline,
                         def_type def, int voice, int nparms, short *parms);
 event_type insert_note(seq_type seq, time_type ntime, int nline, int voice,
                        int pitch, time_type dur, int loud);
- /* LISP: (SEQ-INSERT-NOTE SEQ FIXNUM FIXNUM FIXNUM FIXNUM FIXNUM FIXNUM) */
+ /* LISP: (SEQ-INSERT-NOTE SEQ LONG LONG LONG LONG LONG LONG) */
 event_type insert_seti(seq_type seq, time_type stime, int sline, int voice,
                        int *addr, int value);
 void noop(seq_type seq);
@@ -262,7 +267,7 @@ seq_type seq_copy(seq_type from_seq); /* LISP: (SEQ-COPY SEQ) */
 seq_type seq_create(void); /* LISP: (SEQ-CREATE) */
 void seq_cycle(seq_type seq, boolean flag, time_type dur);
 #define seq_duration(seq) (((seq_type) seq)->chunklist->u.info.duration)
-void seq_end_event(seq_type seq);
+void seq_end_event(call_args_type args);
 #define seq_events(seq) (((seq_type) seq)->chunklist ? \
     (((seq_type) seq)->chunklist->u.info.eventlist) : NULL) 
 #define seq_dictionary(seq) (seq)->chunklist->u.info.dictionary
@@ -278,7 +283,7 @@ void seq_midi_ctrl_meth(seq_type seq, int voice, int ctrl, int value);
 void seq_midi_program_meth(seq_type seq, int voice, int prog);
 void seq_midi_touch_meth(seq_type seq, int voice, int value);
 void seq_noteon_meth(seq_type seq, int voice, int pitch, int vel);
-void seq_noteoff_meth(seq_type seq, int chan, int pitch);
+void seq_noteoff_meth(call_args_type args);
 time_type seq_pause(seq_type seq, boolean flag);
 void seq_play(seq_type seq);
 #define seq_rate(seq) ((seq_type) seq)->rate

@@ -15,27 +15,24 @@ of languages for Audacity.
 *//*******************************************************************/
 
 
-#include "Audacity.h"
+
 #include "LangChoice.h"
+#include "MemoryX.h"
 
 #include <wx/defs.h>
-#include <wx/button.h>
 #include <wx/choice.h>
-#include <wx/intl.h>
-#include <wx/sizer.h>
 #include <wx/stattext.h>
 
 #include "Languages.h"
 #include "ShuttleGui.h"
-#include "widgets/wxPanelWrapper.h"
-#include "widgets/ErrorDialog.h"
-#include "Internat.h"
+#include "AudacityMessageBox.h"
+#include "wxPanelWrapper.h"
 
 class LangChoiceDialog final : public wxDialogWrapper {
 public:
    LangChoiceDialog(wxWindow * parent,
                     wxWindowID id,
-                    const wxString & title);
+                    const TranslatableString & title);
 
    wxString GetLang() { return mLang; }
 
@@ -47,7 +44,7 @@ private:
 
    int mNumLangs;
    wxArrayString mLangCodes;
-   wxArrayStringEx mLangNames;
+   TranslatableStrings mLangNames;
 
    DECLARE_EVENT_TABLE()
 };
@@ -58,7 +55,7 @@ wxString ChooseLanguage(wxWindow *parent)
 
    /* i18n-hint: Title on a dialog indicating that this is the first
     * time Audacity has been run. */
-   LangChoiceDialog dlog(parent, -1, _("Audacity First Run"));
+   LangChoiceDialog dlog(parent, -1, XO("Audacity First Run"));
    dlog.CentreOnParent();
    dlog.ShowModal();
    returnVal = dlog.GetLang();
@@ -72,13 +69,14 @@ END_EVENT_TABLE()
 
 LangChoiceDialog::LangChoiceDialog(wxWindow * parent,
                                    wxWindowID id,
-                                   const wxString & title):
+                                   const TranslatableString & title):
    wxDialogWrapper(parent, id, title)
 {
-   SetName(GetTitle());
-   GetLanguages(mLangCodes, mLangNames);
-   int lang =
-      make_iterator_range( mLangCodes ).index( GetSystemLanguageCode() );
+   SetName();
+   const auto &paths = FileNames::AudacityPathList();
+   Languages::GetLanguages(paths, mLangCodes, mLangNames);
+   int lang = make_iterator_range( mLangCodes )
+      .index( Languages::GetSystemLanguageCode(paths) );
 
    ShuttleGui S(this, eIsCreating);
 
@@ -87,9 +85,9 @@ LangChoiceDialog::LangChoiceDialog(wxWindow * parent,
       S.StartHorizontalLay();
       {
          S.SetBorder(15);
-         mChoice = S.AddChoice(_("Choose Language for Audacity to use:"),
-                              mLangNames,
-                              lang);
+         mChoice = S.AddChoice(XXO("Choose Language for Audacity to use:"),
+            mLangNames,
+            lang);
       }
       S.EndVerticalLay();
 
@@ -106,7 +104,8 @@ void LangChoiceDialog::OnOk(wxCommandEvent & WXUNUSED(event))
    int ndx = mChoice->GetSelection();
    mLang = mLangCodes[ndx];
 
-   wxString slang = GetSystemLanguageCode();
+   auto slang =
+      Languages::GetSystemLanguageCode(FileNames::AudacityPathList());
    int sndx = make_iterator_range( mLangCodes ).index( slang );
    wxString sname;
 
@@ -117,19 +116,18 @@ void LangChoiceDialog::OnOk(wxCommandEvent & WXUNUSED(event))
       }
    }
    else {
-      sname = mLangNames[sndx];
+      sname = mLangNames[sndx].Translation();
    }
 
    if (mLang.Left(2) != slang.Left(2)) {
-      wxString msg;
       /* i18n-hint: The %s's are replaced by translated and untranslated
        * versions of language names. */
-      msg.Printf(_("The language you have chosen, %s (%s), is not the same as the system language, %s (%s)."),
-                 mLangNames[ndx],
+      auto msg = XO("The language you have chosen, %s (%s), is not the same as the system language, %s (%s).")
+         .Format(mLangNames[ndx],
                  mLang,
                  sname,
                  slang);
-      if (AudacityMessageBox(msg, _("Confirm"), wxYES_NO) == wxNO) {
+      if ( wxNO == AudacityMessageBox( msg, XO("Confirm"), wxYES_NO ) ) {
          return;
       }
    }

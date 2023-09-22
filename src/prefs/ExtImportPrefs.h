@@ -16,17 +16,19 @@
 
 #include "PrefsPanel.h"
 
-#include "../import/Import.h"
-#include "../import/ImportPlugin.h"
+#include "ImportPlugin.h"
 
 class wxButton;
 class wxGridEvent;
 class wxGridRangeSelectEvent;
 class wxListCtrl;
 class wxListEvent;
+class ExtImportItem;
 class ExtImportPrefs;
 class Grid;
 class ShuttleGui;
+
+#define EXT_IMPORT_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Ext Import") }
 
 class ExtImportPrefsDropTarget final : public wxDropTarget
 {
@@ -49,9 +51,16 @@ class ExtImportPrefs final : public PrefsPanel
  public:
    ExtImportPrefs(wxWindow * parent, wxWindowID winid);
    ~ExtImportPrefs();
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+
    bool Commit() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
+
+   // See bug #2315 for discussion. This should be reviewed
+   // and (possibly) removed after wx3.1.3.
+   void OnShow(wxShowEvent& event);
 
    void OnPluginKeyDown(wxListEvent& event);
    void OnPluginBeginDrag(wxListEvent& event);
@@ -108,11 +117,4 @@ class ExtImportPrefs final : public PrefsPanel
    DECLARE_EVENT_TABLE()
 };
 
-
-/// A PrefsPanelFactory that creates one ExtImportPrefs panel.
-class ExtImportPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
 #endif

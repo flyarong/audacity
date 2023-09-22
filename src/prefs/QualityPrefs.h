@@ -17,48 +17,28 @@
 
 #include "PrefsPanel.h"
 
-class wxChoice;
-class wxTextCtrl;
 class ShuttleGui;
-enum sampleFormat : unsigned;
+enum class sampleFormat : unsigned;
 enum DitherType : unsigned;
 
-class wxArrayStringEx;
+#define QUALITY_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Quality") }
 
-class QualityPrefs final : public PrefsPanel
+class AUDACITY_DLL_API QualityPrefs final : public PrefsPanel
 {
  public:
    QualityPrefs(wxWindow * parent, wxWindowID winid);
    virtual ~QualityPrefs();
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
 
    bool Commit() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
-
-   static sampleFormat SampleFormatChoice();
-
-   static DitherType FastDitherChoice();
-   static DitherType BestDitherChoice();
 
  private:
    void Populate();
-   void GetNamesAndLabels();
-   void OnSampleRateChoice(wxCommandEvent & e);
-
-   wxArrayStringEx mSampleRateNames;
-   std::vector<int> mSampleRateLabels;
-
-   wxChoice *mSampleRates;
-   wxTextCtrl *mOtherSampleRate;
-   int mOtherSampleRateValue;
-
+   
    DECLARE_EVENT_TABLE()
 };
 
-/// A PrefsPanelFactory that creates one QualityPrefs panel.
-class QualityPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
 #endif

@@ -11,20 +11,20 @@ Paul Licameli split from TrackPanel.cpp
 #ifndef __AUDACITY_SCRUBBING__
 #define __AUDACITY_SCRUBBING__
 
-#include "../../Experimental.h"
-
-#include "../../MemoryX.h"
+#include <thread>
 #include <vector>
 #include <wx/longlong.h>
 
+#include "../../ScrubState.h" // for ScrubbingOptions
+#include "ClientData.h" // to inherit
+#include "Prefs.h" // to inherit
 #include "../../widgets/Overlay.h" // to inherit
-#include "../../commands/CommandFunctors.h"
 #include "../../commands/CommandContext.h"
 #include "../../commands/CommandManager.h" // for MenuTable
-#include "../../../include/audacity/Types.h"
+#include "Identifier.h"
 
 class AudacityProject;
-extern AudacityProject *GetActiveProject();
+class TranslatableString;
 
 // Conditionally compile either a separate thead, or else use a timer in the main
 // thread, to poll the mouse and update scrubbing speed and direction.  The advantage of
@@ -35,43 +35,21 @@ extern AudacityProject *GetActiveProject();
 #define USE_SCRUB_THREAD
 #endif
 
-// For putting an increment of work in the scrubbing queue
-struct ScrubbingOptions {
-   ScrubbingOptions() {}
-
-   bool adjustStart {};
-
-   // usually from TrackList::GetEndTime()
-   double maxTime {};
-   double minTime {};
-
-   bool bySpeed {};
-   bool isPlayingAtSpeed{};
-
-   double delay {};
-
-   // Limiting values for the speed of a scrub interval:
-   double minSpeed { 0.0 };
-   double maxSpeed { 1.0 };
-
-
-   // When maximum speed scrubbing skips to follow the mouse,
-   // this is the minimum amount of playback allowed at the maximum speed:
-   double minStutterTime {};
-
-   static double MaxAllowedScrubSpeed()
-   { return 32.0; } // Is five octaves enough for your amusement?
-   static double MinAllowedScrubSpeed()
-   { return 0.01; } // Mixer needs a lower bound speed.  Scrub no slower than this.
-};
-
 // Scrub state object
-class Scrubber : public wxEvtHandler
+class AUDACITY_DLL_API Scrubber final
+   : public wxEvtHandler
+   , public ClientData::Base
+   , private PrefsListener
+   , public std::enable_shared_from_this< Scrubber >
 {
-public:
-   static constexpr unsigned ScrubPollInterval_ms = 50;
-   
+public:   
+   static Scrubber &Get( AudacityProject &project );
+   static const Scrubber &Get( const AudacityProject &project );
+
+   explicit
    Scrubber(AudacityProject *project);
+   Scrubber( const Scrubber & ) = delete;
+   Scrubber &operator=( const Scrubber & ) = delete;
    ~Scrubber();
 
    static bool ShouldScrubPinned();
@@ -82,12 +60,13 @@ public:
    // Returns true iff the event should be considered consumed by this:
    // Assume xx is relative to the left edge of TrackPanel!
    bool MaybeStartScrubbing(wxCoord xx);
-   bool StartSpeedPlay(double speed, double time0, double time1);
+   bool StartKeyboardScrubbing(double time0, bool backwards);
+   double GetKeyboardScrubbingSpeed();
 
    void ContinueScrubbingUI();
    void ContinueScrubbingPoll();
 
-   // This is meant to be called only from ControlToolBar
+   // This is meant to be called only from ProjectAudioManager
    void StopScrubbing();
 
    wxCoord GetScrubStartPosition() const
@@ -97,6 +76,14 @@ public:
    { return mSpeedPlaying;}
    bool IsSpeedPlaying() const
    { return IsScrubbing() && mSpeedPlaying; }
+   bool WasKeyboardScrubbing() const
+   { return mKeyboardScrubbing; }
+   bool IsKeyboardScrubbing() const
+   { return IsScrubbing() && mKeyboardScrubbing; }
+   void SetBackwards(bool backwards)
+   { mBackwards = backwards;}
+   bool IsBackwards() const
+   { return mBackwards;}
    // True iff the user has clicked to start scrub and not yet stopped,
    // but IsScrubbing() may yet be false
    bool HasMark() const
@@ -109,7 +96,8 @@ public:
    { mSmoothScrollingScrub = value; }
 
    bool ChoseSeeking() const;
-   bool MayDragToSeek() const;
+   void SetMayDragToSeek( bool value ) { mMayDragToSeek = value; }
+   bool MayDragToSeek() const { return mMayDragToSeek; }
    bool TemporarilySeeks() const;
    bool Seeks() const;
    bool Scrubs() const;
@@ -127,8 +115,6 @@ public:
    // This returns the same as the enabled state of the menu items:
    bool CanScrub() const;
 
-   // For the toolbar
-   MenuTable::BaseItemPtr Menu();
    // For popup
    void PopulatePopupMenu(wxMenu &menu);
 
@@ -137,40 +123,39 @@ public:
    void OnSeek(const CommandContext&);
    void OnToggleScrubRuler(const CommandContext&);
 
+   void OnKeyboardScrubBackwards(const CommandContext&);
+   void OnKeyboardScrubForwards(const CommandContext&);
+   void DoKeyboardScrub(bool backwards, bool keyUp);
+
    // Convenience wrapper for the above
    template<void (Scrubber::*pfn)(const CommandContext&)>
       void Thunk(wxCommandEvent &)
-         { (this->*pfn)(*GetActiveProject()); }
+         { (this->*pfn)(*mProject); }
 
    // A string to put in the leftmost part of the status bar
    // when scrub or seek is in progress, or else empty.
-   const wxString &GetUntranslatedStateString() const;
+   const TranslatableString &GetUntranslatedStateString() const;
    wxString StatusMessageForWave() const;
-
-   // All possible status strings.
-   static std::vector<wxString> GetAllUntranslatedStatusStrings();
 
    void Pause(bool paused);
    bool IsPaused() const;
    void CheckMenuItems();
 
+   bool IsTransportingPinned() const;
+
+   void SetSeekPress( bool value ) { mScrubSeekPress = value; }
+
 private:
+   void UpdatePrefs() override;
+
+   //! @pre `!mThread.joinable()` (when defined(USE_SCRUB_THREAD))
    void StartPolling();
    void StopPolling();
    void DoScrub(bool seek);
    void OnActivateOrDeactivateApp(wxActivateEvent & event);
 
-   // I need this because I can't push the scrubber as an event handler
-   // in two places at once.
-   struct Forwarder : public wxEvtHandler {
-      Forwarder(Scrubber &scrubber_) : scrubber( scrubber_ ) {}
-
-      Scrubber &scrubber;
-
-      void OnMouse(wxMouseEvent &event);
-      DECLARE_EVENT_TABLE()
-   };
-   Forwarder mForwarder{ *this };
+   void ScrubPollerThread();
+   void JoinThread();
 
 private:
    int mScrubToken;
@@ -183,6 +168,8 @@ private:
    bool mPaused{};
    bool mSeeking {};
    bool mSpeedPlaying{true};
+   bool mKeyboardScrubbing{};
+   bool mBackwards{};
    bool mDragging {};
 
    bool mCancelled {};
@@ -198,8 +185,8 @@ private:
 #ifdef USE_SCRUB_THREAD
    // Course corrections in playback are done in a helper thread, unhindered by
    // the complications of the main event dispatch loop
-   class ScrubPollerThread;
-   ScrubPollerThread *mpThread {};
+   std::thread mThread;
+   std::atomic<bool> mFinishThread{ false };
 #endif
 
    // Other periodic update of the UI must be done in the main thread,
@@ -209,27 +196,9 @@ private:
 
    ScrubbingOptions mOptions;
    double mMaxSpeed { 1.0 };
-};
 
-// Specialist in drawing the scrub speed, and listening for certain events
-class ScrubbingOverlay final : public wxEvtHandler, public Overlay
-{
-public:
-   ScrubbingOverlay(AudacityProject *project);
-
-private:
-   std::pair<wxRect, bool> DoGetRectangle(wxSize size) override;
-   void Draw(OverlayPanel &panel, wxDC &dc) override;
-
-   void OnTimer(wxCommandEvent &event);
-
-   const Scrubber &GetScrubber() const;
-   Scrubber &GetScrubber();
-
-   AudacityProject *mProject;
-
-   wxRect mLastScrubRect, mNextScrubRect;
-   wxString mLastScrubSpeedText, mNextScrubSpeedText;
+   bool mShowScrubbing { false };
+   bool mMayDragToSeek{ false };
 };
 
 #endif

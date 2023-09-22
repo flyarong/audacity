@@ -2,7 +2,7 @@
 
    Audacity - A Digital Audio Editor
    Copyright 1999-2009 Audacity Team
-   License: GPL v2 - see LICENSE.txt
+   License: GPL v2 or later - see LICENSE.txt
 
    Dan Horgan
 
@@ -55,10 +55,10 @@ and sends it to that message target.
 #ifndef __COMMANDTARGETS__
 #define __COMMANDTARGETS__
 
-#include "../MemoryX.h"
+#include <memory>
 #include <vector>
-//#include "../src/Project.h"
-#include "../commands/ResponseQueue.h"
+#include <wx/string.h>
+#include <wx/thread.h>
 
 class wxStatusBar;
 
@@ -71,7 +71,7 @@ public:
 };
 
 /// Interface for objects that can receive (string) messages from a command
-class CommandMessageTarget /* not final */
+class AUDACITY_DLL_API CommandMessageTarget /* not final */
 {
 public:
    CommandMessageTarget() {mCounts.push_back(0);}
@@ -156,7 +156,7 @@ public:
 
 #if 0
 
-#include "../widgets/ProgressDialog.h" // Member variable
+//#include "ProgressDialog.h" // Member variable
 
 /// Sends command progress information to a ProgressDialog
 class GUIProgressTarget final : public CommandProgressTarget
@@ -203,7 +203,7 @@ public:
 };
 
 /// Displays messages from a command in an AudacityMessageBox
-class MessageBoxTarget final : public CommandMessageTarget
+class AUDACITY_DLL_API MessageBoxTarget final : public CommandMessageTarget
 {
 public:
    virtual ~MessageBoxTarget() {}
@@ -211,7 +211,7 @@ public:
 };
 
 /// Displays messages from a command in a wxStatusBar
-class StatusBarTarget final : public CommandMessageTarget
+class AUDACITY_DLL_API StatusBarTarget final : public CommandMessageTarget
 {
 private:
    wxStatusBar &mStatus;
@@ -222,30 +222,35 @@ public:
    void Update(const wxString &message) override;
 };
 
-/// Adds messages to a response queue (to be sent back to a script)
-class ResponseQueueTarget final : public CommandMessageTarget
+/// Constructs a response (to be sent back to a script)
+class ResponseTarget final : public CommandMessageTarget
 {
 private:
-   ResponseQueue &mResponseQueue;
+   wxSemaphore mSemaphore;
    wxString mBuffer;
 public:
-   ResponseQueueTarget(ResponseQueue &responseQueue)
-      : mResponseQueue(responseQueue),
-       mBuffer( wxEmptyString )
-   { }
-   virtual ~ResponseQueueTarget()
+   ResponseTarget()
+      : mSemaphore(0, 1),
+        mBuffer(wxEmptyString)
+   { 
+      // Cater for handling long responses quickly.
+      mBuffer.Alloc(40000);
+   }
+   virtual ~ResponseTarget()
    {
-      if( mBuffer.StartsWith("\n" ) )
-         mBuffer = mBuffer.Mid( 1 );
-      mResponseQueue.AddResponse( mBuffer  );
-      mResponseQueue.AddResponse(wxString(wxT("\n")));
    }
    void Update(const wxString &message) override
    {
       mBuffer += message;
-#if 0
-         mResponseQueue.AddResponse(message);
-#endif
+   }
+   virtual void Flush() override
+   {
+      mSemaphore.Post();
+   }
+   wxString GetResponse()
+   {
+      mSemaphore.Wait();
+      return mBuffer;
    }
 };
 
@@ -305,7 +310,7 @@ public:
    std::shared_ptr<CommandMessageTarget> mErrorTarget;
 public:
    // && is not a reference to a reference, but rather a way to allow reference to a temporary
-   // that will be gone or transfered after we have taken it.  It's a reference to an xvalue, 
+   // that will be gone or transferred after we have taken it.  It's a reference to an xvalue, 
    // or 'expiring value'.
    CommandOutputTargets(std::unique_ptr<CommandProgressTarget> &&pt = TargetFactory::ProgressDefault(),
                        std::shared_ptr<CommandMessageTarget>  &&st = TargetFactory::MessageDefault(),
@@ -381,7 +386,8 @@ public:
    }
 };
 
-class LispifiedCommandOutputTargets : public CommandOutputTargets
+class AUDACITY_DLL_API LispifiedCommandOutputTargets
+   : public CommandOutputTargets
 {
 public :
    LispifiedCommandOutputTargets( CommandOutputTargets & target );
@@ -390,7 +396,7 @@ private:
    CommandOutputTargets * pToRestore;
 };
 
-class BriefCommandOutputTargets : public CommandOutputTargets
+class AUDACITY_DLL_API BriefCommandOutputTargets : public CommandOutputTargets
 {
 public :
    BriefCommandOutputTargets( CommandOutputTargets & target );

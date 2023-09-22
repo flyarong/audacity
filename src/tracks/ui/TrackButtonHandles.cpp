@@ -8,16 +8,22 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+
 #include "TrackButtonHandles.h"
 
-#include "../../HitTestResult.h"
-#include "../../Menus.h"
-#include "../../Project.h"
+#include "Project.h"
+#include "ProjectAudioIO.h"
+#include "../../ProjectAudioManager.h"
+#include "ProjectHistory.h"
+#include "../../SelectUtilities.h"
 #include "../../RefreshCode.h"
-#include "../../Track.h"
+#include "Track.h"
+#include "../../TrackPanelAx.h"
+#include "../../TrackInfo.h"
 #include "../../TrackPanel.h"
+#include "../../TrackUtilities.h"
 #include "../../commands/CommandManager.h"
+#include "../../tracks/ui/ChannelView.h"
 
 MinimizeButtonHandle::MinimizeButtonHandle
 ( const std::shared_ptr<Track> &pTrack, const wxRect &rect )
@@ -33,13 +39,12 @@ UIHandle::Result MinimizeButtonHandle::CommitChanges
 {
    using namespace RefreshCode;
 
-   auto pTrack = mpTrack.lock();
-   if (pTrack)
-   {
-      bool wasMinimized = pTrack->GetMinimized();
-      for (auto channel : TrackList::Channels(pTrack.get()))
-         channel->SetMinimized(!wasMinimized);
-      pProject->ModifyState(true);
+   if (auto pTrack = mpTrack.lock()) {
+      auto channels = pTrack->Channels();
+      bool wasMinimized = ChannelView::Get(**channels.begin()).GetMinimized();
+      for (auto pChannel : channels)
+         ChannelView::Get(*pChannel).SetMinimized( !wasMinimized );
+      ProjectHistory::Get(*pProject).ModifyState(true);
 
       // Redraw all tracks when any one of them expands or contracts
       // (Could we invent a return code that draws only those at or below
@@ -50,10 +55,12 @@ UIHandle::Result MinimizeButtonHandle::CommitChanges
    return RefreshNone;
 }
 
-wxString MinimizeButtonHandle::Tip(const wxMouseState &) const
+TranslatableString MinimizeButtonHandle::Tip(
+   const wxMouseState &, AudacityProject &) const
 {
    auto pTrack = GetTrack();
-   return pTrack->GetMinimized() ? _("Expand") : _("Collapse");
+   return ChannelView::Get(*pTrack->GetChannel(0)).GetMinimized()
+      ? XO("Expand") : XO("Collapse");
 }
 
 UIHandlePtr MinimizeButtonHandle::HitTest
@@ -91,22 +98,23 @@ UIHandle::Result SelectButtonHandle::CommitChanges
    auto pTrack = mpTrack.lock();
    if (pTrack)
    {
-      const bool unsafe = pProject->IsAudioActive();
-      SelectActions::DoListSelection(*pProject,
-         pTrack.get(), event.ShiftDown(), event.ControlDown(), !unsafe);
+      const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
+      SelectUtilities::DoListSelection(*pProject,
+         *pTrack, event.ShiftDown(), event.ControlDown(), !unsafe);
 //    return RefreshAll ;
    }
 
    return RefreshNone;
 }
 
-wxString SelectButtonHandle::Tip(const wxMouseState &) const
+TranslatableString SelectButtonHandle::Tip(
+   const wxMouseState &, AudacityProject &) const
 {
    auto pTrack = GetTrack();
 #if defined(__WXMAC__)
-   return pTrack->GetSelected() ? _("Command+Click to Unselect") : _("Select track");
+   return pTrack->GetSelected() ? XO("Command+Click to deselect") : XO("Select track");
 #else
-   return pTrack->GetSelected() ? _("Ctrl+Click to Unselect") : _("Select track");
+   return pTrack->GetSelected() ? XO("Ctrl+Click to deselect") : XO("Select track");
 #endif
 }
 
@@ -147,10 +155,11 @@ UIHandle::Result CloseButtonHandle::CommitChanges
    auto pTrack = mpTrack.lock();
    if (pTrack)
    {
-      pProject->StopIfPaused();
-      if (!pProject->IsAudioActive()) {
+      auto toRemove = pTrack->SubstitutePendingChangedTrack();
+      ProjectAudioManager::Get( *pProject ).StopIfPaused();
+      if (!ProjectAudioIO::Get( *pProject ).IsAudioActive()) {
          // This pushes an undo item:
-         TrackActions::DoRemoveTrack(*pProject, pTrack.get());
+         TrackUtilities::DoRemoveTrack(*pProject, toRemove.get());
          // Redraw all tracks when any one of them closes
          // (Could we invent a return code that draws only those at or below
          // the affected track?)
@@ -161,18 +170,18 @@ UIHandle::Result CloseButtonHandle::CommitChanges
    return result;
 }
 
-wxString CloseButtonHandle::Tip(const wxMouseState &) const
+TranslatableString CloseButtonHandle::Tip(
+   const wxMouseState &, AudacityProject &project) const
 {
-   auto name = _("Close");
-   auto project = ::GetActiveProject();
+   auto name = XO("Close");
    auto focused =
-      project->GetTrackPanel()->GetFocusedTrack() == GetTrack().get();
+      TrackFocus::Get( project ).Get() == GetTrack().get();
    if (!focused)
       return name;
 
-   auto commandManager = project->GetCommandManager();
-   TranslatedInternalString command{ wxT("TrackClose"), name };
-   return commandManager->DescribeCommandsAndShortcuts( &command, 1u );
+   auto &commandManager = CommandManager::Get( project );
+   ComponentInterfaceSymbol command{ wxT("TrackClose"), name };
+   return commandManager.DescribeCommandsAndShortcuts( &command, 1u );
 }
 
 UIHandlePtr CloseButtonHandle::HitTest
@@ -208,7 +217,7 @@ MenuButtonHandle::~MenuButtonHandle()
 UIHandle::Result MenuButtonHandle::CommitChanges
 (const wxMouseEvent &, AudacityProject *pProject, wxWindow *WXUNUSED(pParent))
 {
-   auto pPanel = pProject->GetTrackPanel();
+   auto &trackPanel = TrackPanel::Get( *pProject );
    auto pCell = mpCell.lock();
    if (!pCell)
       return RefreshCode::Cancelled;
@@ -216,22 +225,23 @@ UIHandle::Result MenuButtonHandle::CommitChanges
       static_cast<CommonTrackPanelCell*>(pCell.get())->FindTrack();
    if (!pTrack)
       return RefreshCode::Cancelled;
-   pPanel->CallAfter( [=]{ pPanel->OnTrackMenu( pTrack.get() ); } );
+   trackPanel.CallAfter(
+      [&trackPanel,pTrack]{ trackPanel.OnTrackMenu( pTrack.get() ); } );
    return RefreshCode::RefreshNone;
 }
 
-wxString MenuButtonHandle::Tip(const wxMouseState &) const
+TranslatableString MenuButtonHandle::Tip(
+   const wxMouseState &, AudacityProject &project) const
 {
-   auto name = _("Open menu...");
-   auto project = ::GetActiveProject();
+   auto name = XO("Open menu...");
    auto focused =
-      project->GetTrackPanel()->GetFocusedTrack() == GetTrack().get();
+      TrackFocus::Get( project ).Get() == GetTrack().get();
    if (!focused)
       return name;
 
-   auto commandManager = project->GetCommandManager();
-   TranslatedInternalString command{ wxT("TrackMenu"), name };
-   return commandManager->DescribeCommandsAndShortcuts( &command, 1u );
+   auto &commandManager = CommandManager::Get( project );
+   ComponentInterfaceSymbol command{ wxT("TrackMenu"), name };
+   return commandManager.DescribeCommandsAndShortcuts( &command, 1u );
 }
 
 UIHandlePtr MenuButtonHandle::HitTest

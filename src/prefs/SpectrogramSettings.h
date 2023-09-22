@@ -11,25 +11,29 @@ Paul Licameli
 #ifndef __AUDACITY_SPECTROGRAM_SETTINGS__
 #define __AUDACITY_SPECTROGRAM_SETTINGS__
 
-#include "../Experimental.h"
-
-#include "../SampleFormat.h"
-#include "../RealFFTf.h"
+#include "ClientData.h" // to inherit
+#include "Prefs.h"
+#include "SampleFormat.h"
+#include "RealFFTf.h"
 
 #undef SPECTRAL_SELECTION_GLOBAL_SWITCH
 
+class EnumValueSymbols;
 struct FFTParam;
 class NumberScale;
 class SpectrumPrefs;
 class wxArrayStringEx;
+class WaveTrack;
 
-class SpectrogramSettings
+class AUDACITY_DLL_API SpectrogramSettings
+   : public PrefsListener
+   , public ClientData::Cloneable< ClientData::UniquePtr >
 {
    friend class SpectrumPrefs;
 public:
 
    // Singleton for settings that are not per-track
-   class Globals
+   class AUDACITY_DLL_API Globals
    {
    public:
       static Globals &Get();
@@ -66,14 +70,27 @@ public:
       stNumScaleTypes,
    };
 
-   static const wxArrayStringEx &GetScaleNames();
-   static const wxArrayStringEx &GetAlgorithmNames();
+   static const EnumValueSymbols &GetScaleNames();
+   static const EnumValueSymbols &GetColorSchemeNames();
+   static const TranslatableStrings &GetAlgorithmNames();
+
+   // Return either the track's independent settings or global defaults
+   //! Mutative access to attachment even if the track argument is const
+   static SpectrogramSettings &Get(const WaveTrack &track);
+
+   // Force creation of track's independent settings
+   static SpectrogramSettings &Own(WaveTrack &track);
+
+   //! Make track lose indpendent settings and use defaults
+   static void Reset(WaveTrack &track);
 
    static SpectrogramSettings &defaults();
    SpectrogramSettings();
    SpectrogramSettings(const SpectrogramSettings &other);
    SpectrogramSettings& operator= (const SpectrogramSettings &other);
    ~SpectrogramSettings();
+
+   PointerType Clone() const override;
 
    bool IsDefault() const
    {
@@ -83,9 +100,12 @@ public:
    bool Validate(bool quiet);
    void LoadPrefs();
    void SavePrefs();
+
+   void UpdatePrefs() override;
+
    void InvalidateCaches();
    void DestroyWindows();
-   void CacheWindows() const;
+   void CacheWindows();
    void ConvertToEnumeratedWindowSizes();
    void ConvertToActualWindowSizes();
 
@@ -113,19 +133,32 @@ private:
 public:
    size_t WindowSize() const { return windowSize; }
 
-#ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
 private:
    int zeroPaddingFactor;
 public:
    size_t ZeroPaddingFactor() const {
       return algorithm == algPitchEAC ? 1 : zeroPaddingFactor;
    }
-#endif
 
    size_t GetFFTLength() const; // window size (times zero padding, if STFT)
    size_t NBins() const;
 
-   bool isGrayscale;
+   enum ColorScheme : int {
+      // Keep in correspondence with AColor::colorSchemes, AColor::gradient_pre
+      csColorNew = 0,
+      csColorTheme,
+      csGrayscale,
+      csInvGrayscale,
+
+      csNumColorScheme,
+   };
+   ColorScheme colorScheme;
+
+   class ColorSchemeEnumSetting : public EnumSetting< ColorScheme > {
+       using EnumSetting< ColorScheme >::EnumSetting;
+       void Migrate(wxString &value) override;
+   };
+   static ColorSchemeEnumSetting colorSchemeSetting;
 
    ScaleType scaleType;
 
@@ -157,11 +190,37 @@ public:
    // Following fields are derived from preferences.
 
    // Variables used for computing the spectrum
-   mutable HFFT           hFFT;
-   mutable Floats         window;
+   HFFT           hFFT;
+   Floats         window;
 
    // Two other windows for computing reassigned spectrogram
-   mutable Floats         tWindow; // Window times time parameter
-   mutable Floats         dWindow; // Derivative of window
+   Floats         tWindow; // Window times time parameter
+   Floats         dWindow; // Derivative of window
 };
+
+extern AUDACITY_DLL_API IntSetting SpectrumMaxFreq;
+
+class AUDACITY_DLL_API SpectrogramBounds
+   : public ClientData::Cloneable< ClientData::UniquePtr >
+{
+public:
+
+   //! Get either the global default settings, or the track's own if previously created
+   static SpectrogramBounds &Get( WaveTrack &track );
+
+   //! @copydoc Get
+   static const SpectrogramBounds &Get( const WaveTrack &track );
+
+   ~SpectrogramBounds() override;
+   PointerType Clone() const override;
+
+   void GetBounds(const WaveTrack &wt, float &min, float &max) const;
+
+   void SetBounds(float min, float max)
+   { mSpectrumMin = min, mSpectrumMax = max; }
+
+private:
+   float mSpectrumMin = -1, mSpectrumMax = -1;
+};
+
 #endif

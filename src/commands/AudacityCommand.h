@@ -11,32 +11,28 @@
 #ifndef __AUDACITY_COMMAND__
 #define __AUDACITY_COMMAND__
 
-#include "../Audacity.h"
 
-#include "../MemoryX.h"
+
 #include <set>
 
-#include "../MemoryX.h"
 #include <wx/defs.h>
 
-class wxWindow;
+#include "wxPanelWrapper.h" // to inherit
 
-#include "../SampleFormat.h"
-#include "../SelectedRegion.h"
-#include "../Internat.h"
-#include "../include/audacity/ComponentInterface.h"
-#include "../include/audacity/EffectAutomationParameters.h" // for command automation
+#include "ComponentInterface.h"
+#include "EffectAutomationParameters.h"
+#include "EffectInterface.h" // for SettingsVisitor type alias
 
-#include "../Track.h"
-#include "../effects/Effect.h"
-#include "../Registrar.h"
+#include "Registrar.h"
 
 class ShuttleGui;
 
 #define BUILTIN_GENERIC_COMMAND_PREFIX wxT("Built-in AudacityCommand: ")
 
+class AudacityCommand;
 class AudacityProject;
 class CommandContext;
+class ProgressDialog;
 
 
 class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
@@ -48,36 +44,33 @@ class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
  public:
    AudacityCommand();
    virtual ~AudacityCommand();
-
+   
    // ComponentInterface implementation
 
    //These four can be defaulted....
-   PluginPath GetPath() override;
-   VendorSymbol GetVendor() override;
-   wxString GetVersion() override;
+   PluginPath GetPath() const override;
+   VendorSymbol GetVendor() const override;
+   wxString GetVersion() const override;
    //  virtual wxString GetFamily();
 
    //These two must be implemented by instances.
-   ComponentInterfaceSymbol GetSymbol() override = 0;
-   virtual wxString GetDescription() override
-   {wxFAIL_MSG( "Implement a Description for this command");return "FAIL";};
+   ComponentInterfaceSymbol GetSymbol() const override = 0;
+   virtual TranslatableString GetDescription() const override
+   {wxFAIL_MSG( "Implement a Description for this command");return XO("FAIL");};
 
    // Name of page in the Audacity alpha manual
-   virtual wxString ManualPage(){ return wxEmptyString;};
-   virtual bool IsBatchProcessing(){ return mIsBatch;}
-   virtual void SetBatchProcessing(bool start){ mIsBatch = start;};
+   virtual ManualPageID ManualPage() { return {}; }
+   virtual bool IsBatchProcessing() const { return mIsBatch; }
+   virtual void SetBatchProcessing(bool start) { mIsBatch = start; }
    
-   virtual bool Apply(const CommandContext & WXUNUSED(context) ) {return false;}; 
-   virtual bool Apply(); // redirects to the command context version.
+   virtual bool Apply(const CommandContext & WXUNUSED(context) ) { return false; }
 
    bool ShowInterface(wxWindow *parent, bool forceModal = false);
-   virtual void SetHostUI(EffectUIHostInterface * WXUNUSED(host)){;};
 
-   bool PopulateUI(wxWindow *parent);
    wxDialog *CreateUI(wxWindow *parent, AudacityCommand *client);
 
-   virtual bool GetAutomationParameters(wxString & parms);
-   virtual bool SetAutomationParameters(const wxString & parms);
+   bool SaveSettingsAsString(wxString & parms);
+   bool LoadSettingsFromString(const wxString & parms);
 
    bool DoAudacityCommand(wxWindow *parent, const CommandContext & context,bool shouldPrompt = true);
 
@@ -85,9 +78,9 @@ class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
    // Display a message box, using effect's (translated) name as the prefix
    // for the title.
    enum : long { DefaultMessageBoxStyle = wxOK | wxCENTRE };
-   int MessageBox(const wxString& message,
+   int MessageBox(const TranslatableString& message,
                   long style = DefaultMessageBoxStyle,
-                  const wxString& titleStr = wxString{});
+                  const TranslatableString& titleStr = {});
 
 //
 // protected virtual methods
@@ -109,7 +102,7 @@ class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
    virtual bool PromptUser(wxWindow *parent);
 
    // Check whether command should be skipped
-   // Typically this is only useful in automation, for example
+   // Typically this is only useful in macros, for example
    // detecting that zero noise reduction is to be done,
    // or that normalisation is being done without Dc bias shift
    // or amplitude modification
@@ -123,17 +116,22 @@ class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
    virtual bool TransferDataToWindow();
    virtual bool TransferDataFromWindow();
 
+   //! Visit settings, if defined.  false means no defined settings.
+   //! Default implementation returns false
+   virtual bool VisitSettings( SettingsVisitor & );
+   //! Visit settings, if defined.  false means no defined settings.
+   //! Default implementation returns false
+   virtual bool VisitSettings( ConstSettingsVisitor & );
+
 protected:
 
    ProgressDialog *mProgress; // Temporary pointer, NOT deleted in destructor.
    // UI
    wxDialog       *mUIDialog;
    wxWindow       *mUIParent;
-   int             mUIResultID;
 
 private:
    bool mIsBatch;
-   bool mUIDebug;
    bool mNeedsInit;
 };
 
@@ -144,7 +142,7 @@ class AUDACITY_DLL_API AudacityCommandDialog /* not final */ : public wxDialogWr
 public:
    // constructors and destructors
    AudacityCommandDialog(wxWindow * parent,
-                const wxString & title,
+                const TranslatableString & title,
                 AudacityCommand * pCommand,
                 int type = 0,
                 int flags = wxDEFAULT_DIALOG_STYLE,

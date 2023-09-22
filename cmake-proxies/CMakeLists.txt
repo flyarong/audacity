@@ -1,50 +1,21 @@
-#directory cmake-proxies
-set( LIB_SRC_DIRECTORY ${top_dir}/lib-src/ )
-
-#These are done in their actual directories, no need for a proxy.
-
-#Same idea, but not yet done/needed
-#add_subdirectory( "mod-null" )
-#add_subdirectory( "mod-nyq-bench" )
-#add_subdirectory( "mod-track-panel" )
-
-#These are all headers, nothing to build.
-#add_subdirectory( "ffmpeg" )
-#add_subdirectory( "lame" )
+# Required libraries
+#
+#       directory          option      symbol      req   chk   version
 
 
-# libexpat
-set( BUILD_shared OFF CACHE INTERNAL "" FORCE )
-add_subdirectory( "${LIB_SRC_DIRECTORY}expat" "${CMAKE_CURRENT_BINARY_DIR}/expat" EXCLUDE_FROM_ALL )
-set_target_properties(expat PROPERTIES OSX_ARCHITECTURES "")
+# Optional libraries
+#
+addlib( libvamp            vamp        VAMP        NO    YES   "vamp >= 2.5" "vamp-hostsdk >= 2.5" )
+addlib( lv2                lv2         LV2         NO    YES   "lilv-0 >= 0.24.6" "lv2 >= 1.16.0" "serd-0 >= 0.30.2" "sord-0 >= 0.16.4" "sratom-0 >= 0.6.4" "suil-0 >= 0.10.6" )
 
-add_subdirectory( "FileDialog" )
-#add_subdirectory( "help" )
-add_subdirectory( "libogg" )
-add_subdirectory( "libflac" )
-add_subdirectory( "libid3tag" )
-add_subdirectory( "libmad" )
-add_subdirectory( "libnyquist" )
-add_subdirectory( "libscorealign" )
-add_subdirectory( "libsndfile" )
-add_subdirectory( "libsoxr" )
-add_subdirectory( "libvamp" )
-add_subdirectory( "libvorbis" )
-#add_subdirectory( "locale" )
-add_subdirectory( "lv2" )
-add_subdirectory( "mod-script-pipe" )
-add_subdirectory( "${LIB_SRC_DIRECTORY}portaudio-v19" "${CMAKE_CURRENT_BINARY_DIR}/portaudio-v19" EXCLUDE_FROM_ALL )
+#addlib( portmidi           midi        MIDI        NO    YES   "PortMidi" )
 
-cmake_policy(PUSH)
-cmake_policy(VERSION 2.8.11)
-set(CMAKE_CACHEFILE_DIR ${CMAKE_BINARY_DIR})
-add_subdirectory( "${LIB_SRC_DIRECTORY}portmidi" "${CMAKE_CURRENT_BINARY_DIR}/portmidi" EXCLUDE_FROM_ALL )
-set_target_properties(portmidi-static PROPERTIES OSX_ARCHITECTURES "")
-cmake_policy(POP)
+if (NOT USE_MIDI AND
+   "EXPERIMENTAL_MIDI_OUT" IN_LIST EXPERIMENTAL_OPTIONS_LIST )
+   message(FATAL_ERROR "EXPERIMENTAL_MIDI_OUT requires USE_MIDI")
+endif ()
 
-add_subdirectory( "portmixer" )
-#add_subdirectory( "portburn" ) # not built
-add_subdirectory( "portsmf" )
-add_subdirectory( "sbsms" )
-add_subdirectory( "soundtouch" )
-add_subdirectory( "twolame" )
+addlib( portsmf            portsmf     PORTSMF     NO    YES   "portSMF >= 0.1" )
+addlib( libsbsms           sbsms       SBSMS       NO    YES   "sbsms >= 2.2.0" )
+addlib( soundtouch         soundtouch  SOUNDTOUCH  NO    YES   "soundtouch >= 1.7.1" )
+addlib( twolame            twolame     LIBTWOLAME  NO    YES   "twolame >= 0.3.13" )

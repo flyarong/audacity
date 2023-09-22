@@ -12,10 +12,13 @@ Paul Licameli split from TrackPanel.cpp
 #define __AUDACITY_LABEL_GLYPH_HANDLE__
 
 #include "LabelDefaultClickHandle.h"
-#include "../../../MemoryX.h"
+#include "Observer.h"
 
 class wxMouseState;
 class LabelTrack;
+struct LabelTrackEvent;
+class NotifyingSelectedRegion;
+class ZoomInfo;
 
 /// mEdge:
 /// 0 if not over a glyph,
@@ -27,22 +30,30 @@ class LabelTrack;
 ///   mMouseLabelLeft - index of any left label hit
 ///   mMouseLabelRight - index of any right label hit
 ///
-struct LabelTrackHit {
+struct LabelTrackHit
+{
+   LabelTrackHit( const std::shared_ptr<LabelTrack> &pLT );
+   ~LabelTrackHit();
+
    int mEdge{};
+   //This one is to distinguish ranged label from point label
+   int mMouseOverLabel{ -1 };        /// Keeps track of which (ranged) label the mouse is currently over.
    int mMouseOverLabelLeft{ -1 };    /// Keeps track of which left label the mouse is currently over.
    int mMouseOverLabelRight{ -1 };   /// Keeps track of which right label the mouse is currently over.
-   bool mbIsMoving {};
    bool mIsAdjustingLabel {};
+
+   std::shared_ptr<LabelTrack> mpLT {};
+
+   Observer::Subscription mSubscription;
+   void OnLabelPermuted( const LabelTrackEvent &e );
 };
 
 class LabelGlyphHandle final : public LabelDefaultClickHandle
 {
-   static HitTestPreview HitPreview(bool hitCenter);
-
 public:
    explicit LabelGlyphHandle
       (const std::shared_ptr<LabelTrack> &pLT,
-       const wxRect &rect, const LabelTrackHit &hit);
+       const wxRect &rect, const std::shared_ptr<LabelTrackHit> &pHit);
 
    LabelGlyphHandle &operator=(const LabelGlyphHandle&) = default;
    
@@ -53,7 +64,7 @@ public:
 
    virtual ~LabelGlyphHandle();
 
-   void Enter(bool forward) override;
+   void Enter(bool forward, AudacityProject *) override;
 
    Result Click
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
@@ -62,7 +73,7 @@ public:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release
@@ -73,14 +84,32 @@ public:
 
    bool StopsOnKeystroke() override { return true; }
 
-   LabelTrackHit mHit{};
+   std::shared_ptr<LabelTrackHit> mpHit{};
 
    static UIHandle::Result NeedChangeHighlight
       (const LabelGlyphHandle &oldState, const LabelGlyphHandle &newState);
 
 private:
+   void HandleGlyphClick
+      (LabelTrackHit &hit,
+       const wxMouseEvent & evt, const wxRect & r, const ZoomInfo &zoomInfo,
+       NotifyingSelectedRegion &newSel);
+   bool HandleGlyphDragRelease
+      (AudacityProject &project,
+       LabelTrackHit &hit,
+       const wxMouseEvent & evt, wxRect & r, const ZoomInfo &zoomInfo,
+       NotifyingSelectedRegion &newSel);
+
+   void MayAdjustLabel
+      ( LabelTrackHit &hit,
+        int iLabel, int iEdge, bool bAllowSwapping, double fNewTime);
+   void MayMoveLabel( int iLabel, int iEdge, double fNewTime);
+
    std::shared_ptr<LabelTrack> mpLT {};
    wxRect mRect {};
+
+   /// Displacement of mouse cursor from the centre being dragged.
+   int mxMouseDisplacement;
 };
 
 #endif

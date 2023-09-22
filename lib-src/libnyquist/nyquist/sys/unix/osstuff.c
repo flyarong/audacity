@@ -36,6 +36,8 @@
  *	advertised.
  * 28-OCT-05    Roger Dannenberg at CMU-SCS
  *      added directory listing functions
+ * 9-JUL-2020   Roger Dannenberg
+ *      added get-real-time lisp function
  */
 
 #include "switches.h"
@@ -44,6 +46,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 #include <sys/types.h>
 #include <dirent.h>
@@ -70,7 +73,9 @@ static int lposition;
 static int line_edit = TRUE;
 
 #ifndef READ_LINE
-#define typeahead_max 128
+// typeahead is high for humans but allows NyquistIDE to 
+// send envelope data and preferences
+#define typeahead_max 1024
 static char typeahead[typeahead_max];
 static int typeahead_tail = 0;
 static int typeahead_head = 0;
@@ -78,12 +83,19 @@ static char lbuf[LBSIZE];
 static int lpos[LBSIZE];
 #endif
 
+#if USE_RAND
+#if __APPLE__
+#else
+#include <time.h>
+#endif
+#endif
+
 static int echo_enabled = 1;
 
 /* forward declarations */
-FORWARD LOCAL void xflush();
-FORWARD LOCAL int xcheck();
-FORWARD LOCAL void hidden_msg();
+FORWARD LOCAL void xflush(void);
+FORWARD LOCAL int xcheck(void);
+FORWARD LOCAL void hidden_msg(void);
 
 /*==========================================================================*/
 /* control-c interrupt handling routines and variables. Uses B4.2 signal
@@ -94,13 +106,12 @@ FORWARD LOCAL void hidden_msg();
 #include	<signal.h>
 
 static int		ctc = FALSE;
-static void control_c(int x)	{ctc = TRUE;}
-void ctcinit()	{signal ( SIGINT, control_c );}
-static void ctcreset()	{signal ( SIGINT, control_c );}
+static void control_c(int x) {ctc = TRUE;}
+void ctcinit(void)           {signal ( SIGINT, control_c );}
+static void ctcreset(void)   {signal ( SIGINT, control_c );}
 
 
 /*==========================================================================*/
-
 
 const char os_pathchar = '/';
 const char os_sepchar = ':';
@@ -110,15 +121,33 @@ const char os_sepchar = ':';
 void osinit(const char *banner)
 {	
     printf("%s\n",banner);
+    if (max_sample_block_len < 64) {
+        printf("Warning: max_sample_block_len %d is small. Maybe you forgot"
+               " to reset it after debugging.\n", max_sample_block_len);
+    }
     /* start the random number generator. Older version was srand(1)
        seed of 1 makes the sequence repeatable. Random gives better
        pseudo randomness than does rand().
     */
 #if USE_RAND
-    srand(1);
+    // srand(1);
+#if __APPLE__
+    sranddev(); // initialize to a random seed
+#else
+    srand(time(NULL));
+#endif
 #endif
 
 #if USE_RANDOM
+#define USE_RANDOM something // see if compiler will tell us who
+    // set this first
+// USE_RANDOM is not supported, or at least the code should
+// be inspected carefully if USE_RANDOM is set. Things to look
+// for are: Is USE_RAND undefined to avoid conflicts? Should
+// the seed be initialized (as in sranddev() above under USE_RAND)?
+// Who uses random()? Nyquist uses random numbers in XLISP, in the
+// noise() function, in STK's Noise class, and probably other places.
+you must die here
     srandom(1);
 #endif
 
@@ -148,7 +177,8 @@ void oserror(const char *msg) {printf("error: %s\n",msg);}
 
 
 /* osaopen - open an ascii file */
-FILE *osaopen(name,mode) const char *name,*mode; {
+FILE *osaopen(const char *name, const char *mode)
+{
     FILE *fp = NULL;
     if (ok_to_open(name, mode))
         fp = fopen(name,mode);
@@ -221,7 +251,7 @@ int osbputc(ch,fp) int ch; FILE *fp; {return (putc(ch,fp));}
 
 #ifdef OLDEST_OSTGETC
 /* ostgetc - get a character from the terminal */
-int ostgetc()
+int ostgetc(void)
 {
     int ch;
     switch (ch = term_getchar()) {
@@ -277,7 +307,7 @@ int ostgetc()
 #else
 #if OLD_OSTGETC
 /* ostgetc - get a character from the terminal */
-int ostgetc()
+int ostgetc(void)
 {   int ch;
 
     for (;;) {
@@ -312,7 +342,7 @@ int readline_first = 1;
 
 extern int xldebug;
 
-int ostgetc()
+int ostgetc(void)
 {
    int rval;
 
@@ -348,7 +378,7 @@ int ostgetc()
 #else /* no readline */
 
 
-void end_of_line_edit()
+void end_of_line_edit(void)
 {
     line_edit = FALSE;
     if (tfp) {
@@ -359,7 +389,7 @@ void end_of_line_edit()
 }
 
 /* THIS IS THE "REAL" ostgetc(): */
-LOCAL int rawtchar()
+LOCAL int rawtchar(void)
 {
     int ch;
     if (typeahead_tail != typeahead_head) {
@@ -376,7 +406,7 @@ LOCAL int rawtchar()
     return ch;
 }
 
-int ostgetc()
+int ostgetc(void)
 {
 /*
  * NOTE: lbuf[] accumulates characters as they are typed
@@ -532,7 +562,7 @@ int ostgetc()
 
 /* ostputc - put a character to the terminal */
 void ostputc(int ch)
- {     
+{     
     oscheck();		/* check for control characters */
 
     /* output the character */
@@ -542,10 +572,10 @@ void ostputc(int ch)
     /* output the character to the transcript file */
     if (tfp) osaputc(ch,tfp);
     putchar(((char) ch));
- }
+}
  
 /* ostoutflush - flush output buffer */
-void ostoutflush()
+void ostoutflush(void)
 {
     if (tfp) fflush(tfp);
     fflush(stdout);
@@ -569,7 +599,7 @@ void osflush(void)
  *
  * This function assumes that '\016' has been received already.
  */
-LOCAL void hidden_msg()
+LOCAL void hidden_msg(void)
 {
 #define MSGBUF_MAX 64
     char msgbuf[MSGBUF_MAX];
@@ -651,7 +681,6 @@ void oscheck(void)
         }
     }
 
-    run_time++;
     // when compute-bound, run_time is incremented by 10000 in about 15s, so
     // that's about 700 Hz. We want to flush any output at about 2Hz, so 
     // we'll pick 400 as a round number.
@@ -672,14 +701,14 @@ void oscheck(void)
 }
 
 /* xflush - flush the input line buffer and start a new line */
-LOCAL void xflush()
+LOCAL void xflush(void)
 {
    osflush();
    ostputc('\n');
 }
 
 /* xsystem - execute a system command */
-LVAL xsystem()
+LVAL xsystem(void)
 {   /*LVAL strval;*/
     unsigned char *cmd = NULL;
     if (SAFE_NYQUIST) return NULL;
@@ -691,7 +720,7 @@ LVAL xsystem()
 
 
 /* xsetdir -- set current directory of the process */
-LVAL xsetdir()
+LVAL xsetdir(void)
 {
     char *dir = (char *)getstring(xlgastring());
     int result = -1;
@@ -723,13 +752,13 @@ LVAL xsetdir()
 }
 
 /* xget_temp_path -- get a path to create temp files */
-LVAL xget_temp_path()
+LVAL xget_temp_path(void)
 {
     return cvstring("/tmp/");
 }
 
 /* xget_user -- get a string identifying the user, for use in file names */
-LVAL xget_user()
+LVAL xget_user(void)
 {
     const char *user = getenv("USER");
     if (!user || !*user) {
@@ -741,12 +770,12 @@ LVAL xget_user()
 
 
 /* xechoenabled -- set/clear echo_enabled flag (unix only) */
-LVAL xechoenabled()
+LVAL xechoenabled(void)
 {
-	int flag = (xlgetarg() != NULL);
+    int flag = (xlgetarg() != NULL);
     xllastarg();
-	echo_enabled = flag;
-	return NULL;
+    echo_enabled = flag;
+    return NULL;
 }
 
 
@@ -774,7 +803,7 @@ int osdir_list_start(const char *path)
 
 
 /* osdir_list_next -- read the next entry from a directory */
-const char *osdir_list_next()
+const char *osdir_list_next(void)
 {
     if (osdir_list_status != OSDIR_LIST_STARTED) {
         return NULL;
@@ -790,7 +819,7 @@ const char *osdir_list_next()
 
 
 /* osdir_list_finish -- close an open directory */
-void osdir_list_finish()
+void osdir_list_finish(void)
 {
     if (osdir_list_status != OSDIR_LIST_READY) {
         closedir(osdir_dir);
@@ -800,18 +829,26 @@ void osdir_list_finish()
 
 
 /* xcheck -- return a character if one is present */
-LOCAL int xcheck()
+LOCAL int xcheck(void)
 {
     int ch = term_testchar();
     return ch;
 }
 
 /* xgetkey - get a key from the keyboard */
-LVAL xgetkey() {xllastarg(); return (cvfixnum((FIXTYPE)term_getchar()));}
+LVAL xgetkey(void) {xllastarg(); return (cvfixnum((FIXTYPE)term_getchar()));}
 
 /* ossymbols - enter os specific symbols */
 void ossymbols(void) {}
 
 /* xsetupconsole -- used to configure window in Win32 version */
-LVAL xsetupconsole() { return NIL; }
+LVAL xsetupconsole(void) { return NIL; }
 
+
+/* xgetrealtime - get current time in seconds */
+LVAL xgetrealtime(void)
+{
+    struct timeval te;
+    gettimeofday(&te, NULL); // get current time
+    return cvflonum((double) te.tv_sec + (te.tv_usec * 1e-6));
+}

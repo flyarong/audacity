@@ -14,16 +14,17 @@
 *//*******************************************************************/
 
 
-#include "../Audacity.h"
+
 #include "ExtImportPrefs.h"
 
 #include <wx/defs.h>
 #include <wx/listctrl.h>
 #include <wx/dnd.h>
 
-#include "../Prefs.h"
-#include "../ShuttleGui.h"
-#include "../widgets/ErrorDialog.h"
+#include "Prefs.h"
+#include "ShuttleGui.h"
+#include "Import.h"
+#include "AudacityMessageBox.h"
 #include "../widgets/Grid.h"
 
 #define EXTIMPORT_MIME_SUPPORT 0
@@ -59,20 +60,41 @@ END_EVENT_TABLE()
 ExtImportPrefs::ExtImportPrefs(wxWindow * parent, wxWindowID winid)
 /* i18n-hint:  Title of dialog governing "Extended", or "advanced,"
  * audio file import options */
-:   PrefsPanel(parent, winid, _("Extended Import")), RuleTable(NULL),
+:   PrefsPanel(parent, winid, XO("Extended Import")), RuleTable(NULL),
     PluginList(NULL), mCreateTable (false), mDragFocus (NULL),
     mFakeKeyEvent (false), mStopRecursiveSelection (false), last_selected (-1)
 {
    Populate();
-}
 
+   // See bug #2315 for discussion
+   // This should be reviewed and (possibly) removed after wx3.1.3.
+   Bind(wxEVT_SHOW, &ExtImportPrefs::OnShow, this);
+}
 ExtImportPrefs::~ExtImportPrefs()
 {
+}
+
+ComponentInterfaceSymbol ExtImportPrefs::GetSymbol() const
+{
+   return EXT_IMPORT_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString ExtImportPrefs::GetDescription() const
+{
+   return XO("Preferences for ExtImport");
+}
+
+ManualPageID ExtImportPrefs::HelpPageName()
+{
+   return "Extended_Import_Preferences";
 }
 
 /// Creates the dialog and its contents.
 void ExtImportPrefs::Populate()
 {
+   // Ensure Importer has current items
+   Importer::Get().ReadImportItems();
+
    //------------------------- Main section --------------------
    // Now construct the GUI itself.
    // Use 'eIsCreatingFromPrefs' so that the GUI is
@@ -87,10 +109,10 @@ void ExtImportPrefs::PopulateOrExchange(ShuttleGui & S)
    S.SetBorder(2);
    S.StartScroller();
 
-   S.TieCheckBox(_("A&ttempt to use filter in OpenFile dialog first"),
-         wxT("/ExtendedImport/OverrideExtendedImportByOpenFileDialogChoice"),
-         true);
-   S.StartStatic(_("Rules to choose import filters"), 1);
+   S.TieCheckBox(XXO("A&ttempt to use filter in OpenFile dialog first"),
+         {wxT("/ExtendedImport/OverrideExtendedImportByOpenFileDialogChoice"),
+          true});
+   S.StartStatic(XO("Rules to choose import filters"), 1);
    {
       S.SetSizerProportion(1);
       S.StartHorizontalLay (wxEXPAND, 1);
@@ -98,7 +120,7 @@ void ExtImportPrefs::PopulateOrExchange(ShuttleGui & S)
          bool fillRuleTable = false;
          if (RuleTable == NULL)
          {
-            RuleTable = safenew Grid(S.GetParent(),EIPRuleTable);
+            RuleTable = safenew Grid(FormatterContext::EmptyContext(), S.GetParent(),EIPRuleTable);
 
             RuleTable->SetColLabelSize(RuleTable->GetDefaultRowSize());
 #if EXTIMPORT_MIME_SUPPORT
@@ -130,16 +152,17 @@ void ExtImportPrefs::PopulateOrExchange(ShuttleGui & S)
             RuleTable->EnableDragCell (true);
             fillRuleTable = true;
          }
-         S.AddWindow(RuleTable, wxEXPAND | wxALL);
+         S.Position(wxEXPAND | wxALL)
+            .AddWindow(RuleTable);
 
-         PluginList = S.Id(EIPPluginList).AddListControl ();
+         PluginList = S.Id(EIPPluginList).AddListControl(
+            { { XO("Importer order"), wxLIST_FORMAT_LEFT,
+                wxLIST_AUTOSIZE_USEHEADER } },
+            wxLC_REPORT | wxLC_SINGLE_SEL
+         );
 
          if (fillRuleTable)
          {
-            PluginList->SetSingleStyle (wxLC_REPORT, true);
-            PluginList->SetSingleStyle (wxLC_SINGLE_SEL, true);
-            PluginList->InsertColumn (0, _("Importer order"));
-
             ExtImportPrefsDropTarget *dragtarget2 {};
             PluginList->SetDropTarget (
                dragtarget2 = safenew ExtImportPrefsDropTarget(
@@ -147,8 +170,6 @@ void ExtImportPrefs::PopulateOrExchange(ShuttleGui & S)
                )
             );
             dragtarget2->SetPrefs (this);
-
-            PluginList->SetColumnWidth (0, wxLIST_AUTOSIZE_USEHEADER);
 
             auto &items = Importer::Get().GetImportItems();
             {
@@ -166,19 +187,19 @@ void ExtImportPrefs::PopulateOrExchange(ShuttleGui & S)
       S.EndHorizontalLay();
       S.StartHorizontalLay (wxSHRINK, 0);
       {
-          MoveRuleUp = S.Id (EIPMoveRuleUp).AddButton (_("Move rule &up"));
-          MoveRuleDown = S.Id (EIPMoveRuleDown).AddButton
-                (_("Move rule &down"));
-          MoveFilterUp = S.Id (EIPMoveFilterUp).AddButton
-                (_("Move f&ilter up"));
-          MoveFilterDown = S.Id (EIPMoveFilterDown).AddButton
-                (_("Move &filter down"));
+          MoveRuleUp = S.Id (EIPMoveRuleUp).AddButton(XXO("Move rule &up"));
+          MoveRuleDown = S.Id (EIPMoveRuleDown).AddButton(
+             XXO("Move rule &down"));
+          MoveFilterUp = S.Id (EIPMoveFilterUp).AddButton(
+             XXO("Move f&ilter up"));
+          MoveFilterDown = S.Id (EIPMoveFilterDown).AddButton(
+             XXO("Move &filter down"));
       }
       S.EndHorizontalLay();
       S.StartHorizontalLay (wxSHRINK, 0);
       {
-          AddRule = S.Id (EIPAddRule).AddButton (_("&Add new rule"));
-          DelRule = S.Id (EIPDelRule).AddButton (_("De&lete selected rule"));
+          AddRule = S.Id (EIPAddRule).AddButton(XXO("&Add new rule"));
+          DelRule = S.Id (EIPDelRule).AddButton(XXO("De&lete selected rule"));
       }
       S.EndHorizontalLay();
    }
@@ -195,7 +216,21 @@ bool ExtImportPrefs::Commit()
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
 
+   Importer::Get().WriteImportItems();
+
    return true;
+}
+
+// See bug #2315 for discussion. This should be reviewed
+// and (possibly) removed after wx3.1.3.
+void ExtImportPrefs::OnShow(wxShowEvent &event)
+{
+   event.Skip();
+   if (event.IsShown())
+   {
+      RuleTable->Refresh();
+      PluginList->Refresh();
+   }
 }
 
 void ExtImportPrefs::OnPluginKeyDown(wxListEvent& event)
@@ -296,7 +331,8 @@ bool ExtImportPrefs::DoOnPluginKeyDown (int code)
    if (mFakeKeyEvent)
    {
       PluginList->SetItemState (itemIndex, 0, wxLIST_STATE_SELECTED);
-      PluginList->SetItemState (itemIndex2, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+      PluginList->SetItemState (itemIndex2, wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
+         wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
    }
    int fcount = item->filter_objects.size();
    if (item->divider >= fcount)
@@ -430,7 +466,7 @@ void ExtImportPrefs::DoOnRuleTableSelect (int toprow)
 {
    auto &items = Importer::Get().GetImportItems();
 
-   if (toprow < 0 || toprow > (int)items.size())
+   if (toprow < 0 || toprow >= (int)items.size())
    {
       return;
    }
@@ -452,7 +488,7 @@ void ExtImportPrefs::DoOnRuleTableSelect (int toprow)
       if (item->filter_objects[i] != NULL)
       {
          PluginList->InsertItem (i + shift,
-               item->filter_objects[i]->GetPluginFormatDescription());
+               item->filter_objects[i]->GetPluginFormatDescription().Translation());
       }
       else
       {
@@ -468,8 +504,8 @@ void ExtImportPrefs::DoOnRuleTableSelect (int toprow)
    wxListItem info;
    info.SetId (0);
    info.SetColumn (0);
-   info.SetStateMask (wxLIST_STATE_SELECTED);
-   info.SetState (wxLIST_STATE_SELECTED);
+   info.SetStateMask (wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
+   info.SetState (wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
    info.SetMask (wxLIST_MASK_STATE);
    PluginList->SetItem (info);
    PluginList->SetColumnWidth (0, wxLIST_AUTOSIZE);
@@ -509,12 +545,14 @@ void ExtImportPrefs::OnRuleTableEdit (wxGridEvent& event)
       {
          if (!askedAboutSpaces)
          {
-            fixSpaces = AudacityMessageBox(_(
+            fixSpaces = AudacityMessageBox(
+               XO(
 "There are space characters (spaces, newlines, tabs or linefeeds) in one of \
 the items. They are likely to break the pattern matching. Unless you know \
 what you are doing, it is recommended to trim spaces. Do you want \
-Audacity to trim spaces for you?"
-            ),_("Spaces detected"), wxYES_NO);
+Audacity to trim spaces for you?"),
+               XO("Spaces detected"),
+               wxYES_NO);
             askedAboutSpaces = true;
          }
          if (fixSpaces != wxYES)
@@ -600,14 +638,20 @@ void ExtImportPrefs::OnDelRule(wxCommandEvent& WXUNUSED(event))
       return;
    auto &items = Importer::Get().GetImportItems();
 
-   int msgres = AudacityMessageBox (_("Do you really want to delete selected rule?"),
-      _("Rule deletion confirmation"), wxYES_NO, RuleTable);
+   int msgres = AudacityMessageBox (
+      XO("Do you really want to delete selected rule?"),
+      XO("Rule deletion confirmation"),
+      wxYES_NO,
+      RuleTable);
    // Yes or no, there is no third!
    if (msgres != wxYES)
       return;
 
-   RuleTable->DeleteRows (last_selected);
+   PluginList->DeleteAllItems();
    items.erase (items.begin() + last_selected);
+   DoOnRuleTableSelect (last_selected);
+   // This will change last_selected
+   RuleTable->DeleteRows (last_selected);
    RuleTable->AutoSizeColumns ();
    if (last_selected >= RuleTable->GetNumberRows ())
       last_selected = RuleTable->GetNumberRows () - 1;
@@ -672,11 +716,6 @@ void ExtImportPrefs::OnRuleTableCellClick (wxGridEvent& event)
    }
 
    event.Skip();
-}
-
-wxString ExtImportPrefs::HelpPageName()
-{
-   return "Extended_Import_Preferences";
 }
 
 ExtImportPrefsDropTarget::ExtImportPrefsDropTarget(wxDataObject *dataObject)
@@ -811,8 +850,15 @@ void ExtImportPrefsDropTarget::OnLeave()
 {
 }
 
-PrefsPanel *ExtImportPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew ExtImportPrefs(parent, winid);
+namespace{
+PrefsPanel::Registration sAttachment{ "ExtImport",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew ExtImportPrefs(parent, winid);
+   },
+   false,
+   // Place as a lower level of the tree of pages:
+   { "ImportExport" }
+};
 }

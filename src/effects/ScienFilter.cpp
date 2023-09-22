@@ -31,12 +31,11 @@
 a graph for EffectScienFilter.
 
 *//*******************************************************************/
-
-#include "../Audacity.h"
 #include "ScienFilter.h"
+#include "EffectEditor.h"
+#include "LoadEffects.h"
 
 #include <math.h>
-#include <float.h>
 
 #include <wx/setup.h> // for wxUSE_* macros
 
@@ -44,26 +43,26 @@ a graph for EffectScienFilter.
 #include <wx/choice.h>
 #include <wx/dcclient.h>
 #include <wx/dcmemory.h>
-#include <wx/intl.h>
 #include <wx/settings.h>
 #include <wx/slider.h>
 #include <wx/stattext.h>
 #include <wx/utils.h>
 #include <wx/valgen.h>
 
-#include "../AColor.h"
-#include "../AllThemeResources.h"
-#include "../PlatformCompatibility.h"
-#include "../Prefs.h"
-#include "../Project.h"
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
-#include "../Theme.h"
-#include "../WaveTrack.h"
+#include "AColor.h"
+#include "AllThemeResources.h"
+#include "PlatformCompatibility.h"
+#include "Prefs.h"
+#include "Project.h"
+#include "ShuttleGui.h"
+#include "Theme.h"
+#include "WaveTrack.h"
 #include "../widgets/valnum.h"
-#include "../widgets/ErrorDialog.h"
-#include "../widgets/Ruler.h"
-#include "../widgets/WindowAccessible.h"
+#include "AudacityMessageBox.h"
+#include "../widgets/RulerPanel.h"
+#include "../widgets/IntFormat.h"
+#include "../widgets/LinearDBFormat.h"
+#include "WindowAccessible.h"
 
 #if !defined(M_PI)
 #define PI = 3.1415926535897932384626433832795
@@ -85,15 +84,7 @@ enum
    ID_StopbandRipple
 };
 
-enum kTypes
-{
-   kButterworth,
-   kChebyshevTypeI,
-   kChebyshevTypeII,
-   nTypes
-};
-
-static const EnumValueSymbol kTypeStrings[nTypes] =
+const EnumValueSymbol EffectScienFilter::kTypeStrings[nTypes] =
 {
    /*i18n-hint: Butterworth is the name of the person after whom the filter type is named.*/
    { XO("Butterworth") },
@@ -103,49 +94,41 @@ static const EnumValueSymbol kTypeStrings[nTypes] =
    { XO("Chebyshev Type II") }
 };
 
-enum kSubTypes
-{
-   kLowPass,
-   kHighPass,
-   nSubTypes
-};
-
-static const EnumValueSymbol kSubTypeStrings[nSubTypes] =
+const EnumValueSymbol EffectScienFilter::kSubTypeStrings[nSubTypes] =
 {
    // These are acceptable dual purpose internal/visible names
    { XO("Lowpass") },
    { XO("Highpass") }
 };
 
-// Define keys, defaults, minimums, and maximums for the effect parameters
-//
-//     Name       Type     Key                     Def            Min   Max               Scale
-Param( Type,      int,     wxT("FilterType"),       kButterworth,  0,    nTypes - 1,    1  );
-Param( Subtype,   int,     wxT("FilterSubtype"),    kLowPass,      0,    nSubTypes - 1, 1  );
-Param( Order,     int,     wxT("Order"),            1,             1,    10,               1  );
-Param( Cutoff,    float,   wxT("Cutoff"),           1000.0,        1.0,  FLT_MAX,          1  );
-Param( Passband,  float,   wxT("PassbandRipple"),   1.0,           0.0,  100.0,            1  );
-Param( Stopband,  float,   wxT("StopbandRipple"),   30.0,          0.0,  100.0,            1  );
-
-static const double s_fChebyCoeffs[MAX_Order][MAX_Order + 1] =
+const EffectParameterMethods& EffectScienFilter::Parameters() const
 {
-   // For Chebyshev polynomials of the first kind (see http://en.wikipedia.org/wiki/Chebyshev_polynomial)
-   // Coeffs are in the order 0, 1, 2...9
-   { 0,  1},        // order 1
-   {-1,  0,   2},   // order 2 etc.
-   { 0, -3,   0,    4},
-   { 1,  0,  -8,    0,    8},
-   { 0,  5,   0,  -20,    0,   16},
-   {-1,  0,  18,    0,  -48,    0,   32},
-   { 0, -7,   0,   56,    0, -112,    0,   64},
-   { 1,  0, -32,    0,  160,    0, -256,    0,  128},
-   { 0,  9,   0, -120,    0,  432,    0, -576,    0,   256},
-   {-1,  0,  50,    0, -400,    0, 1120,    0, -1280,    0, 512}
-};
+   static CapturedParameters<EffectScienFilter,
+      Type, Subtype, Order, Cutoff, Passband, Stopband
+   > parameters{
+      [](EffectScienFilter &, EffectSettings &, EffectScienFilter &e,
+         bool updating){
+         if (updating) {
+            e.mOrderIndex = e.mOrder - 1;
+            e.CalcFilter();
+         }
+         return true;
+      },
+   };
+   return parameters;
+}
 
 //----------------------------------------------------------------------------
 // EffectScienFilter
 //----------------------------------------------------------------------------
+
+const ComponentInterfaceSymbol EffectScienFilter::Symbol
+{ XO("Classic Filters") };
+
+#ifdef EXPERIMENTAL_SCIENCE_FILTERS
+// true argument means don't automatically enable this effect
+namespace{ BuiltinEffectsModule::Registration< EffectScienFilter > reg( true ); }
+#endif
 
 BEGIN_EVENT_TABLE(EffectScienFilter, wxEvtHandler)
    EVT_SIZE(EffectScienFilter::OnSize)
@@ -161,15 +144,8 @@ BEGIN_EVENT_TABLE(EffectScienFilter, wxEvtHandler)
 END_EVENT_TABLE()
 
 EffectScienFilter::EffectScienFilter()
-: mpBiquad{ size_t( MAX_Order / 2 ), true }
 {
-   mOrder = DEF_Order;
-   mFilterType = DEF_Type;
-   mFilterSubtype = DEF_Subtype;
-   mCutoff = DEF_Cutoff;
-   mRipple = DEF_Passband;
-   mStopbandRipple = DEF_Stopband;
-
+   Parameters().Reset(*this);
    SetLinearEffectFlag(true);
 
    mOrderIndex = mOrder - 1;
@@ -187,193 +163,101 @@ EffectScienFilter::~EffectScienFilter()
 
 // ComponentInterface implementation
 
-ComponentInterfaceSymbol EffectScienFilter::GetSymbol()
+ComponentInterfaceSymbol EffectScienFilter::GetSymbol() const
 {
-   return CLASSICFILTERS_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectScienFilter::GetDescription()
+TranslatableString EffectScienFilter::GetDescription() const
 {
-   return _("Performs IIR filtering that emulates analog filters");
+   /* i18n-hint: "infinite impulse response" */
+   return XO("Performs IIR filtering that emulates analog filters");
 }
 
-wxString EffectScienFilter::ManualPage()
+ManualPageID EffectScienFilter::ManualPage() const
 {
-   return wxT("Classic_Filters");
+   return L"Classic_Filters";
 }
 
 
 // EffectDefinitionInterface implementation
 
-EffectType EffectScienFilter::GetType()
+EffectType EffectScienFilter::GetType() const
 {
    return EffectTypeProcess;
 }
 
-// EffectClientInterface implementation
-
-unsigned EffectScienFilter::GetAudioInCount()
+unsigned EffectScienFilter::GetAudioInCount() const
 {
    return 1;
 }
 
-unsigned EffectScienFilter::GetAudioOutCount()
+unsigned EffectScienFilter::GetAudioOutCount() const
 {
    return 1;
 }
 
-bool EffectScienFilter::ProcessInitialize(sampleCount WXUNUSED(totalLen), ChannelNames WXUNUSED(chanMap))
+bool EffectScienFilter::ProcessInitialize(
+   EffectSettings &, double, ChannelNames chanMap)
 {
    for (int iPair = 0; iPair < (mOrder + 1) / 2; iPair++)
       mpBiquad[iPair].Reset();
-
    return true;
 }
 
-size_t EffectScienFilter::ProcessBlock(float **inBlock, float **outBlock, size_t blockLen)
+size_t EffectScienFilter::ProcessBlock(EffectSettings &,
+   const float *const *inBlock, float *const *outBlock, size_t blockLen)
 {
-   float *ibuf = inBlock[0];
+   const float *ibuf = inBlock[0];
    for (int iPair = 0; iPair < (mOrder + 1) / 2; iPair++)
    {
-      mpBiquad[iPair].pfIn = ibuf;
-      mpBiquad[iPair].pfOut = outBlock[0];
-      mpBiquad[iPair].Process(blockLen);
+      mpBiquad[iPair].Process(ibuf, outBlock[0], blockLen);
       ibuf = outBlock[0];
    }
 
    return blockLen;
 }
-bool EffectScienFilter::DefineParams( ShuttleParams & S ){
-   S.SHUTTLE_ENUM_PARAM( mFilterType, Type, kTypeStrings, nTypes );
-   S.SHUTTLE_ENUM_PARAM( mFilterSubtype, Subtype, kSubTypeStrings, nSubTypes );
-   S.SHUTTLE_PARAM( mOrder, Order );
-   S.SHUTTLE_PARAM( mCutoff, Cutoff );
-   S.SHUTTLE_PARAM( mRipple, Passband );
-   S.SHUTTLE_PARAM( mStopbandRipple, Stopband );
-   return true;
-}
-
-bool EffectScienFilter::GetAutomationParameters(CommandParameters & parms)
-{
-   parms.Write(KEY_Type, kTypeStrings[mFilterType].Internal());
-   parms.Write(KEY_Subtype, kSubTypeStrings[mFilterSubtype].Internal());
-   parms.Write(KEY_Order, mOrder);
-   parms.WriteFloat(KEY_Cutoff, mCutoff);
-   parms.WriteFloat(KEY_Passband, mRipple);
-   parms.WriteFloat(KEY_Stopband, mStopbandRipple);
-
-   return true;
-}
-
-bool EffectScienFilter::SetAutomationParameters(CommandParameters & parms)
-{
-   ReadAndVerifyEnum(Type, kTypeStrings, nTypes);
-   ReadAndVerifyEnum(Subtype, kSubTypeStrings, nSubTypes);
-   ReadAndVerifyInt(Order);
-   ReadAndVerifyFloat(Cutoff);
-   ReadAndVerifyFloat(Passband);
-   ReadAndVerifyFloat(Stopband);
-
-   mFilterType = Type;
-   mFilterSubtype = Subtype;
-   mOrder = Order;
-   mCutoff = Cutoff;
-   mRipple = Passband;
-   mStopbandRipple = Stopband;
-
-   mOrderIndex = mOrder - 1;
-
-   CalcFilter();
-
-   return true;
-}
 
 // Effect implementation
-
-bool EffectScienFilter::Startup()
-{
-   wxString base = wxT("/SciFilter/");
-
-   // Migrate settings from 2.1.0 or before
-
-   // Already migrated, so bail
-   if (gPrefs->Exists(base + wxT("Migrated")))
-   {
-      return true;
-   }
-
-   // Load the old "current" settings
-   if (gPrefs->Exists(base))
-   {
-	   double dTemp;
-      gPrefs->Read(base + wxT("Order"), &mOrder, 1);
-      mOrder = wxMax (1, mOrder);
-      mOrder = wxMin (MAX_Order, mOrder);
-      gPrefs->Read(base + wxT("FilterType"), &mFilterType, 0);
-      mFilterType = wxMax (0, mFilterType);
-      mFilterType = wxMin (2, mFilterType);
-      gPrefs->Read(base + wxT("FilterSubtype"), &mFilterSubtype, 0);
-      mFilterSubtype = wxMax (0, mFilterSubtype);
-      mFilterSubtype = wxMin (1, mFilterSubtype);
-      gPrefs->Read(base + wxT("Cutoff"), &dTemp, 1000.0);
-      mCutoff = (float)dTemp;
-      mCutoff = wxMax (1, mCutoff);
-      mCutoff = wxMin (100000, mCutoff);
-      gPrefs->Read(base + wxT("Ripple"), &dTemp, 1.0);
-      mRipple = dTemp;
-      mRipple = wxMax (0, mRipple);
-      mRipple = wxMin (100, mRipple);
-      gPrefs->Read(base + wxT("StopbandRipple"), &dTemp, 30.0);
-      mStopbandRipple = dTemp;
-      mStopbandRipple = wxMax (0, mStopbandRipple);
-      mStopbandRipple = wxMin (100, mStopbandRipple);
-
-      SaveUserPreset(GetCurrentSettingsGroup());
-
-      // Do not migrate again
-      gPrefs->Write(base + wxT("Migrated"), true);
-      gPrefs->Flush();
-   }
-
-   return true;
-}
 
 bool EffectScienFilter::Init()
 {
    int selcount = 0;
    double rate = 0.0;
 
-   auto trackRange = inputTracks()->Selected< const WaveTrack >();
+   auto trackRange = inputTracks()->Selected<const WaveTrack>();
 
    {
       auto t = *trackRange.begin();
-      mNyquist = (t ? t->GetRate() : GetActiveProject()->GetRate()) / 2.0;
+      mNyquist =
+         (t
+            ? t->GetRate()
+            : mProjectRate)
+         / 2.0;
    }
 
-   for (auto t : trackRange)
-   {
+   for (auto t : trackRange) {
       if (selcount == 0)
-      {
          rate = t->GetRate();
-      }
-      else
-      {
-         if (t->GetRate() != rate)
-         {
-            Effect::MessageBox(_("To apply a filter, all selected tracks must have the same sample rate."));
+      else {
+         if (t->GetRate() != rate) {
+            EffectUIServices::DoMessageBox(*this,
+               XO(
+"To apply a filter, all selected tracks must have the same sample rate.") );
             return false;
          }
       }
-      selcount++;
+      ++selcount;
    }
 
    return true;
 }
 
-void EffectScienFilter::PopulateOrExchange(ShuttleGui & S)
+std::unique_ptr<EffectEditor> EffectScienFilter::PopulateOrExchange(
+   ShuttleGui & S, EffectInstance &, EffectSettingsAccess &,
+   const EffectOutputs *)
 {
-   wxWindow *const parent = S.GetParent();
-
+   mUIParent = S.GetParent();
    S.AddSpace(5);
    S.SetSizerProportion(1);
    S.StartMultiColumn(3, wxEXPAND);
@@ -388,50 +272,54 @@ void EffectScienFilter::PopulateOrExchange(ShuttleGui & S)
       S.StartVerticalLay();
       {
          mdBRuler = safenew RulerPanel(
-            parent, wxID_ANY, wxVERTICAL,
+            S.GetParent(), wxID_ANY, wxVERTICAL,
             wxSize{ 100, 100 }, // Ruler can't handle small sizes
             RulerPanel::Range{ 30.0, -120.0 },
-            Ruler::LinearDBFormat,
-            _("dB"),
+            LinearDBFormat::Instance(),
+            XO("dB"),
             RulerPanel::Options{}
                .LabelEdges(true)
          );
 
          S.SetBorder(1);
          S.AddSpace(1, 1);
-         S.Prop(1);
-         S.AddWindow(mdBRuler, wxALIGN_RIGHT | wxTOP);
+         S.Prop(1)
+            .Position(wxALIGN_RIGHT | wxTOP)
+            .AddWindow(mdBRuler);
          S.AddSpace(1, 1);
       }
       S.EndVerticalLay();
 
       mPanel = safenew EffectScienFilterPanel(
-         parent, wxID_ANY,
+         S.GetParent(), wxID_ANY,
          this, mLoFreq, mNyquist
       );
 
       S.SetBorder(5);
-      S.Prop(1);
-      S.AddWindow(mPanel, wxEXPAND | wxRIGHT);
-      S.SetSizeHints(-1, -1);
+      S.Prop(1)
+         .Position(wxEXPAND | wxRIGHT)
+         .MinSize( { -1, -1 } )
+         .AddWindow(mPanel);
 
       S.StartVerticalLay();
       {
-         S.AddVariableText(_("+ dB"), false, wxCENTER);
-         S.SetStyle(wxSL_VERTICAL | wxSL_INVERSE);
-         mdBMaxSlider = S.Id(ID_dBMax).AddSlider( {}, 10, 20, 0);
+         S.AddVariableText(XO("+ dB"), false, wxCENTER);
+         mdBMaxSlider = S.Id(ID_dBMax)
+            .Name(XO("Max dB"))
+            .Style(wxSL_VERTICAL | wxSL_INVERSE)
+            .AddSlider( {}, 10, 20, 0);
 #if wxUSE_ACCESSIBILITY
-         mdBMaxSlider->SetName(_("Max dB"));
-         mdBMaxSlider->SetAccessible(safenew SliderAx(mdBMaxSlider, _("%d dB")));
+         mdBMaxSlider->SetAccessible(safenew SliderAx(mdBMaxSlider, XO("%d dB")));
+#endif
+         mdBMinSlider = S.Id(ID_dBMin)
+            .Name(XO("Min dB"))
+            .Style(wxSL_VERTICAL | wxSL_INVERSE)
+            .AddSlider( {}, -10, -10, -120);
+#if wxUSE_ACCESSIBILITY
+         mdBMinSlider->SetAccessible(safenew SliderAx(mdBMinSlider, XO("%d dB")));
 #endif
 
-         S.SetStyle(wxSL_VERTICAL | wxSL_INVERSE);
-         mdBMinSlider = S.Id(ID_dBMin).AddSlider( {}, -10, -10, -120);
-         S.AddVariableText(_("- dB"), false, wxCENTER);
-#if wxUSE_ACCESSIBILITY
-         mdBMinSlider->SetName(_("Min dB"));
-         mdBMinSlider->SetAccessible(safenew SliderAx(mdBMinSlider, _("%d dB")));
-#endif
+         S.AddVariableText(XO("- dB"), false, wxCENTER);
       }
       S.EndVerticalLay();
 
@@ -441,20 +329,21 @@ void EffectScienFilter::PopulateOrExchange(ShuttleGui & S)
 
       S.AddSpace(1, 1);
 
-      mfreqRuler  = safenew RulerPanel(
-         parent, wxID_ANY, wxHORIZONTAL,
+      mfreqRuler = safenew RulerPanel(
+         S.GetParent(), wxID_ANY, wxHORIZONTAL,
          wxSize{ 100, 100 }, // Ruler can't handle small sizes
          RulerPanel::Range{ mLoFreq, mNyquist },
-         Ruler::IntFormat,
-         wxT(""),
+         IntFormat::Instance(),
+         {},
          RulerPanel::Options{}
             .Log(true)
             .Flip(true)
             .LabelEdges(true)
       );
 
-      S.Prop(1);
-      S.AddWindow(mfreqRuler, wxEXPAND | wxALIGN_LEFT | wxRIGHT);
+      S.Prop(1)
+         .Position(wxEXPAND | wxALIGN_LEFT | wxRIGHT)
+         .AddWindow(mfreqRuler);
 
       S.AddSpace(1, 1);
 
@@ -468,71 +357,79 @@ void EffectScienFilter::PopulateOrExchange(ShuttleGui & S)
       {
          wxASSERT(nTypes == WXSIZEOF(kTypeStrings));
 
-         auto typeChoices = LocalizedStrings(kTypeStrings, nTypes);
          mFilterTypeCtl = S.Id(ID_Type)
-            .AddChoice(_("&Filter Type:"), typeChoices);
-         mFilterTypeCtl->SetValidator(wxGenericValidator(&mFilterType));
-         S.SetSizeHints(-1, -1);
+            .Focus()
+            .Validator<wxGenericValidator>(&mFilterType)
+            .MinSize( { -1, -1 } )
+            .AddChoice(XXO("&Filter Type:"),
+               Msgids(kTypeStrings, nTypes)
+            );
 
-         wxArrayStringEx orders;
-         for (int i = 1; i <= 10; i++)
-         {
-            orders.push_back(wxString::Format(wxT("%d"), i));
-         }
-         /*i18n-hint: 'Order' means the complexity of the filter, and is a number between 1 and 10.*/
-         mFilterOrderCtl = S.Id(ID_Order).AddChoice(_("O&rder:"), orders);
-         mFilterOrderCtl->SetValidator(wxGenericValidator(&mOrderIndex));
-         S.SetSizeHints(-1, -1);
+         mFilterOrderCtl = S.Id(ID_Order)
+            .Validator<wxGenericValidator>(&mOrderIndex)
+            .MinSize( { -1, -1 } )
+            /*i18n-hint: 'Order' means the complexity of the filter, and is a number between 1 and 10.*/
+            .AddChoice(XXO("O&rder:"),
+               []{
+                  TranslatableStrings orders;
+                  for (int i = 1; i <= 10; i++)
+                     orders.emplace_back( Verbatim("%d").Format( i ) );
+                  return orders;
+               }()
+            );
          S.AddSpace(1, 1);
 
-         FloatingPointValidator<float> vldRipple(1, &mRipple);
-         vldRipple.SetRange(MIN_Passband, MAX_Passband);
-         
-         mRippleCtlP = S.AddVariableText(_("&Passband Ripple:"), false, wxALL | wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-         mRippleCtl = S.Id(ID_Ripple).AddTextBox( {}, wxT(""), 10);
-         mRippleCtl->SetName(_("Passband Ripple (dB)"));
-         mRippleCtl->SetValidator(vldRipple);
-         mRippleCtlU = S.AddVariableText(_("dB"), false, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+         mRippleCtlP = S.AddVariableText( XO("&Passband Ripple:"),
+            false, wxALL | wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+         mRippleCtl = S.Id(ID_Ripple)
+            .Name(XO("Passband Ripple (dB)"))
+            .Validator<FloatingPointValidator<float>>(
+               1, &mRipple, NumValidatorStyle::DEFAULT,
+               Passband.min, Passband.max)
+            .AddTextBox( {}, L"", 10);
+         mRippleCtlU = S.AddVariableText(XO("dB"),
+            false, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
-         wxASSERT(nSubTypes == WXSIZEOF(kSubTypeStrings));
-
-         auto subTypeChoices = LocalizedStrings(kSubTypeStrings, nSubTypes);
          mFilterSubTypeCtl = S.Id(ID_SubType)
-            .AddChoice(_("&Subtype:"), subTypeChoices);
-         mFilterSubTypeCtl->SetValidator(wxGenericValidator(&mFilterSubtype));
-         S.SetSizeHints(-1, -1);
-      
-         FloatingPointValidator<float> vldCutoff(1, &mCutoff);
-         vldCutoff.SetRange(MIN_Cutoff, mNyquist - 1);
-         
-         mCutoffCtl = S.Id(ID_Cutoff).AddTextBox(_("C&utoff:"), wxT(""), 10);
-         mCutoffCtl->SetName(_("Cutoff (Hz)"));
-         mCutoffCtl->SetValidator(vldCutoff);
-         S.AddUnits(_("Hz"));
+            .Validator<wxGenericValidator>(&mFilterSubtype)
+            .MinSize( { -1, -1 } )
+            .AddChoice(XXO("&Subtype:"),
+               Msgids(kSubTypeStrings, nSubTypes)
+            );
 
-         FloatingPointValidator<float> vldStopbandRipple(1, &mStopbandRipple);
-         vldStopbandRipple.SetRange(MIN_Stopband, MAX_Stopband);
-         
-         mStopbandRippleCtlP = S.AddVariableText(_("Minimum S&topband Attenuation:"), false, wxALL | wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-         mStopbandRippleCtl = S.Id(ID_StopbandRipple).AddTextBox( {}, wxT(""), 10);
-         mStopbandRippleCtl->SetName(_("Minimum S&topband Attenuation (dB)"));
-         mStopbandRippleCtl->SetValidator(vldStopbandRipple);
-         mStopbandRippleCtlU = S.AddVariableText(_("dB"), false, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+         mCutoffCtl = S.Id(ID_Cutoff)
+            .Name(XO("Cutoff (Hz)"))
+            .Validator<FloatingPointValidator<float>>(
+               1, &mCutoff, NumValidatorStyle::DEFAULT,
+               Cutoff.min, mNyquist - 1)
+            .AddTextBox(XXO("C&utoff:"), L"", 10);
+         S.AddUnits(XO("Hz"));
+
+         mStopbandRippleCtlP =
+            S.AddVariableText(XO("Minimum S&topband Attenuation:"),
+            false, wxALL | wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+         mStopbandRippleCtl = S.Id(ID_StopbandRipple)
+            .Name(XO("Minimum S&topband Attenuation (dB)"))
+            .Validator<FloatingPointValidator<float>>(
+               1, &mStopbandRipple, NumValidatorStyle::DEFAULT,
+               Stopband.min, Stopband.max)
+            .AddTextBox( {}, L"", 10);
+         mStopbandRippleCtlU =
+            S.AddVariableText(XO("dB"),
+            false, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
       }
       S.EndMultiColumn();
       S.AddSpace(1, 1);
    }
    S.EndMultiColumn();
 
-   mFilterTypeCtl->SetFocus();
-
-   return;
+   return nullptr;
 }
 
 //
 // Populate the window with relevant variables
 //
-bool EffectScienFilter::TransferDataToWindow()
+bool EffectScienFilter::TransferDataToWindow(const EffectSettings &)
 {
    mOrderIndex = mOrder - 1;
 
@@ -552,7 +449,7 @@ bool EffectScienFilter::TransferDataToWindow()
    return TransferGraphLimitsFromWindow();
 }
 
-bool EffectScienFilter::TransferDataFromWindow()
+bool EffectScienFilter::TransferDataFromWindow(EffectSettings &)
 {
    if (!mUIParent->Validate() || !mUIParent->TransferDataFromWindow())
    {
@@ -617,230 +514,20 @@ bool EffectScienFilter::TransferGraphLimitsFromWindow()
    return true;
 }
 
-bool EffectScienFilter::CalcFilter()
+void EffectScienFilter::CalcFilter()
 {
-   // Set up the coefficients in all the biquads
-   float fNorm = mCutoff / mNyquist;
-   if (fNorm >= 0.9999)
-      fNorm = 0.9999F;
-   float fC = tan (PI * fNorm / 2);
-   float fDCPoleDistSqr = 1.0F;
-   float fZPoleX, fZPoleY;
-   float fZZeroX, fZZeroY;
-   float beta = cos (fNorm*PI);
    switch (mFilterType)
    {
-   case kButterworth:     // Butterworth
-      if ((mOrder & 1) == 0)
-      {
-         // Even order
-         for (int iPair = 0; iPair < mOrder/2; iPair++)
-         {
-            float fSPoleX = fC * cos (PI - (iPair + 0.5) * PI / mOrder);
-            float fSPoleY = fC * sin (PI - (iPair + 0.5) * PI / mOrder);
-            BilinTransform (fSPoleX, fSPoleY, &fZPoleX, &fZPoleY);
-            mpBiquad[iPair].fNumerCoeffs [0] = 1;
-            if (mFilterSubtype == kLowPass)		// LOWPASS
-               mpBiquad[iPair].fNumerCoeffs [1] = 2;
-            else
-               mpBiquad[iPair].fNumerCoeffs [1] = -2;
-            mpBiquad[iPair].fNumerCoeffs [2] = 1;
-            mpBiquad[iPair].fDenomCoeffs [0] = -2 * fZPoleX;
-            mpBiquad[iPair].fDenomCoeffs [1] = square(fZPoleX) + square(fZPoleY);
-            if (mFilterSubtype == kLowPass)		// LOWPASS
-               fDCPoleDistSqr *= Calc2D_DistSqr (1, 0, fZPoleX, fZPoleY);
-            else
-               fDCPoleDistSqr *= Calc2D_DistSqr (-1, 0, fZPoleX, fZPoleY);		// distance from Nyquist
-         }
-      }
-      else
-      {
-         // Odd order - first do the 1st-order section
-         float fSPoleX = -fC;
-         float fSPoleY = 0;
-         BilinTransform (fSPoleX, fSPoleY, &fZPoleX, &fZPoleY);
-         mpBiquad[0].fNumerCoeffs [0] = 1;
-         if (mFilterSubtype == kLowPass)		// LOWPASS
-            mpBiquad[0].fNumerCoeffs [1] = 1;
-         else
-            mpBiquad[0].fNumerCoeffs [1] = -1;
-         mpBiquad[0].fNumerCoeffs [2] = 0;
-         mpBiquad[0].fDenomCoeffs [0] = -fZPoleX;
-         mpBiquad[0].fDenomCoeffs [1] = 0;
-         if (mFilterSubtype == kLowPass)		// LOWPASS
-            fDCPoleDistSqr = 1 - fZPoleX;
-         else
-            fDCPoleDistSqr = fZPoleX + 1;    // dist from Nyquist
-         for (int iPair = 1; iPair <= mOrder/2; iPair++)
-         {
-            fSPoleX = fC * cos (PI - iPair * PI / mOrder);
-            fSPoleY = fC * sin (PI - iPair * PI / mOrder);
-            BilinTransform (fSPoleX, fSPoleY, &fZPoleX, &fZPoleY);
-            mpBiquad[iPair].fNumerCoeffs [0] = 1;
-            if (mFilterSubtype == kLowPass)		// LOWPASS
-               mpBiquad[iPair].fNumerCoeffs [1] = 2;
-            else
-               mpBiquad[iPair].fNumerCoeffs [1] = -2;
-            mpBiquad[iPair].fNumerCoeffs [2] = 1;
-            mpBiquad[iPair].fDenomCoeffs [0] = -2 * fZPoleX;
-            mpBiquad[iPair].fDenomCoeffs [1] = square(fZPoleX) + square(fZPoleY);
-            if (mFilterSubtype == kLowPass)		// LOWPASS
-               fDCPoleDistSqr *= Calc2D_DistSqr (1, 0, fZPoleX, fZPoleY);
-            else
-               fDCPoleDistSqr *= Calc2D_DistSqr (-1, 0, fZPoleX, fZPoleY);		// distance from Nyquist
-         }
-      }
-      mpBiquad[0].fNumerCoeffs [0] *= fDCPoleDistSqr / (1 << mOrder);	// mult by DC dist from poles, divide by dist from zeroes
-      mpBiquad[0].fNumerCoeffs [1] *= fDCPoleDistSqr / (1 << mOrder);
-      mpBiquad[0].fNumerCoeffs [2] *= fDCPoleDistSqr / (1 << mOrder);
+   case kButterworth:
+      mpBiquad = Biquad::CalcButterworthFilter(mOrder, mNyquist, mCutoff, mFilterSubtype);
       break;
-
-   case kChebyshevTypeI:     // Chebyshev Type 1
-      double eps; eps = sqrt (pow (10.0, wxMax(0.001, mRipple) / 10.0) - 1);
-      double a; a = log (1 / eps + sqrt(1 / square(eps) + 1)) / mOrder;
-      // Assume even order to start
-      for (int iPair = 0; iPair < mOrder/2; iPair++)
-      {
-         float fSPoleX = -fC * sinh (a) * sin ((2*iPair + 1) * PI / (2 * mOrder));
-         float fSPoleY = fC * cosh (a) * cos ((2*iPair + 1) * PI / (2 * mOrder));
-         BilinTransform (fSPoleX, fSPoleY, &fZPoleX, &fZPoleY);
-         if (mFilterSubtype == kLowPass)		// LOWPASS
-         {
-            fZZeroX = -1;
-            fDCPoleDistSqr = Calc2D_DistSqr (1, 0, fZPoleX, fZPoleY);
-            fDCPoleDistSqr /= 2*2;  // dist from zero at Nyquist
-         }
-         else
-         {
-            // Highpass - do the digital LP->HP transform on the poles and zeroes
-            ComplexDiv (beta - fZPoleX, -fZPoleY, 1 - beta * fZPoleX, -beta * fZPoleY, &fZPoleX, &fZPoleY);
-            fZZeroX = 1;
-            fDCPoleDistSqr = Calc2D_DistSqr (-1, 0, fZPoleX, fZPoleY);		// distance from Nyquist
-            fDCPoleDistSqr /= 2*2;  // dist from zero at Nyquist
-         }
-         mpBiquad[iPair].fNumerCoeffs [0] = fDCPoleDistSqr;
-         mpBiquad[iPair].fNumerCoeffs [1] = -2 * fZZeroX * fDCPoleDistSqr;
-         mpBiquad[iPair].fNumerCoeffs [2] = fDCPoleDistSqr;
-         mpBiquad[iPair].fDenomCoeffs [0] = -2 * fZPoleX;
-         mpBiquad[iPair].fDenomCoeffs [1] = square(fZPoleX) + square(fZPoleY);
-      }
-      if ((mOrder & 1) == 0)
-      {
-         float fTemp = DB_TO_LINEAR(-wxMax(0.001, mRipple));      // at DC the response is down R dB (for even-order)
-         mpBiquad[0].fNumerCoeffs [0] *= fTemp;
-         mpBiquad[0].fNumerCoeffs [1] *= fTemp;
-         mpBiquad[0].fNumerCoeffs [2] *= fTemp;
-      }
-      else
-      {
-         // Odd order - now do the 1st-order section
-         float fSPoleX = -fC * sinh (a);
-         float fSPoleY = 0;
-         BilinTransform (fSPoleX, fSPoleY, &fZPoleX, &fZPoleY);
-         if (mFilterSubtype == kLowPass)		// LOWPASS
-         {
-            fZZeroX = -1;
-            fDCPoleDistSqr = sqrt(Calc2D_DistSqr (1, 0, fZPoleX, fZPoleY));
-            fDCPoleDistSqr /= 2;  // dist from zero at Nyquist
-         }
-         else
-         {
-            // Highpass - do the digital LP->HP transform on the poles and zeroes
-            ComplexDiv (beta - fZPoleX, -fZPoleY, 1 - beta * fZPoleX, -beta * fZPoleY, &fZPoleX, &fZPoleY);
-            fZZeroX = 1;
-            fDCPoleDistSqr = sqrt(Calc2D_DistSqr (-1, 0, fZPoleX, fZPoleY));		// distance from Nyquist
-            fDCPoleDistSqr /= 2;  // dist from zero at Nyquist
-         }
-         mpBiquad[(mOrder-1)/2].fNumerCoeffs [0] = fDCPoleDistSqr;
-         mpBiquad[(mOrder-1)/2].fNumerCoeffs [1] = -fZZeroX * fDCPoleDistSqr;
-         mpBiquad[(mOrder-1)/2].fNumerCoeffs [2] = 0;
-         mpBiquad[(mOrder-1)/2].fDenomCoeffs [0] = -fZPoleX;
-         mpBiquad[(mOrder-1)/2].fDenomCoeffs [1] = 0;
-      }
+   case kChebyshevTypeI:
+      mpBiquad = Biquad::CalcChebyshevType1Filter(mOrder, mNyquist, mCutoff, mRipple, mFilterSubtype);
       break;
-
-   case kChebyshevTypeII:     // Chebyshev Type 2
-      float fSZeroX, fSZeroY;
-      float fSPoleX, fSPoleY;
-      eps = DB_TO_LINEAR(-wxMax(0.001, mStopbandRipple));
-      a = log (1 / eps + sqrt(1 / square(eps) + 1)) / mOrder;
-
-      // Assume even order
-      for (int iPair = 0; iPair < mOrder/2; iPair++)
-      {
-         ComplexDiv (fC, 0, -sinh (a) * sin ((2*iPair + 1) * PI / (2 * mOrder)),
-            cosh (a) * cos ((2*iPair + 1) * PI / (2 * mOrder)),
-            &fSPoleX, &fSPoleY);
-         BilinTransform (fSPoleX, fSPoleY, &fZPoleX, &fZPoleY);
-         fSZeroX = 0;
-         fSZeroY = fC / cos (((2 * iPair) + 1) * PI / (2 * mOrder));
-         BilinTransform (fSZeroX, fSZeroY, &fZZeroX, &fZZeroY);
-
-         if (mFilterSubtype == kLowPass)		// LOWPASS
-         {
-            fDCPoleDistSqr = Calc2D_DistSqr (1, 0, fZPoleX, fZPoleY);
-            fDCPoleDistSqr /= Calc2D_DistSqr (1, 0, fZZeroX, fZZeroY);
-         }
-         else
-         {
-            // Highpass - do the digital LP->HP transform on the poles and zeroes
-            ComplexDiv (beta - fZPoleX, -fZPoleY, 1 - beta * fZPoleX, -beta * fZPoleY, &fZPoleX, &fZPoleY);
-            ComplexDiv (beta - fZZeroX, -fZZeroY, 1 - beta * fZZeroX, -beta * fZZeroY, &fZZeroX, &fZZeroY);
-            fDCPoleDistSqr = Calc2D_DistSqr (-1, 0, fZPoleX, fZPoleY);		// distance from Nyquist
-            fDCPoleDistSqr /= Calc2D_DistSqr (-1, 0, fZZeroX, fZZeroY);
-         }
-         mpBiquad[iPair].fNumerCoeffs [0] = fDCPoleDistSqr;
-         mpBiquad[iPair].fNumerCoeffs [1] = -2 * fZZeroX * fDCPoleDistSqr;
-         mpBiquad[iPair].fNumerCoeffs [2] = (square(fZZeroX) + square(fZZeroY)) * fDCPoleDistSqr;
-         mpBiquad[iPair].fDenomCoeffs [0] = -2 * fZPoleX;
-         mpBiquad[iPair].fDenomCoeffs [1] = square(fZPoleX) + square(fZPoleY);
-      }
-      // Now, if it's odd order, we have one more to do
-      if (mOrder & 1)
-      {
-         int iPair = (mOrder-1)/2; // we'll do it as a biquad, but it's just first-order
-         ComplexDiv (fC, 0, -sinh (a) * sin ((2*iPair + 1) * PI / (2 * mOrder)),
-            cosh (a) * cos ((2*iPair + 1) * PI / (2 * mOrder)),
-            &fSPoleX, &fSPoleY);
-         BilinTransform (fSPoleX, fSPoleY, &fZPoleX, &fZPoleY);
-         fZZeroX = -1;     // in the s-plane, the zero is at infinity
-         fZZeroY = 0;
-         if (mFilterSubtype == kLowPass)		// LOWPASS
-         {
-            fDCPoleDistSqr = sqrt(Calc2D_DistSqr (1, 0, fZPoleX, fZPoleY));
-            fDCPoleDistSqr /= 2;
-         }
-         else
-         {
-            // Highpass - do the digital LP->HP transform on the poles and zeroes
-            ComplexDiv (beta - fZPoleX, -fZPoleY, 1 - beta * fZPoleX, -fZPoleY, &fZPoleX, &fZPoleY);
-            fZZeroX = 1;
-            fDCPoleDistSqr = sqrt(Calc2D_DistSqr (-1, 0, fZPoleX, fZPoleY));		// distance from Nyquist
-            fDCPoleDistSqr /= 2;
-         }
-         mpBiquad[iPair].fNumerCoeffs [0] = fDCPoleDistSqr;
-         mpBiquad[iPair].fNumerCoeffs [1] = -fZZeroX * fDCPoleDistSqr;
-         mpBiquad[iPair].fNumerCoeffs [2] = 0;
-         mpBiquad[iPair].fDenomCoeffs [0] = -fZPoleX;
-         mpBiquad[iPair].fDenomCoeffs [1] = 0;
-      }
+   case kChebyshevTypeII:
+      mpBiquad = Biquad::CalcChebyshevType2Filter(mOrder, mNyquist, mCutoff, mStopbandRipple, mFilterSubtype);
       break;
    }
-   return true;
-}
-
-double EffectScienFilter::ChebyPoly(int Order, double NormFreq)   // NormFreq = 1 at the f0 point (where response is R dB down)
-{
-   // Calc cosh (Order * acosh (NormFreq));
-   double x = 1;
-   double fSum = 0;
-   wxASSERT (Order >= MIN_Order && Order <= MAX_Order);
-   for (int i = 0; i <= Order; i++)
-   {
-      fSum += s_fChebyCoeffs [Order-1][i] * x;
-      x *= NormFreq;
-   }
-   return fSum;
 }
 
 float EffectScienFilter::FilterMagnAtFreq(float Freq)
@@ -878,14 +565,17 @@ float EffectScienFilter::FilterMagnAtFreq(float Freq)
 
    case kChebyshevTypeI:     // Chebyshev Type 1
       double eps; eps = sqrt(pow (10.0, wxMax(0.001, mRipple)/10.0) - 1);
+      double chebyPolyVal;
       switch (mFilterSubtype)
       {
       case 0:	// lowpass
       default:
-         Magn = sqrt (1 / (1 + square(eps) * square(ChebyPoly(mOrder, FreqWarped/CutoffWarped))));
+         chebyPolyVal = Biquad::ChebyPoly(mOrder, FreqWarped/CutoffWarped);
+         Magn = sqrt (1 / (1 + square(eps) * square(chebyPolyVal)));
          break;
       case 1:
-         Magn = sqrt (1 / (1 + square(eps) * square(ChebyPoly(mOrder, CutoffWarped/FreqWarped))));
+         chebyPolyVal = Biquad::ChebyPoly(mOrder, CutoffWarped/FreqWarped);
+         Magn = sqrt (1 / (1 + square(eps) * square(chebyPolyVal)));
          break;
       }
       break;
@@ -896,10 +586,12 @@ float EffectScienFilter::FilterMagnAtFreq(float Freq)
       {
       case kLowPass:	// lowpass
       default:
-         Magn = sqrt (1 / (1 + 1 / (square(eps) * square(ChebyPoly(mOrder, CutoffWarped/FreqWarped)))));
+         chebyPolyVal = Biquad::ChebyPoly(mOrder, CutoffWarped/FreqWarped);
+         Magn = sqrt (1 / (1 + 1 / (square(eps) * square(chebyPolyVal))));
          break;
       case kHighPass:
-         Magn = sqrt (1 / (1 + 1 / (square(eps) * square(ChebyPoly(mOrder, FreqWarped/CutoffWarped)))));
+         chebyPolyVal = Biquad::ChebyPoly(mOrder, FreqWarped/CutoffWarped);
+         Magn = sqrt (1 / (1 + 1 / (square(eps) * square(chebyPolyVal))));
          break;
       }
       break;
@@ -930,7 +622,8 @@ void EffectScienFilter::OnFilterSubtype(wxCommandEvent & WXUNUSED(evt))
 
 void EffectScienFilter::OnCutoff(wxCommandEvent & WXUNUSED(evt))
 {
-   if (!EnableApply(mUIParent->TransferDataFromWindow()))
+   if (!EffectEditor::EnableApply(
+      mUIParent, mUIParent->TransferDataFromWindow()))
    {
       return;
    }
@@ -940,7 +633,8 @@ void EffectScienFilter::OnCutoff(wxCommandEvent & WXUNUSED(evt))
 
 void EffectScienFilter::OnRipple(wxCommandEvent & WXUNUSED(evt))
 {
-   if (!EnableApply(mUIParent->TransferDataFromWindow()))
+   if (!EffectEditor::EnableApply(
+      mUIParent, mUIParent->TransferDataFromWindow()))
    {
       return;
    }
@@ -950,7 +644,8 @@ void EffectScienFilter::OnRipple(wxCommandEvent & WXUNUSED(evt))
 
 void EffectScienFilter::OnStopbandRipple(wxCommandEvent & WXUNUSED(evt))
 {
-   if (!EnableApply(mUIParent->TransferDataFromWindow()))
+   if (!EffectEditor::EnableApply(
+      mUIParent, mUIParent->TransferDataFromWindow()))
    {
       return;
    }

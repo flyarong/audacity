@@ -12,7 +12,9 @@ Paul Licameli
 #define __AUDACITY_UI_HANDLE__
 
 #include <utility>
-#include "MemoryX.h"
+#include <memory>
+#include <typeinfo>
+#include "TrackPanelDrawable.h" // to inherit
 
 class wxDC;
 class wxRect;
@@ -25,12 +27,11 @@ class TrackPanelCell;
 struct TrackPanelMouseEvent;
 struct TrackPanelMouseState;
 
-#include "MemoryX.h"
-
+/// \brief Short-lived drawing and event-handling object associated with a TrackPanelCell
 // A TrackPanelCell reports a handle object of some subclass, in response to a
 // hit test at a mouse position; then this handle processes certain events,
 // and maintains necessary state through click-drag-release event sequences.
-class UIHandle /* not final */
+class AUDACITY_DLL_API UIHandle /* not final */ : public TrackPanelDrawable
 {
 public:
    // See RefreshCode.h for bit flags:
@@ -39,19 +40,13 @@ public:
    // Future: may generalize away from current Track class
    using Cell = TrackPanelCell;
 
-   // Argument for the drawing function
-   enum DrawingPass {
-      Cells,
-      Panel,
-   };
-
    virtual ~UIHandle() = 0;
 
    // Before clicking, the handle is notified that it has been "hit"
    // This might put the handle into its first rotated state
    // (or last, if forward is false) or mark itself as needing a highlight.
    // Default does nothing.
-   virtual void Enter(bool forward);
+   virtual void Enter(bool forward, AudacityProject *pProject);
 
    // Tell whether the handle has more than one TAB key rotation state.
    // Default is always false.
@@ -65,11 +60,16 @@ public:
    // Tell whether the handle has its own escape action.  In case it is already
    // clicked, it will not cancel on Escape key if true.
    // Default is always false.
-   virtual bool HasEscape() const;
+   virtual bool HasEscape(AudacityProject *pProject) const;
 
    // The handle may change state and mark itself for highlight change.
    // Default does nothing and returns false
-   virtual bool Escape();
+   virtual bool Escape(AudacityProject *pProject);
+
+   //! Whether the handle has any special right-button handling
+   /*! If not, then Click() will not be called for right click.
+       Default is always false */
+   virtual bool HandlesRightClick();
 
    // Assume hit test (implemented in other classes) was positive.
    // May return Cancelled, overriding the hit test decision and stopping drag.
@@ -89,7 +89,7 @@ public:
    // or called after Drag().
    // Specifies cursor and status bar message.
    virtual HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject) = 0;
+      (const TrackPanelMouseState &state, AudacityProject *pProject) = 0;
 
    // Assume previously Clicked and not yet Released or Cancelled.
    // event.pCell may be other than for Click; may be NULL, and rect empty.
@@ -103,17 +103,6 @@ public:
    // Assume previously Clicked and not yet Released or Cancelled.
    // Cancelled in return flags has no effect.
    virtual Result Cancel(AudacityProject *pProject) = 0;
-
-   // Draw extras over cells.  Default does nothing.
-   // Supplies only the whole panel rectangle for now.
-   // If pass is Cells, then any drawing that extends outside the cells
-   // is later overlaid with the cell bevels and the empty background color.
-   // Otherwise (Panel), it is a later drawing pass that will not be overlaid.
-   // This is invoked on the hit test target even before it is clicked,
-   // and also during drag.
-   virtual void DrawExtras
-      (DrawingPass pass,
-       wxDC * dc, const wxRegion &updateRegion, const wxRect &panelRect);
 
    // Whether to force Release (not Cancel!) of the drag when a
    // keystroke command is about to be dispatched.  Default is always false.
@@ -171,6 +160,9 @@ std::shared_ptr<Subclass> AssignUIHandlePtr
       return pNew;
    }
    else {
+      //type slicing check
+      wxASSERT(typeid(*ptr) == typeid(*pNew));
+
       auto code = Subclass::NeedChangeHighlight( *ptr, *pNew );
       *ptr = std::move(*pNew);
       ptr->SetChangeHighlight( code );

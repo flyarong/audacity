@@ -13,25 +13,31 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "ChangeSpeed.h"
+#include "EffectEditor.h"
+#include "EffectOutputTracks.h"
+#include "LoadEffects.h"
 
 #include <math.h>
 
 #include <wx/choice.h>
-#include <wx/intl.h>
 #include <wx/slider.h>
 
+#include "ConfigInterface.h"
 #include "../LabelTrack.h"
-#include "../Prefs.h"
-#include "../Project.h"
-#include "../Resample.h"
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
+#include "Prefs.h"
+#include "Resample.h"
+#include "ShuttleGui.h"
+#include "SyncLock.h"
+#include "../widgets/NumericTextCtrl.h"
 #include "../widgets/valnum.h"
 
 #include "TimeWarper.h"
-#include "../WaveTrack.h"
+#include "WaveClip.h"
+#include "WaveTrack.h"
+
+#include "NumericConverterFormats.h"
 
 enum
 {
@@ -49,25 +55,26 @@ enum kVinyl
    kVinyl_33AndAThird = 0,
    kVinyl_45,
    kVinyl_78,
-   kVinyl_NA,
-   nVinyl
+   kVinyl_NA
 };
 
-static const wxChar *kVinylStrings[nVinyl] =
-{
-   wxT("33\u2153"),
-   wxT("45"),
-   wxT("78"),
+static const TranslatableStrings kVinylStrings{
+   XO("33\u2153"),
+   XO("45"),
+   XO("78"),
    /* i18n-hint: n/a is an English abbreviation meaning "not applicable". */
    XO("n/a"),
 };
 
 // Soundtouch is not reasonable below -99% or above 3000%.
 
-// Define keys, defaults, minimums, and maximums for the effect parameters
-//
-//     Name          Type     Key               Def   Min      Max      Scale
-Param( Percentage,   double,  wxT("Percentage"), 0.0,  -99.0,   4900.0,  1  );
+const EffectParameterMethods& EffectChangeSpeed::Parameters() const
+{
+   static CapturedParameters<EffectChangeSpeed,
+      Percentage
+   > parameters;
+   return parameters;
+}
 
 // We warp the slider to go up to 400%, but user can enter higher values
 static const double kSliderMax = 100.0;         // warped above zero to actually go up to 400%
@@ -76,6 +83,11 @@ static const double kSliderWarp = 1.30105;      // warp power takes max from 100
 //
 // EffectChangeSpeed
 //
+
+const ComponentInterfaceSymbol EffectChangeSpeed::Symbol
+{ XO("Change Speed") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectChangeSpeed > reg; }
 
 BEGIN_EVENT_TABLE(EffectChangeSpeed, wxEvtHandler)
     EVT_TEXT(ID_PercentChange, EffectChangeSpeed::OnText_PercentChange)
@@ -89,14 +101,13 @@ END_EVENT_TABLE()
 
 EffectChangeSpeed::EffectChangeSpeed()
 {
-   // effect parameters
-   m_PercentChange = DEF_Percentage;
+   Parameters().Reset(*this);
 
    mFromVinyl = kVinyl_33AndAThird;
    mToVinyl = kVinyl_33AndAThird;
    mFromLength = 0.0;
    mToLength = 0.0;
-   mFormat = NumericConverter::DefaultSelectionFormat();
+   mFormat = NumericConverterFormats::DefaultSelectionFormat();
    mbLoopDetect = false;
 
    SetLinearEffectFlag(true);
@@ -108,110 +119,55 @@ EffectChangeSpeed::~EffectChangeSpeed()
 
 // ComponentInterface implementation
 
-ComponentInterfaceSymbol EffectChangeSpeed::GetSymbol()
+ComponentInterfaceSymbol EffectChangeSpeed::GetSymbol() const
 {
-   return CHANGESPEED_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectChangeSpeed::GetDescription()
+TranslatableString EffectChangeSpeed::GetDescription() const
 {
-   return _("Changes the speed of a track, also changing its pitch");
+   return XO("Changes the speed of a track, also changing its pitch");
 }
 
-wxString EffectChangeSpeed::ManualPage()
+ManualPageID EffectChangeSpeed::ManualPage() const
 {
-   return wxT("Change_Speed");
+   return L"Change_Speed";
 }
 
 
 // EffectDefinitionInterface implementation
 
-EffectType EffectChangeSpeed::GetType()
+EffectType EffectChangeSpeed::GetType() const
 {
    return EffectTypeProcess;
 }
 
-// EffectClientInterface implementation
-bool EffectChangeSpeed::DefineParams( ShuttleParams & S ){
-   S.SHUTTLE_PARAM( m_PercentChange, Percentage );
-   return true;
-}
-
-bool EffectChangeSpeed::GetAutomationParameters(CommandParameters & parms)
+OptionalMessage EffectChangeSpeed::LoadFactoryDefaults(EffectSettings &settings) const
 {
-   parms.Write(KEY_Percentage, m_PercentChange);
-
-   return true;
+   // To do: externalize state so const_cast isn't needed
+   return const_cast<EffectChangeSpeed&>(*this).DoLoadFactoryDefaults(settings);
 }
 
-bool EffectChangeSpeed::SetAutomationParameters(CommandParameters & parms)
-{
-   ReadAndVerifyDouble(Percentage);
-
-   m_PercentChange = Percentage;
-
-   return true;
-}
-
-bool EffectChangeSpeed::LoadFactoryDefaults()
+OptionalMessage
+EffectChangeSpeed::DoLoadFactoryDefaults(EffectSettings &settings)
 {
    mFromVinyl = kVinyl_33AndAThird;
-   mFormat = NumericConverter::DefaultSelectionFormat();
+   mFormat = NumericConverterFormats::DefaultSelectionFormat();
 
-   return Effect::LoadFactoryDefaults();
+   return Effect::LoadFactoryDefaults(settings);
 }
 
 // Effect implementation
 
-bool EffectChangeSpeed::CheckWhetherSkipEffect()
+bool EffectChangeSpeed::CheckWhetherSkipEffect(const EffectSettings &) const
 {
    return (m_PercentChange == 0.0);
 }
 
-double EffectChangeSpeed::CalcPreviewInputLength(double previewLength)
+double EffectChangeSpeed::CalcPreviewInputLength(
+   const EffectSettings &, double previewLength) const
 {
    return previewLength * (100.0 + m_PercentChange) / 100.0;
-}
-
-bool EffectChangeSpeed::Startup()
-{
-   wxString base = wxT("/Effects/ChangeSpeed/");
-
-   // Migrate settings from 2.1.0 or before
-
-   // Already migrated, so bail
-   if (gPrefs->Exists(base + wxT("Migrated")))
-   {
-      return true;
-   }
-
-   // Load the old "current" settings
-   if (gPrefs->Exists(base))
-   {
-      // Retrieve last used control values
-      gPrefs->Read(base + wxT("PercentChange"), &m_PercentChange, 0);
-
-      wxString format;
-      gPrefs->Read(base + wxT("TimeFormat"), &format, wxString{});
-      mFormat = NumericConverter::LookupFormat( NumericConverter::TIME, format );
-
-      gPrefs->Read(base + wxT("VinylChoice"), &mFromVinyl, 0);
-      if (mFromVinyl == kVinyl_NA)
-      {
-         mFromVinyl = kVinyl_33AndAThird;
-      }
-
-      SetPrivateConfig(GetCurrentSettingsGroup(), wxT("TimeFormat"), mFormat.Internal());
-      SetPrivateConfig(GetCurrentSettingsGroup(), wxT("VinylChoice"), mFromVinyl);
-
-      SaveUserPreset(GetCurrentSettingsGroup());
-
-      // Do not migrate again
-      gPrefs->Write(base + wxT("Migrated"), true);
-      gPrefs->Flush();
-   }
-
-   return true;
 }
 
 bool EffectChangeSpeed::Init()
@@ -222,62 +178,119 @@ bool EffectChangeSpeed::Init()
    return true;
 }
 
-bool EffectChangeSpeed::Process()
+auto EffectChangeSpeed::FindGaps(
+   const WaveTrack &track, const double curT0, const double curT1) -> Gaps
+{
+   // Silenced samples will be inserted in gaps between clips, so capture where
+   // these gaps are for later deletion
+   Gaps gaps;
+   const auto newGap = [&](double st, double et){
+      gaps.emplace_back(track.SnapToSample(st), track.SnapToSample(et));
+   };
+   double last = curT0;
+   auto clips = track.SortedClipArray();
+   auto front = clips.front();
+   auto back = clips.back();
+   for (auto &clip : clips) {
+      auto st = clip->GetPlayStartTime();
+      auto et = clip->GetPlayEndTime();
+      if (st >= curT0 || et < curT1) {
+         if (curT0 < st && clip == front)
+            newGap(curT0, st);
+         else if (last < st && curT0 <= last)
+            newGap(last, st);
+         if (et < curT1 && clip == back)
+            newGap(et, curT1);
+      }
+      last = et;
+   }
+   return gaps;
+}
+
+bool EffectChangeSpeed::Process(EffectInstance &, EffectSettings &)
 {
    // Similar to EffectSoundTouch::Process()
 
    // Iterate over each track.
    // All needed because this effect needs to introduce
    // silence in the sync-lock group tracks to keep sync
-   CopyInputTracks(true); // Set up mOutputTracks.
+   EffectOutputTracks outputs{ *mTracks, {{ mT0, mT1 }}, true };
    bool bGoodResult = true;
 
    mCurTrackNum = 0;
-   mMaxNewLength = 0.0;
 
    mFactor = 100.0 / (100.0 + m_PercentChange);
 
-   mOutputTracks->Any().VisitWhile( bGoodResult,
-      [&](LabelTrack *lt) {
-         if (lt->GetSelected() || lt->IsSyncLockSelected())
-         {
-            if (!ProcessLabelTrack(lt))
+   outputs.Get().Any().VisitWhile(bGoodResult,
+      [&](LabelTrack &lt) {
+         if (SyncLock::IsSelectedOrSyncLockSelected(&lt)) {
+            if (!ProcessLabelTrack(&lt))
                bGoodResult = false;
          }
       },
-      [&](WaveTrack *pOutWaveTrack, const Track::Fallthrough &fallthrough) {
-         if (!pOutWaveTrack->GetSelected())
+      [&](auto &&fallthrough){ return [&](WaveTrack &outWaveTrack) {
+         if (!outWaveTrack.GetSelected())
             return fallthrough();
 
          //Get start and end times from track
-         mCurT0 = pOutWaveTrack->GetStartTime();
-         mCurT1 = pOutWaveTrack->GetEndTime();
+         mCurT0 = outWaveTrack.GetStartTime();
+         mCurT1 = outWaveTrack.GetEndTime();
 
          //Set the current bounds to whichever left marker is
          //greater and whichever right marker is less:
-         mCurT0 = wxMax(mT0, mCurT0);
-         mCurT1 = wxMin(mT1, mCurT1);
+         mCurT0 = std::max(mT0, mCurT0);
+         mCurT1 = std::min(mT1, mCurT1);
 
          // Process only if the right marker is to the right of the left marker
          if (mCurT1 > mCurT0) {
             //Transform the marker timepoints to samples
-            auto start = pOutWaveTrack->TimeToLongSamples(mCurT0);
-            auto end = pOutWaveTrack->TimeToLongSamples(mCurT1);
+            auto start = outWaveTrack.TimeToLongSamples(mCurT0);
+            auto end = outWaveTrack.TimeToLongSamples(mCurT1);
 
-            //ProcessOne() (implemented below) processes a single track
-            if (!ProcessOne(pOutWaveTrack, start, end))
+            const auto gaps = FindGaps(outWaveTrack, mCurT0, mCurT1);
+
+            auto newTracks = outWaveTrack.WideEmptyCopy();
+            auto iter =
+               (*newTracks->Any<WaveTrack>().begin())->Channels().begin();
+            for (const auto pChannel : outWaveTrack.Channels()) {
+               // ProcessOne() (implemented below) processes a single channel
+               if (ProcessOne(*pChannel, **iter++, start, end))
+                  ++mCurTrackNum;
+               else {
+                  newTracks.reset();
+                  break;
+               }
+            }
+            if (!newTracks) {
                bGoodResult = false;
+               return;
+            }
+            const auto pNewTrack = *newTracks->Any<WaveTrack>().begin();
+            pNewTrack->Flush();
+
+            const double newLength = pNewTrack->GetEndTime();
+            const LinearTimeWarper warper{
+               mCurT0, mCurT0, mCurT1, mCurT0 + newLength };
+
+            outWaveTrack.ClearAndPaste(mCurT0, mCurT1,
+               *newTracks, true, true, &warper);
+
+               // Finally, recreate the gaps
+            for (const auto [st, et] : gaps)
+               if (st >= mCurT0 && et <= mCurT1 && st != et)
+                  outWaveTrack.SplitDelete(warper.Warp(st), warper.Warp(et));
          }
-         mCurTrackNum++;
-      },
-      [&](Track *t) {
-         if (t->IsSyncLockSelected())
-            t->SyncLockAdjust(mT1, mT0 + (mT1 - mT0) * mFactor);
+         else
+            mCurTrackNum += outWaveTrack.NChannels();
+      }; },
+      [&](Track &t) {
+         if (SyncLock::IsSyncLockSelected(&t))
+            t.SyncLockAdjust(mT1, mT0 + (mT1 - mT0) * mFactor);
       }
    );
 
    if (bGoodResult)
-      ReplaceProcessedTracks(bGoodResult);
+      outputs.Commit();
 
    // Update selection.
    mT1 = mT0 + (((mT1 - mT0) * 100.0) / (100.0 + m_PercentChange));
@@ -285,126 +298,135 @@ bool EffectChangeSpeed::Process()
    return bGoodResult;
 }
 
-void EffectChangeSpeed::PopulateOrExchange(ShuttleGui & S)
+std::unique_ptr<EffectEditor> EffectChangeSpeed::PopulateOrExchange(
+   ShuttleGui & S, EffectInstance &, EffectSettingsAccess &,
+   const EffectOutputs *)
 {
+   mUIParent = S.GetParent();
+
    {
       wxString formatId;
-      GetPrivateConfig(GetCurrentSettingsGroup(), wxT("TimeFormat"),
-                       formatId, mFormat.Internal());
-      mFormat = NumericConverter::LookupFormat(
-         NumericConverter::TIME, formatId );
+      GetConfig(GetDefinition(), PluginSettings::Private,
+         CurrentSettingsGroup(),
+         wxT("TimeFormat"), formatId, mFormat.Internal());
+      mFormat = NumericConverterFormats::Lookup(
+         FormatterContext::SampleRateContext(mProjectRate),
+         NumericConverterType_TIME(), formatId);
    }
-   GetPrivateConfig(GetCurrentSettingsGroup(), wxT("VinylChoice"), mFromVinyl, mFromVinyl);
+   GetConfig(GetDefinition(), PluginSettings::Private,
+      CurrentSettingsGroup(),
+      wxT("VinylChoice"), mFromVinyl, mFromVinyl);
 
    S.SetBorder(5);
 
    S.StartVerticalLay(0);
    {
       S.AddSpace(0, 5);
-      S.AddTitle(_("Change Speed, affecting both Tempo and Pitch"));
+      S.AddTitle(XO("Change Speed, affecting both Tempo and Pitch"));
       S.AddSpace(0, 10);
 
       // Speed multiplier and percent change controls.
       S.StartMultiColumn(4, wxCENTER);
       {
-         FloatingPointValidator<double> vldMultiplier(3, &mMultiplier, NumValidatorStyle::THREE_TRAILING_ZEROES);
-         vldMultiplier.SetRange(MIN_Percentage / 100.0, ((MAX_Percentage / 100.0) + 1));
-         mpTextCtrl_Multiplier =
-            S.Id(ID_Multiplier).AddTextBox(_("Speed Multiplier:"), wxT(""), 12);
-         mpTextCtrl_Multiplier->SetValidator(vldMultiplier);
+         mpTextCtrl_Multiplier = S.Id(ID_Multiplier)
+            .Validator<FloatingPointValidator<double>>(
+               3, &mMultiplier,
+               NumValidatorStyle::THREE_TRAILING_ZEROES,
+               Percentage.min / 100.0, ((Percentage.max / 100.0) + 1) )
+            .AddTextBox(XXO("&Speed Multiplier:"), L"", 12);
 
-         FloatingPointValidator<double> vldPercentage(3, &m_PercentChange, NumValidatorStyle::THREE_TRAILING_ZEROES);
-         vldPercentage.SetRange(MIN_Percentage, MAX_Percentage);
-         mpTextCtrl_PercentChange =
-            S.Id(ID_PercentChange).AddTextBox(_("Percent Change:"), wxT(""), 12);
-         mpTextCtrl_PercentChange->SetValidator(vldPercentage);
+         mpTextCtrl_PercentChange = S.Id(ID_PercentChange)
+            .Validator<FloatingPointValidator<double>>(
+               3, &m_PercentChange,
+               NumValidatorStyle::THREE_TRAILING_ZEROES,
+               Percentage.min, Percentage.max )
+            .AddTextBox(XXO("Percent C&hange:"), L"", 12);
       }
       S.EndMultiColumn();
 
       // Percent change slider.
       S.StartHorizontalLay(wxEXPAND);
       {
-         S.SetStyle(wxSL_HORIZONTAL);
-         mpSlider_PercentChange =
-            S.Id(ID_PercentChange).AddSlider( {}, 0, (int)kSliderMax, (int)MIN_Percentage);
-         mpSlider_PercentChange->SetName(_("Percent Change"));
+         mpSlider_PercentChange = S.Id(ID_PercentChange)
+            .Name(XO("Percent Change"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {}, 0, (int)kSliderMax, (int)Percentage.min);
       }
       S.EndHorizontalLay();
 
       // Vinyl rpm controls.
       S.StartMultiColumn(5, wxCENTER);
       {
-         /* i18n-hint: "rpm" is an English abbreviation meaning "revolutions per minute". */
-         S.AddUnits(_("Standard Vinyl rpm:"));
+         /* i18n-hint: "rpm" is an English abbreviation meaning "revolutions per minute".
+            "vinyl" refers to old-fashioned phonograph records */
+         S.AddUnits(XO("Standard Vinyl rpm:"));
 
-         wxASSERT(nVinyl == WXSIZEOF(kVinylStrings));
+         mpChoice_FromVinyl = S.Id(ID_FromVinyl)
+            /* i18n-hint: changing speed of audio "from" one value "to" another
+             "rpm" means "revolutions per minute" as on a vinyl record turntable
+             */
+            .Name(XO("From rpm"))
+            .MinSize( { 100, -1 } )
+            /* i18n-hint: changing speed of audio "from" one value "to" another */
+            .AddChoice(XXC("&from", "change speed"), kVinylStrings);
 
-         wxArrayStringEx vinylChoices;
-         for (int i = 0; i < nVinyl; i++)
-         {
-            if (i == kVinyl_NA)
-            {
-               vinylChoices.push_back(wxGetTranslation(kVinylStrings[i]));
-            }
-            else
-            {
-               vinylChoices.push_back(kVinylStrings[i]);
-            }
-         }
-
-         mpChoice_FromVinyl =
-            S.Id(ID_FromVinyl).AddChoice(_("from"), vinylChoices);
-         mpChoice_FromVinyl->SetName(_("From rpm"));
-         mpChoice_FromVinyl->SetSizeHints(100, -1);
-
-         mpChoice_ToVinyl =
-            S.Id(ID_ToVinyl).AddChoice(_("to"), vinylChoices);
-         mpChoice_ToVinyl->SetName(_("To rpm"));
-         mpChoice_ToVinyl->SetSizeHints(100, -1);
+         mpChoice_ToVinyl = S.Id(ID_ToVinyl)
+            /* i18n-hint: changing speed of audio "from" one value "to" another
+             "rpm" means "revolutions per minute" as on a vinyl record turntable
+             */
+            .Name(XO("To rpm"))
+            .MinSize( { 100, -1 } )
+            /* i18n-hint: changing speed of audio "from" one value "to" another */
+            .AddChoice(XXC("&to", "change speed"), kVinylStrings);
       }
       S.EndMultiColumn();
 
       // From/To time controls.
-      S.StartStatic(_("Selection Length"), 0);
+      S.StartStatic(XO("Selection Length"), 0);
       {
          S.StartMultiColumn(2, wxALIGN_LEFT);
          {
-            S.AddPrompt(_("Current Length:"));
+            S.AddPrompt(XXO("C&urrent Length:"));
 
             mpFromLengthCtrl = safenew
-                  NumericTextCtrl(S.GetParent(), wxID_ANY,
-                                 NumericConverter::TIME,
+                  NumericTextCtrl(FormatterContext::SampleRateContext(mProjectRate),
+                                 S.GetParent(), wxID_ANY,
+                                 NumericConverterType_TIME(),
                                  mFormat,
                                  mFromLength,
-                                 mProjectRate,
                                  NumericTextCtrl::Options{}
                                   .ReadOnly(true)
                                   .MenuEnabled(false));
 
-            mpFromLengthCtrl->SetName(_("from"));
-            mpFromLengthCtrl->SetToolTip(_("Current length of selection."));
-            S.AddWindow(mpFromLengthCtrl, wxALIGN_LEFT);
+            S.ToolTip(XO("Current length of selection."))
+               /* i18n-hint: changing speed of audio "from" one value "to" another */
+               .Name(XC("from", "change speed"))
+               .Position(wxALIGN_LEFT)
+               .AddWindow(mpFromLengthCtrl);
 
-            S.AddPrompt(_("New Length:"));
+            S.AddPrompt(XXO("&New Length:"));
 
             mpToLengthCtrl = safenew
-                  NumericTextCtrl(S.GetParent(), ID_ToLength,
-                                 NumericConverter::TIME,
+                  NumericTextCtrl(FormatterContext::SampleRateContext(mProjectRate),
+                                 S.GetParent(), ID_ToLength,
+                                 NumericConverterType_TIME(),
                                  mFormat,
-                                 mToLength,
-                                 mProjectRate);
+                                 mToLength);
 
-            mpToLengthCtrl->SetName(_("to"));
-            S.AddWindow(mpToLengthCtrl, wxALIGN_LEFT);
+            /* i18n-hint: changing speed of audio "from" one value "to" another */
+            S.Name(XC("to", "change speed"))
+               .Position(wxALIGN_LEFT)
+               .AddWindow(mpToLengthCtrl);
          }
          S.EndMultiColumn();
       }
       S.EndStatic();
    }
    S.EndVerticalLay();
+   return nullptr;
 }
 
-bool EffectChangeSpeed::TransferDataToWindow()
+bool EffectChangeSpeed::TransferDataToWindow(const EffectSettings &)
 {
    mbLoopDetect = true;
 
@@ -440,7 +462,7 @@ bool EffectChangeSpeed::TransferDataToWindow()
    return true;
 }
 
-bool EffectChangeSpeed::TransferDataFromWindow()
+bool EffectChangeSpeed::TransferDataFromWindow(EffectSettings &)
 {
    // mUIParent->TransferDataFromWindow() loses some precision, so save and restore it.
    double exactPercent = m_PercentChange;
@@ -450,8 +472,11 @@ bool EffectChangeSpeed::TransferDataFromWindow()
    }
    m_PercentChange = exactPercent;
 
-   SetPrivateConfig(GetCurrentSettingsGroup(), wxT("TimeFormat"), mFormat.Internal());
-   SetPrivateConfig(GetCurrentSettingsGroup(), wxT("VinylChoice"), mFromVinyl);
+   // TODO: just visit these effect settings the default way
+   SetConfig(GetDefinition(), PluginSettings::Private,
+      CurrentSettingsGroup(), wxT("TimeFormat"), mFormat.Internal());
+   SetConfig(GetDefinition(), PluginSettings::Private,
+      CurrentSettingsGroup(), wxT("VinylChoice"), mFromVinyl);
 
    return true;
 }
@@ -471,18 +496,10 @@ bool EffectChangeSpeed::ProcessLabelTrack(LabelTrack *lt)
 
 // ProcessOne() takes a track, transforms it to bunch of buffer-blocks,
 // and calls libsamplerate code on these blocks.
-bool EffectChangeSpeed::ProcessOne(WaveTrack * track,
-                           sampleCount start, sampleCount end)
+bool EffectChangeSpeed::ProcessOne(
+   const WaveChannel &track, WaveChannel &outputTrack,
+   sampleCount start, sampleCount end)
 {
-   if (track == NULL)
-      return false;
-
-   // initialization, per examples of Mixer::Mixer and
-   // EffectSoundTouch::ProcessOne
-
-   auto outputTrack = mFactory->NewWaveTrack(track->GetSampleFormat(),
-                                                    track->GetRate());
-
    //Get the length of the selection (as double). len is
    //used simple to calculate a progress meter, so it is easier
    //to make it a double now than it is to do it later
@@ -490,7 +507,7 @@ bool EffectChangeSpeed::ProcessOne(WaveTrack * track,
 
    // Initiate processing buffers, most likely shorter than
    // the length of the selection being processed.
-   auto inBufferSize = track->GetMaxBlockSize();
+   auto inBufferSize = track.GetMaxBlockSize();
 
    Floats inBuffer{ inBufferSize };
 
@@ -508,12 +525,12 @@ bool EffectChangeSpeed::ProcessOne(WaveTrack * track,
    while (samplePos < end) {
       //Get a blockSize of samples (smaller than the size of the buffer)
       auto blockSize = limitSampleBufferSize(
-         track->GetBestBlockSize(samplePos),
+         track.GetBestBlockSize(samplePos),
          end - samplePos
       );
 
       //Get the samples from the track and put them in the buffer
-      track->Get((samplePtr) inBuffer.get(), floatSample, samplePos, blockSize);
+      track.GetFloats(inBuffer.get(), samplePos, blockSize);
 
       const auto results = resample.Process(mFactor,
                                     inBuffer.get(),
@@ -524,7 +541,7 @@ bool EffectChangeSpeed::ProcessOne(WaveTrack * track,
       const auto outgen = results.second;
 
       if (outgen > 0)
-         outputTrack->Append((samplePtr)outBuffer.get(), floatSample,
+         outputTrack.Append((samplePtr)outBuffer.get(), floatSample,
                              outgen);
 
       // Increment samplePos
@@ -536,22 +553,6 @@ bool EffectChangeSpeed::ProcessOne(WaveTrack * track,
          break;
       }
    }
-
-   // Flush the output WaveTrack (since it's buffered, too)
-   outputTrack->Flush();
-
-   // Take the output track and insert it in place of the original
-   // sample data
-   double newLength = outputTrack->GetEndTime();
-   if (bResult)
-   {
-      LinearTimeWarper warper { mCurT0, mCurT0, mCurT1, mCurT0 + newLength };
-      track->ClearAndPaste(
-         mCurT0, mCurT1, outputTrack.get(), true, false, &warper);
-   }
-
-   if (newLength > mMaxNewLength)
-      mMaxNewLength = newLength;
 
    return bResult;
 }
@@ -618,7 +619,8 @@ void EffectChangeSpeed::OnChoice_Vinyl(wxCommandEvent & WXUNUSED(evt))
    mToVinyl = mpChoice_ToVinyl->GetSelection();
    // Use this as the 'preferred' choice.
    if (mFromVinyl != kVinyl_NA) {
-      SetPrivateConfig(GetCurrentSettingsGroup(), wxT("VinylChoice"), mFromVinyl);
+      SetConfig(GetDefinition(), PluginSettings::Private,
+         CurrentSettingsGroup(), wxT("VinylChoice"), mFromVinyl);
    }
 
    // If mFromVinyl & mToVinyl are set, then there's a NEW percent change.
@@ -673,8 +675,9 @@ void EffectChangeSpeed::OnTimeCtrl_ToLength(wxCommandEvent & WXUNUSED(evt))
 
 void EffectChangeSpeed::OnTimeCtrlUpdate(wxCommandEvent & evt)
 {
-   mFormat = NumericConverter::LookupFormat(
-      NumericConverter::TIME, evt.GetString() );
+   mFormat = NumericConverterFormats::Lookup(
+      FormatterContext::SampleRateContext(mProjectRate),
+      NumericConverterType_TIME(), evt.GetString());
 
    mpFromLengthCtrl->SetFormatName(mFormat);
    // Update From/To Length controls (precision has changed).
@@ -700,7 +703,7 @@ void EffectChangeSpeed::Update_Text_Multiplier()
 void EffectChangeSpeed::Update_Slider_PercentChange()
 // Update Slider Percent control from percent change.
 {
-   auto unwarped = std::min<double>(m_PercentChange, MAX_Percentage);
+   auto unwarped = std::min<double>(m_PercentChange, Percentage.max);
    if (unwarped > 0.0)
       // Un-warp values above zero to actually go up to kSliderMax.
       unwarped = pow(m_PercentChange, (1.0 / kSliderWarp));
@@ -728,7 +731,8 @@ void EffectChangeSpeed::Update_Vinyl()
             mpChoice_ToVinyl->SetSelection(mpChoice_FromVinyl->GetSelection());
          } else {
             // Use the last saved option.
-            GetPrivateConfig(GetCurrentSettingsGroup(), wxT("VinylChoice"), mFromVinyl, 0);
+            GetConfig(GetDefinition(), PluginSettings::Private,
+               CurrentSettingsGroup(), wxT("VinylChoice"), mFromVinyl, 0);
             mpChoice_FromVinyl->SetSelection(mFromVinyl);
             mpChoice_ToVinyl->SetSelection(mFromVinyl);
          }
@@ -775,12 +779,13 @@ void EffectChangeSpeed::Update_TimeCtrl_ToLength()
    // Negative times do not make sense.
    // 359999 = 99h:59m:59s which is a little less disturbing than overflow characters
    // though it may still look a bit strange with some formats.
-   mToLength = TrapDouble(mToLength, 0.0, 359999.0);
+   mToLength = std::clamp<double>(mToLength, 0.0, 359999.0);
    mpToLengthCtrl->SetValue(mToLength);
 }
 
 void EffectChangeSpeed::UpdateUI()
 // Disable OK and Preview if not in sensible range.
 {
-   EnableApply(m_PercentChange >= MIN_Percentage && m_PercentChange <= MAX_Percentage);
+   EffectEditor::EnableApply(mUIParent,
+      m_PercentChange >= Percentage.min && m_PercentChange <= Percentage.max);
 }

@@ -11,43 +11,25 @@
 #ifndef __AUDACITY_ABOUT_DLG__
 #define __AUDACITY_ABOUT_DLG__
 
-#include "MemoryX.h"
 #include <vector>
-#include "widgets/wxPanelWrapper.h" // to inherit
-
-extern const wxString VerCheckArgs();
-extern const wxString VerCheckUrl();
-extern const wxString VerCheckHtml();
+#include "wxPanelWrapper.h" // to inherit
 
 class wxStaticBitmap;
+class wxTextOutputStream;
 
 class ShuttleGui;
 
 struct AboutDialogCreditItem {
-   wxString description;
-   int role;
-
-   AboutDialogCreditItem(wxString &&description_, int role_)
-      : description(description_), role(role_)
+   AboutDialogCreditItem( TranslatableString str, int r )
+      : description{ std::move( str ) }, role{ r }
    {}
-
-   // No copy, use the move
-   AboutDialogCreditItem(const AboutDialogCreditItem&) PROHIBITED;
-   AboutDialogCreditItem& operator= (const AboutDialogCreditItem&) PROHIBITED;
-
-   // Move constructor, because wxString lacks one
-   AboutDialogCreditItem(AboutDialogCreditItem &&moveMe)
-      : role(moveMe.role)
-   {
-      description.swap(moveMe.description);
-   }
-
-   ~AboutDialogCreditItem() {}
+   TranslatableString description;
+   int role;
 };
 
 using AboutDialogCreditItemsList = std::vector<AboutDialogCreditItem>;
 
-class AboutDialog final : public wxDialogWrapper {
+class AUDACITY_DLL_API AboutDialog final : public wxDialogWrapper {
    DECLARE_DYNAMIC_CLASS(AboutDialog)
 
  public:
@@ -79,11 +61,14 @@ class AboutDialog final : public wxDialogWrapper {
    void PopulateInformationPage (ShuttleGui & S );
 
    void CreateCreditsList();
-   void AddCredit(wxString &&description, Role role);
+   void AddCredit( const wxString &name, Role role );
+   void AddCredit( const wxString &name, TranslatableString format, Role role );
    wxString GetCreditsByRole(AboutDialog::Role role);
 
-   void AddBuildinfoRow( wxString* htmlstring, const wxChar * libname, const wxChar * libdesc, const wxString &status);
-   void AddBuildinfoRow( wxString* htmlstring, const wxChar * libname, const wxChar * libdesc);
+   void AddBuildinfoRow( wxTextOutputStream *str, const wxChar * libname,
+      const TranslatableString &libdesc, const TranslatableString &status);
+   void AddBuildinfoRow( wxTextOutputStream *str,
+      const TranslatableString &description, const wxChar *spec);
 };
 
 #endif

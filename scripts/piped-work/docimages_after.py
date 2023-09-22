@@ -21,13 +21,11 @@ Effects  = [
             "Amplify","BassAndTreble","Compressor","Distortion","Echo",
             "Equalization","Normalize","Phaser",
             "Repeat","Reverb","Wahwah",
-            "HighPassFilter","LowPassFilter",
+            "High-passFilter","Low-passFilter",
             "NotchFilter","AdjustableFade","Delay","Limiter"               
             ]
 
-Slow = ["ChangePitch","ChangeSpeed", "ChangeTempo","Paulstretch",
-         "TimeScale"
-            ]
+Slow = ["ChangePitch","ChangeSpeed", "ChangeTempo","Paulstretch" ]
 
 
 Generators = ["Chirp","DtmfTones","Noise","Tone","Pluck"]
@@ -118,6 +116,7 @@ def spaceDemo():
     capture( 'BeforeTruncateSilence.png' , 'AllTracks' )
     do( 'Select: Start=0 End=0')
     capture( 'SpaceyTrack.png' , 'AllTracks' )
+    do('SelectAll')
     do( 'TruncateSilence' )
     capture( 'AfterTruncateSilence1.png' , 'AllTracks' )
     do( 'Select: Start=0 End=0')

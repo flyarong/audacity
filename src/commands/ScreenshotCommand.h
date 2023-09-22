@@ -2,7 +2,7 @@
 
    Audacity - A Digital Audio Editor
    Copyright 1999-2018 Audacity Team
-   License: GPL v2 - see LICENSE.txt
+   License: GPL v2 or later - see LICENSE.txt
 
    Dominic Mazzoni
    Dan Horgan
@@ -14,7 +14,6 @@
 #define __SCREENSHOT_COMMAND__
 
 #include "Command.h"
-#include "../commands/AudacityCommand.h"
 
 #include <wx/colour.h> // member variable
 
@@ -29,9 +28,7 @@ class AdornedRulerPanel;
 class AudacityProject;
 class CommandContext;
 
-#define SCREENSHOT_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Screenshot") }
-
-class ScreenshotCommand : public AudacityCommand
+class AUDACITY_DLL_API ScreenshotCommand : public AudacityCommand
 {
 public:
    enum kBackgrounds
@@ -52,18 +49,6 @@ public:
       keffects,
       kscriptables,
       kpreferences,
-      kselectionbar,
-      kspectralselection,
-      ktools,
-      ktransport,
-      kmixer,
-      kmeter,
-      kplaymeter,
-      krecordmeter,
-      kedit,
-      kdevice,
-      kscrub,
-      ktranscription,
       ktrackpanel,
       kruler,
       ktracks,
@@ -79,15 +64,21 @@ public:
       nCaptureWhats
    };
 
-   ScreenshotCommand(){ mbBringToTop=true;mIgnore=NULL;};
+   EnumValueSymbols kCaptureWhatStrings();
+
+   static const ComponentInterfaceSymbol Symbol;
+
+   ScreenshotCommand();
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SCREENSHOT_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Takes screenshots.");};
-   bool DefineParams( ShuttleParams & S ) override;
+   ComponentInterfaceSymbol GetSymbol() const override {return Symbol;};
+   TranslatableString GetDescription() const override {return XO("Takes screenshots.");};
+   template<bool Const> bool VisitSettings( SettingsVisitorBase<Const> &S );
+   bool VisitSettings( SettingsVisitor & S ) override;
+   bool VisitSettings( ConstSettingsVisitor & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#screenshot_short_format");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#screenshot_short_format";}
 
 private:
    int mWhat;
@@ -96,13 +87,15 @@ private:
    bool mbBringToTop;
    bool bHasBackground;
    bool bHasBringToTop;
-   friend class ScreenFrame;
+   friend class ScreenshotBigDialog;
 
 public:
    bool Apply(const CommandContext & context) override;
    void GetDerivedParams();
 
 private:
+   EnumValueSymbols mSymbols;
+
    // May need to ignore the screenshot dialog
    // Appears not to be used anymore.
    wxWindow *mIgnore;
@@ -119,7 +112,7 @@ private:
 
    wxRect GetBackgroundRect();
 
-   bool CaptureToolbar(const CommandContext & Context, ToolManager *man, int type, const wxString &name);
+   bool CaptureToolbar(const CommandContext & Context, ToolManager *man, Identifier type, const wxString &name);
    bool CaptureDock(const CommandContext & Context, wxWindow *win, const wxString &fileName);
    void CaptureCommands(const CommandContext & Context, const wxArrayStringEx &Commands  );
    void CaptureEffects(const CommandContext & Context, AudacityProject * pProject, const wxString &fileName );
@@ -142,7 +135,7 @@ private:
 public:
    static ScreenshotCommand * mpShooter;
    static void (*mIdleHandler)(wxIdleEvent& event);
-   static void SetIdleHandler( void (*pHandler)(wxIdleEvent& event) ){mIdleHandler=pHandler;};
+   static void SetIdleHandler( AudacityProject &project );
    static bool MayCapture( wxDialog * pDlg );
 
    void CaptureWindowOnIdle( const CommandContext & context, wxWindow * pWin );

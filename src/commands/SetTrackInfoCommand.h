@@ -20,45 +20,32 @@
 #include "Command.h"
 #include "CommandType.h"
 
-#define SET_TRACK_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Set Track") }
-#define SET_TRACK_STATUS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Set Track Status") }
-#define SET_TRACK_AUDIO_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Set Track Audio") }
-#define SET_TRACK_VISUALS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Set Track Visuals") }
-
 class Track;
 
 class SetTrackBase : public AudacityCommand
 {
 public:
-   SetTrackBase();
-   bool Apply(const CommandContext & context) override;
-   virtual bool ApplyInner( const CommandContext &context, Track *t  );
-   virtual bool DefineParams( ShuttleParams & S ) override;
-   virtual void PopulateOrExchange(ShuttleGui & S) override;
-
-   int mTrackIndex;
-   int mChannelIndex;
-   bool bHasTrackIndex;
-   bool bHasChannelIndex;
-
-   bool bIsSecondChannel;
-   bool mbPromptForTracks;
+   bool Apply(const CommandContext & context) final;
+   virtual bool ApplyInner(const CommandContext &context, Track &t) = 0;
 };
-
 
 class SetTrackStatusCommand : public SetTrackBase
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    //SetTrackStatusCommand();
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SET_TRACK_STATUS_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets various values for a track.");};
-   bool DefineParams( ShuttleParams & S ) override;
+   ComponentInterfaceSymbol GetSymbol() const override {return Symbol;};
+   TranslatableString GetDescription() const override {return XO("Sets various values for a track.");};
+   template<bool Const> bool VisitSettings( SettingsVisitorBase<Const> &S );
+   bool VisitSettings( SettingsVisitor & S ) override;
+   bool VisitSettings( ConstSettingsVisitor & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#set_track_status");};
-   bool ApplyInner( const CommandContext & context, Track * t ) override;
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_I#set_track_status";}
+   bool ApplyInner(const CommandContext & context, Track &t) override;
 
 public:
    wxString mTrackName;
@@ -74,16 +61,20 @@ public:
 class SetTrackAudioCommand : public SetTrackBase
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    //SetTrackAudioCommand();
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SET_TRACK_AUDIO_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets various values for a track.");};
-   bool DefineParams( ShuttleParams & S ) override;
+   ComponentInterfaceSymbol GetSymbol() const override {return Symbol;};
+   TranslatableString GetDescription() const override {return XO("Sets various values for a track.");};
+   template<bool Const> bool VisitSettings( SettingsVisitorBase<Const> &S );
+   bool VisitSettings( SettingsVisitor & S ) override;
+   bool VisitSettings( ConstSettingsVisitor & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#set_track_audio");};
-   bool ApplyInner( const CommandContext & context, Track * t ) override;
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_I#set_track_audio";}
+   bool ApplyInner(const CommandContext & context, Track &t) override;
 
 public:
    double mPan;
@@ -101,16 +92,20 @@ public:
 class SetTrackVisualsCommand : public SetTrackBase
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    //SetTrackVisualsCommand();
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SET_TRACK_VISUALS_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets various values for a track.");};
-   bool DefineParams( ShuttleParams & S ) override;
+   ComponentInterfaceSymbol GetSymbol() const override {return Symbol;};
+   TranslatableString GetDescription() const override {return XO("Sets various values for a track.");};
+   template<bool Const> bool VisitSettings( SettingsVisitorBase<Const> &S );
+   bool VisitSettings( SettingsVisitor & S ) override;
+   bool VisitSettings( ConstSettingsVisitor & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#set_track_visuals");};
-   bool ApplyInner( const CommandContext & context, Track * t ) override;
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_I#set_track_visuals";}
+   bool ApplyInner(const CommandContext & context, Track &t) override;
 
 public:
    int mColour;
@@ -123,7 +118,7 @@ public:
 
    bool bUseSpecPrefs;
    bool bSpectralSelect;
-   bool bGrayScale;
+   int mSpecColorScheme;
 
 // For tracking optional parameters.
    bool bHasColour;
@@ -136,42 +131,40 @@ public:
 
    bool bHasUseSpecPrefs;
    bool bHasSpectralSelect;
-   bool bHasGrayScale;
+   bool bHasSpecColorScheme;
 };
 
 class SetTrackCommand : public SetTrackBase
 {
 public:
-   SetTrackCommand();
+   static const ComponentInterfaceSymbol Symbol;
+
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return SET_TRACK_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets various values for a track.");};
+   ComponentInterfaceSymbol GetSymbol() const override {return Symbol;};
+   TranslatableString GetDescription() const override {return XO("Sets various values for a track.");};
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#set_track");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#set_track";}
 
 public:
 
-   bool DefineParams( ShuttleParams & S ) override { 
+   template<bool Const> bool VisitSettings( SettingsVisitorBase<Const> &S ) {
       return 
-         SetTrackBase::DefineParams(S) &&
-         mSetStatus.DefineParams(S) &&  
-         mSetAudio.DefineParams(S) &&
-         mSetVisuals.DefineParams(S);
+         mSetStatus.VisitSettings(S) &&
+         mSetAudio.VisitSettings(S) &&
+         mSetVisuals.VisitSettings(S);
    };
+   bool VisitSettings( SettingsVisitor & S ) override;
+   bool VisitSettings( ConstSettingsVisitor & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override {
-      SetTrackBase::PopulateOrExchange( S );
       mSetStatus.PopulateOrExchange(S);
       mSetAudio.PopulateOrExchange(S);
       mSetVisuals.PopulateOrExchange(S);
    };
-   bool ApplyInner(const CommandContext & context, Track * t ) override {
-      mSetStatus.bIsSecondChannel = bIsSecondChannel;
-      mSetAudio.bIsSecondChannel = bIsSecondChannel;
-      mSetVisuals.bIsSecondChannel = bIsSecondChannel;
+   bool ApplyInner(const CommandContext & context, Track &t) override {
       return 
-         mSetStatus.ApplyInner( context, t ) &&  
-         mSetAudio.ApplyInner( context, t )&&
-         mSetVisuals.ApplyInner( context, t );
+         mSetStatus.ApplyInner(context, t) &&
+         mSetAudio.ApplyInner(context, t) &&
+         mSetVisuals.ApplyInner(context, t);
    }
 
 private:

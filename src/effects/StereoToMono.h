@@ -11,46 +11,40 @@
 #ifndef __AUDACITY_EFFECT_STEREO_TO_MONO__
 #define __AUDACITY_EFFECT_STEREO_TO_MONO__
 
-#include "Effect.h"
+#include "StatefulEffect.h"
 
-#define STEREOTOMONO_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Stereo To Mono") }
-
-class EffectStereoToMono final : public Effect
+class EffectStereoToMono final : public StatefulEffect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectStereoToMono();
    virtual ~EffectStereoToMono();
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-   bool IsInteractive() override;
+   EffectType GetType() const override;
+   bool IsInteractive() const override;
 
-   // EffectClientInterface implementation
-
-   unsigned GetAudioInCount() override;
-   unsigned GetAudioOutCount() override;
+   unsigned GetAudioInCount() const override;
+   unsigned GetAudioOutCount() const override;
 
    // Effect implementation
 
-   bool Process() override;
-   bool IsHidden() override;
+   bool Process(EffectInstance &instance, EffectSettings &settings) override;
+   bool IsHiddenFromMenus() const override;
 
 private:
    // EffectStereoToMono implementation
 
-   bool ProcessOne(int count);
+   bool ProcessOne(TrackList &outputs,
+      sampleCount & curTime, sampleCount totalTime, WaveTrack &track);
 
-private:
-   sampleCount mStart;
-   sampleCount mEnd;
-   WaveTrack *mLeftTrack;
-   WaveTrack *mRightTrack;
 };
 
 #endif

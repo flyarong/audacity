@@ -13,57 +13,58 @@
 
 ********************************************************************//**
 
-\class SoundActivatedRecord
+\class SoundActivatedRecordDialog
 \brief Configures sound activated recording.
 
 *//********************************************************************/
 
-#include "Audacity.h"
+
 #include "SoundActivatedRecord.h"
 
 #include "ShuttleGui.h"
 #include "Prefs.h"
-#include "prefs/GUISettings.h"
-#include "Internat.h"
+#include "Decibels.h"
 
-BEGIN_EVENT_TABLE(SoundActivatedRecord, wxDialogWrapper)
-   EVT_BUTTON(wxID_OK, SoundActivatedRecord::OnOK)
+BEGIN_EVENT_TABLE(SoundActivatedRecordDialog, wxDialogWrapper)
+   EVT_BUTTON(wxID_OK, SoundActivatedRecordDialog::OnOK)
 END_EVENT_TABLE()
 
-SoundActivatedRecord::SoundActivatedRecord(wxWindow* parent)
-: wxDialogWrapper(parent, -1, _("Sound Activated Record"), wxDefaultPosition,
+SoundActivatedRecordDialog::SoundActivatedRecordDialog(wxWindow* parent)
+: wxDialogWrapper(parent, -1, XO("Sound Activated Record"), wxDefaultPosition,
            wxDefaultSize, wxCAPTION )
 //           wxDefaultSize, wxCAPTION | wxTHICK_FRAME)
 {
-   SetName(GetTitle());
+   SetName();
    ShuttleGui S(this, eIsCreatingFromPrefs);
    PopulateOrExchange(S);
    Fit();
    Center();
 }
 
-SoundActivatedRecord::~SoundActivatedRecord()
+SoundActivatedRecordDialog::~SoundActivatedRecordDialog()
 {
 }
 
-void SoundActivatedRecord::PopulateOrExchange(ShuttleGui & S)
+void SoundActivatedRecordDialog::PopulateOrExchange(ShuttleGui & S)
 {
    S.SetBorder(5);
-   int dBRange;
 
    S.StartVerticalLay();
    {
       S.StartMultiColumn(2, wxEXPAND);
-         S.SetStretchyCol(1);
-         dBRange = gPrefs->Read(ENV_DB_KEY, ENV_DB_RANGE);
-         S.TieSlider(_("Activation level (dB):"), wxT("/AudioIO/SilenceLevel"), -50, 0, -dBRange);
+      S.SetStretchyCol(1);
+      S.TieSlider(
+         XXO("Activation level (dB):"),
+         {wxT("/AudioIO/SilenceLevel"), -50},
+         0, -DecibelScaleCutoff.Read()
+      )->SetMinSize(wxSize(300, wxDefaultCoord));
       S.EndMultiColumn();
    }
    S.EndVerticalLay();
    S.AddStandardButtons();
 }
 
-void SoundActivatedRecord::OnOK(wxCommandEvent & WXUNUSED(event))
+void SoundActivatedRecordDialog::OnOK(wxCommandEvent & WXUNUSED(event))
 {
    ShuttleGui S( this, eIsSavingToPrefs );
    PopulateOrExchange( S );

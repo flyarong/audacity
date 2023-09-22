@@ -5,40 +5,67 @@
   EffectManager.h
 
   Audacity(R) is copyright (c) 1999-2008 Audacity Team.
-  License: GPL v2.  See License.txt.
+  License: GPL v2 or later.  See License.txt.
 
 **********************************************************************/
 
 #ifndef __AUDACITY_EFFECTMANAGER__
 #define __AUDACITY_EFFECTMANAGER__
 
-#include "../Experimental.h"
-
+#include <memory>
 #include <vector>
 
-#include "audacity/EffectInterface.h"
-#include "Effect.h"
-
 #include <unordered_map>
+#include "EffectInterface.h"
+#include "EffectUIServices.h" // for EffectDialogFactory
+#include "Identifier.h"
 
 class AudacityCommand;
+class AudacityProject;
 class CommandContext;
 class CommandMessageTarget;
+class ComponentInterfaceSymbol;
+class TrackList;
+class SelectedRegion;
+class wxString;
+typedef wxString PluginID;
 
-using EffectArray = std::vector <Effect*> ;
-using EffectMap = std::unordered_map<wxString, Effect *>;
+#include "EffectInterface.h"
+
+struct EffectAndDefaultSettings{
+   EffectPlugin *effect{};
+   EffectSettings settings{};
+};
+
+using EffectMap = std::unordered_map<wxString, EffectAndDefaultSettings>;
 using AudacityCommandMap = std::unordered_map<wxString, AudacityCommand *>;
-using EffectOwnerMap = std::unordered_map< wxString, std::shared_ptr<Effect> >;
+using EffectOwnerMap = std::unordered_map< wxString, std::shared_ptr<EffectPlugin> >;
 
-#if defined(EXPERIMENTAL_EFFECTS_RACK)
-class EffectRack;
-#endif
 class AudacityCommand;
 
 
 class AUDACITY_DLL_API EffectManager
 {
 public:
+
+   enum : unsigned {
+      // No flags specified
+      kNone = 0x00,
+      // Flag used to disable prompting for configuration parameteres.
+      kConfigured = 0x01,
+      // Flag used to disable saving the state after processing.
+      kSkipState = 0x02,
+      // Flag used to disable "Repeat Last Effect"
+      kDontRepeatLast = 0x04,
+      // Flag used to disable "Select All during Repeat Generator Effect"
+      kRepeatGen = 0x08,
+      // Flag used for repeating Nyquist Prompt
+      kRepeatNyquistPrompt = 0x10,
+   };
+
+   /*! Find the singleton EffectInstanceFactory for ID. */
+   static
+   const EffectInstanceFactory *GetInstanceFactory(const PluginID &ID);
 
    /** Get the singleton instance of the EffectManager. Probably not safe
        for multi-thread use. */
@@ -54,26 +81,15 @@ public:
    EffectManager();
    virtual ~EffectManager();
 
-   /** (Un)Register an effect so it can be executed. */
-   // Here solely for the purpose of Nyquist Workbench until
-   // a better solution is devised.
-   const PluginID & RegisterEffect(Effect *f);
+   //! Here solely for the purpose of Nyquist Workbench until a better solution is devised.
+   /** Register an effect so it can be executed.
+     uEffect is expected to be a self-hosting Nyquist effect */
+   const PluginID & RegisterEffect(std::unique_ptr<EffectPlugin> uEffect);
+   //! Used only by Nyquist Workbench module
    void UnregisterEffect(const PluginID & ID);
 
-   /** Run an effect given the plugin ID */
-   // Returns true on success.  Will only operate on tracks that
-   // have the "selected" flag set to true, which is consistent with
-   // Audacity's standard UI.
-   bool DoEffect(const PluginID & ID,
-                 wxWindow *parent,
-                 double projectRate,
-                 TrackList *list,
-                 TrackFactory *factory,
-                 SelectedRegion *selectedRegion,
-                 bool shouldPrompt = true);
-
-   wxString GetEffectFamilyName(const PluginID & ID);
-   wxString GetVendorName(const PluginID & ID);
+   TranslatableString GetEffectFamilyName(const PluginID & ID);
+   TranslatableString GetVendorName(const PluginID & ID);
 
    /** Run a command given the plugin ID */
    // Returns true on success. 
@@ -84,11 +100,11 @@ public:
 
    // Renamed from 'Effect' to 'Command' prior to moving out of this class.
    ComponentInterfaceSymbol GetCommandSymbol(const PluginID & ID);
-   wxString GetCommandName(const PluginID & ID); // translated
+   TranslatableString GetCommandName(const PluginID & ID);
    CommandID GetCommandIdentifier(const PluginID & ID);
-   wxString GetCommandDescription(const PluginID & ID);
-   wxString GetCommandUrl(const PluginID & ID);
-   wxString GetCommandTip(const PluginID & ID);
+   TranslatableString GetCommandDescription(const PluginID & ID);
+   ManualPageID GetCommandUrl(const PluginID & ID);
+   TranslatableString GetCommandTip(const PluginID & ID);
    // flags control which commands are included.
    void GetCommandDefinition(const PluginID & ID, const CommandContext & context, int flags);
    bool IsHidden(const PluginID & ID);
@@ -97,88 +113,69 @@ public:
    bool SupportsAutomation(const PluginID & ID);
    wxString GetEffectParameters(const PluginID & ID);
    bool SetEffectParameters(const PluginID & ID, const wxString & params);
-   bool PromptUser(const PluginID & ID, wxWindow *parent);
+   bool PromptUser( const PluginID & ID, const EffectDialogFactory &factory,
+      wxWindow &parent );
    bool HasPresets(const PluginID & ID);
    wxString GetPreset(const PluginID & ID, const wxString & params, wxWindow * parent);
    wxString GetDefaultPreset(const PluginID & ID);
 
 private:
-   void SetBatchProcessing(const PluginID & ID, bool start);
+   void BatchProcessingOn(const PluginID & ID);
+   void BatchProcessingOff(const PluginID & ID);
+   //! A custom deleter for std::unique_ptr
    struct UnsetBatchProcessing {
       PluginID mID;
       void operator () (EffectManager *p) const
-         { if(p) p->SetBatchProcessing(mID, false); }
+         { if(p) p->BatchProcessingOff(mID); }
    };
    using BatchProcessingScope =
       std::unique_ptr< EffectManager, UnsetBatchProcessing >;
 public:
-   // RAII for the function above
+   //! Begin a scope that ends when the returned object is destroyed
+   /*!
+    Within this scope, "batch" (i.e. macro) processing happens, and
+    Effects that are not yet stateless may change their state temporarily,
+    but it is restored afterward
+    */
    BatchProcessingScope SetBatchProcessing(const PluginID &ID)
    {
-      SetBatchProcessing(ID, true); return BatchProcessingScope{ this, {ID} };
+      BatchProcessingOn(ID); return BatchProcessingScope{ this, {ID} };
    }
 
    /** Allow effects to disable saving the state at run time */
    void SetSkipStateFlag(bool flag);
    bool GetSkipStateFlag();
 
-   // Realtime effect processing
-   bool RealtimeIsActive();
-   bool RealtimeIsSuspended();
-   void RealtimeAddEffect(Effect *effect);
-   void RealtimeRemoveEffect(Effect *effect);
-   void RealtimeSetEffects(const EffectArray & mActive);
-   void RealtimeInitialize(double rate);
-   void RealtimeAddProcessor(int group, unsigned chans, float rate);
-   void RealtimeFinalize();
-   void RealtimeSuspend();
-   void RealtimeResume();
-   void RealtimeProcessStart();
-   size_t RealtimeProcess(int group, unsigned chans, float **buffers, size_t numSamples);
-   void RealtimeProcessEnd();
-   int GetRealtimeLatency();
-
-#if defined(EXPERIMENTAL_EFFECTS_RACK)
-   void ShowRack();
-#endif
-
    const PluginID & GetEffectByIdentifier(const CommandID & strTarget);
 
+   /*! Return an effect by its ID. */
+   EffectPlugin *GetEffect(const PluginID & ID);
+
+   /*! Get default settings by effect ID.  May return nullptr */
+   EffectSettings *GetDefaultSettings(const PluginID & ID);
+
+   /*! Get effect and default settings by effect ID. */
+   /*!
+    @post `result: !result.first || result.second`
+    (if first member is not null, then the second is not null)
+    */
+   std::pair<EffectPlugin *, EffectSettings *>
+   GetEffectAndDefaultSettings(const PluginID & ID);
+
 private:
-   /** Return an effect by its ID. */
-   Effect *GetEffect(const PluginID & ID);
+   EffectAndDefaultSettings &DoGetEffect(const PluginID & ID);
+
    AudacityCommand *GetAudacityCommand(const PluginID & ID);
 
-#if defined(EXPERIMENTAL_EFFECTS_RACK)
-   EffectRack *GetRack();
-#endif
-
-private:
    EffectMap mEffects;
    AudacityCommandMap mCommands;
    EffectOwnerMap mHostEffects;
 
    int mNumEffects;
 
-   wxCriticalSection mRealtimeLock;
-   EffectArray mRealtimeEffects;
-   int mRealtimeLatency;
-   bool mRealtimeSuspended;
-   bool mRealtimeActive;
-   std::vector<unsigned> mRealtimeChans;
-   std::vector<double> mRealtimeRates;
-
    // Set true if we want to skip pushing state 
    // after processing at effect run time.
    bool mSkipStateFlag;
-
-#if defined(EXPERIMENTAL_EFFECTS_RACK)
-   EffectRack *mRack;
-
-   friend class EffectRack;
-#endif
-
 };
-
 
 #endif

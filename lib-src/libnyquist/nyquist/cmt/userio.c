@@ -153,6 +153,10 @@ extern int debug;
 #include "xlisp.h"
 #endif
 
+int     IOinputfd;      /* input file descriptor (usually 0) */
+
+int     IOnochar;       /* Value to be returned by IOgetchar()
+                           where there is no input to be had */
 
 /****************************************************************************
 *
@@ -160,8 +164,8 @@ extern int debug;
 *
 ****************************************************************************/
 
-int GetReadFileName();
-int GetWriteFileName();
+int GetReadFileName(void);
+int GetWriteFileName(void);
 
 #ifdef MACINTOSH
 private void PtoC_StrCopy(char *p1, char *p2);
@@ -188,7 +192,7 @@ public int abort_flag;          /* control C or control G equivalent */
 public int redirect_flag;		/* check whether the I/O has been redirected--
                                     Added by Ning Hu	Apr.2001*/
 /* extern void musicterm(); */ /*DMH: from macmidi.c, to allow abort_check*/
-public boolean ascii_input();
+public boolean ascii_input(char *c);
 
 /****************************************************************************
 *
@@ -807,7 +811,7 @@ void readln(fp)
 #ifdef DOTS_FOR_ARGS
 
 /* define with ... in arg list and use vsnprintf to get temp1 */
-public void gprintf(long where, char *format, ...)
+public void gprintf(long where, const char *format, ...)
 {
     char temp1[GPRINTF_MESSAGE_LEN];
 #ifdef AMIGA
@@ -1102,8 +1106,7 @@ char *c;
 #endif
 
 #ifdef UNIX
-public boolean ascii_input(c)
-char *c;
+public boolean ascii_input(char *c)
 {
 #ifdef UNIX_MACH
         /*
@@ -1131,7 +1134,7 @@ char *c;
         if ((*c) == '\r')
                 (*c) = '\n';
         return(ret);
-#else /* UNIX_MACH */
+#else /* __APPLE__ */
 #ifndef BUFFERED_SYNCHRONOUS_INPUT
     int input = IOgetchar();
     if (input != IOnochar) {
@@ -1141,7 +1144,7 @@ char *c;
     }
 #endif /* BUFFERED_SYNCHRONOUS_INPUT */
     return FALSE;
-#endif /* UNIX_MACH */
+#endif /* __APPLE__ */
 }
 #endif
 
@@ -1155,7 +1158,7 @@ public void unget_ascii(char c)
 }
 
 
-public boolean check_ascii()
+public boolean check_ascii(void)
 {
         char c;
         
@@ -1245,8 +1248,8 @@ public int wait_ascii()
         FD_SET(IOinputfd, &readfds);
         gflush();
         getrlimit(RLIMIT_NOFILE, &file_limit);
-        select(file_limit.rlim_max+1, &readfds, 0, 0, NULL);
-#endif /* !UNIX_MACH */
+        select((int) (file_limit.rlim_max+1), &readfds, 0, 0, NULL);
+#endif /* !__APPLE__ */
 #endif /* ifdef UNIX */
     }
     return (int) c;

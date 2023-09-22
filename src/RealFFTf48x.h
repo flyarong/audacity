@@ -3,7 +3,7 @@
 
 #include "MemoryX.h"
 
-#define fft_type float
+using fft_type = float;
 
 int SmallRB(int bits, int numberBits);
 
@@ -17,7 +17,7 @@ enum {
 
 struct FFTParam;
 
-/* wrapper funcitons. If passed -1 function choice will be made locally */
+/* wrapper functions. If passed -1 function choice will be made locally */
 void RealFFTf1x(fft_type *, FFTParam*, int functionType=-1);
 void InverseRealFFTf1x(fft_type *, FFTParam*, int functionType=-1);
 void ReorderToTime1x(FFTParam *hFFT, fft_type *buffer, fft_type *TimeOut, int functionType=-1);

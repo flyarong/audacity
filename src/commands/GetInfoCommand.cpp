@@ -20,34 +20,48 @@ This class now lists
 
 *//*******************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
+
 #include "GetInfoCommand.h"
 
-#include "../Project.h"
+#include "CommandDispatch.h"
 #include "CommandManager.h"
+#include "../CommonCommandFlags.h"
+#include "LoadCommands.h"
+#include "Project.h"
+#include "../ProjectWindows.h"
+#include "CommandManager.h"
+#include "CommandTargets.h"
 #include "../effects/EffectManager.h"
 #include "../widgets/Overlay.h"
-#include "../widgets/OverlayPanel.h"
+#include "../TrackPanelAx.h"
 #include "../TrackPanel.h"
-#include "../Track.h"
-#include "../WaveClip.h"
-#include "../WaveTrack.h"
+#include "WaveClip.h"
+#include "ViewInfo.h"
+#include "WaveTrack.h"
+#include "prefs/WaveformSettings.h"
 #include "../LabelTrack.h"
-#include "../Envelope.h"
-#include "CommandContext.h"
+#include "../NoteTrack.h"
+#include "TimeTrack.h"
+#include "Envelope.h"
 
 #include "SelectCommand.h"
-#include "../Project.h"
-#include "../ShuttleGui.h"
+#include "ShuttleGui.h"
 #include "CommandContext.h"
 
 #include "../prefs/PrefsDialog.h"
-#include "../Shuttle.h"
-#include "../PluginManager.h"
-#include "../ShuttleGui.h"
+#include "SettingsVisitor.h"
+#include "PluginManager.h"
+#include "../tracks/ui/ChannelView.h"
+#include "ShuttleGui.h"
 
+#include <wx/frame.h>
+#include <wx/log.h>
 #include <wx/menu.h>
 
+const ComponentInterfaceSymbol GetInfoCommand::Symbol
+{ XO("Get Info") };
+
+namespace{ BuiltinCommandsModule::Registration< GetInfoCommand > reg; }
 enum {
    kCommands,
    //kCommandsPlus,
@@ -92,13 +106,18 @@ static const EnumValueSymbol kFormats[nFormats] =
    { XO("Brief") }
 };
 
-
-
-bool GetInfoCommand::DefineParams( ShuttleParams & S ){
+template<bool Const>
+bool GetInfoCommand::VisitSettings( SettingsVisitorBase<Const> & S ){
    S.DefineEnum( mInfoType, wxT("Type"), 0, kTypes, nTypes );
    S.DefineEnum( mFormat, wxT("Format"), 0, kFormats, nFormats );
    return true;
 }
+
+bool GetInfoCommand::VisitSettings( SettingsVisitor & S )
+   { return VisitSettings<false>(S); }
+
+bool GetInfoCommand::VisitSettings( ConstSettingsVisitor & S )
+   { return VisitSettings<true>(S); }
 
 void GetInfoCommand::PopulateOrExchange(ShuttleGui & S)
 {
@@ -106,10 +125,10 @@ void GetInfoCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieChoice( _("Type:"),
-         mInfoType, LocalizedStrings( kTypes, nTypes ));
-      S.TieChoice( _("Format:"),
-         mFormat, LocalizedStrings( kFormats, nFormats ));
+      S.TieChoice( XXO("Type:"),
+         mInfoType, Msgids( kTypes, nTypes ));
+      S.TieChoice( XXO("Format:"),
+         mFormat, Msgids( kFormats, nFormats ));
    }
    S.EndMultiColumn();
 }
@@ -122,7 +141,7 @@ bool GetInfoCommand::Apply(const CommandContext &context)
    if( mFormat == kLisp )
    {
       CommandContext LispyContext( 
-         *(context.GetProject()), 
+         context.project,
          std::make_unique<LispifiedCommandOutputTargets>( *context.pOutput.get() )
          );
       return ApplyInner( LispyContext );
@@ -131,7 +150,7 @@ bool GetInfoCommand::Apply(const CommandContext &context)
    if( mFormat == kBrief )
    {
       CommandContext BriefContext( 
-         *(context.GetProject()), 
+         context.project,
          std::make_unique<BriefCommandOutputTargets>( *context.pOutput.get() )
          );
       return ApplyInner( BriefContext );
@@ -143,8 +162,8 @@ bool GetInfoCommand::Apply(const CommandContext &context)
 bool GetInfoCommand::ApplyInner(const CommandContext &context)
 {
    switch( mInfoType  ){
-      case kCommands     : return SendCommands( context, 0 );
-      //case kCommandsPlus : return SendCommands( context, 1 );
+      // flag of 1 to include parameterless commands.
+      case kCommands     : return SendCommands( context, 1 );
       case kMenus        : return SendMenus( context );
       case kPreferences  : return SendPreferences( context );
       case kTracks       : return SendTracks( context );
@@ -160,7 +179,7 @@ bool GetInfoCommand::ApplyInner(const CommandContext &context)
 
 bool GetInfoCommand::SendMenus(const CommandContext &context)
 {
-   wxMenuBar * pBar = context.GetProject()->GetMenuBar();
+   wxMenuBar * pBar = GetProjectFrame( context.project ).GetMenuBar();
    if(!pBar ){
       wxLogDebug("No menus");
       return false;
@@ -185,15 +204,215 @@ bool GetInfoCommand::SendMenus(const CommandContext &context)
    return true;
 }
 
+#include "Prefs.h"
+
+namespace {
+
+/**************************************************************************//**
+\brief Shuttle that retrieves a JSON format definition of a command's parameters.
+********************************************************************************/
+class ShuttleGuiGetDefinition : public ShuttleGui, public CommandMessageTargetDecorator
+{
+public:
+   ShuttleGuiGetDefinition(wxWindow * pParent,CommandMessageTarget & target );
+   virtual ~ShuttleGuiGetDefinition();
+
+   wxCheckBox * TieCheckBox(
+      const TranslatableString &Prompt,
+      const BoolSetting &Setting) override;
+   wxCheckBox * TieCheckBoxOnRight(
+      const TranslatableString &Prompt,
+      const BoolSetting &Setting) override;
+
+   wxChoice *TieChoice(const TranslatableString &Prompt,
+      ChoiceSetting &choiceSetting) override;
+
+   wxChoice * TieNumberAsChoice(const TranslatableString &Prompt,
+      IntSetting &Setting,
+      const TranslatableStrings & Choices,
+      const std::vector<int> * pInternalChoices, int iNoMatchSelector) override;
+
+   wxTextCtrl * TieTextBox(
+      const TranslatableString &Prompt,
+      const StringSetting &Setting,
+      const int nChars) override;
+   wxTextCtrl * TieIntegerTextBox(
+      const TranslatableString & Prompt,
+      const IntSetting &Setting,
+      const int nChars) override;
+   wxTextCtrl * TieNumericTextBox(
+      const TranslatableString & Prompt,
+      const DoubleSetting &Setting,
+      const int nChars) override;
+   wxSlider * TieSlider(
+      const TranslatableString & Prompt,
+      const IntSetting &Setting,
+      const int max,
+      const int min = 0) override;
+   wxSpinCtrl * TieSpinCtrl(
+      const TranslatableString &Prompt,
+      const IntSetting &Setting,
+      const int max,
+      const int min) override;
+};
+
+ShuttleGuiGetDefinition::ShuttleGuiGetDefinition(
+   wxWindow * pParent,CommandMessageTarget & target )
+: ShuttleGui( pParent, eIsGettingMetadata ),
+  CommandMessageTargetDecorator( target )
+{
+
+}
+ShuttleGuiGetDefinition::~ShuttleGuiGetDefinition(void)
+{
+}
+
+wxCheckBox * ShuttleGuiGetDefinition::TieCheckBox(
+   const TranslatableString &Prompt,
+   const BoolSetting &Setting)
+{
+   StartStruct();
+   AddItem( Setting.GetPath(), "id" );
+   AddItem( Prompt.Translation(), "prompt" );
+   AddItem( "bool", "type" );
+   AddBool( Setting.GetDefault(), "default"  );
+   EndStruct();
+   return ShuttleGui::TieCheckBox( Prompt, Setting );
+}
+
+wxCheckBox * ShuttleGuiGetDefinition::TieCheckBoxOnRight(
+   const TranslatableString &Prompt,
+   const BoolSetting &Setting)
+{
+   StartStruct();
+   AddItem( Setting.GetPath(), "id" );
+   AddItem( Prompt.Translation(), "prompt" );
+   AddItem( "bool", "type" );
+   AddBool( Setting.GetDefault(), "default"  );
+   EndStruct();
+   return ShuttleGui::TieCheckBoxOnRight( Prompt, Setting );
+}
+
+wxChoice * ShuttleGuiGetDefinition::TieChoice(const TranslatableString &Prompt,
+   ChoiceSetting &choiceSetting)
+{
+   StartStruct();
+   AddItem( choiceSetting.Key(), "id" );
+   AddItem( Prompt.Translation(), "prompt" );
+   AddItem( "enum", "type" );
+   AddItem( choiceSetting.Default().Internal(), "default"  );
+   StartField( "enum" );
+   StartArray();
+   for ( const auto &choice : choiceSetting.GetSymbols().GetInternals() )
+      AddItem( choice );
+   EndArray();
+   EndField();
+   EndStruct();
+   return ShuttleGui::TieChoice( Prompt, choiceSetting );
+}
+
+wxChoice * ShuttleGuiGetDefinition::TieNumberAsChoice(
+   const TranslatableString &Prompt,
+   IntSetting &Setting,
+   const TranslatableStrings & Choices,
+   const std::vector<int> * pInternalChoices, int iNoMatchSelector)
+{
+   // Come here for controls that present non-exhaustive choices among some
+   //  numbers, with an associated control that allows arbitrary entry of an
+   // "Other..."
+   StartStruct();
+   AddItem( Setting.GetPath(), "id" );
+   AddItem( Prompt.Translation(), "prompt" );
+   AddItem( "number", "type" ); // not "enum" !
+   AddItem( Setting.GetDefault(), "default"  );
+   EndStruct();
+   return ShuttleGui::TieNumberAsChoice(
+      Prompt, Setting, Choices, pInternalChoices, iNoMatchSelector );
+}
+
+wxTextCtrl * ShuttleGuiGetDefinition::TieTextBox(
+   const TranslatableString &Prompt,
+   const StringSetting &Setting,
+   const int nChars)
+{
+   StartStruct();
+   AddItem( Setting.GetPath(), "id" );
+   AddItem( Prompt.Translation(), "prompt" );
+   AddItem( "string", "type" );
+   AddItem( Setting.GetDefault(), "default"  );
+   EndStruct();
+   return ShuttleGui::TieTextBox( Prompt, Setting, nChars );
+}
+
+wxTextCtrl * ShuttleGuiGetDefinition::TieIntegerTextBox(
+   const TranslatableString & Prompt,
+   const IntSetting &Setting,
+   const int nChars)
+{
+   StartStruct();
+   AddItem( Setting.GetPath(), "id" );
+   AddItem( Prompt.Translation(), "prompt" );
+   AddItem( "number", "type" );
+   AddItem( Setting.GetDefault(), "default"  );
+   EndStruct();
+   return ShuttleGui::TieIntegerTextBox( Prompt, Setting, nChars );
+}
+
+wxTextCtrl * ShuttleGuiGetDefinition::TieNumericTextBox(
+   const TranslatableString & Prompt,
+   const DoubleSetting &Setting,
+   const int nChars)
+{
+   StartStruct();
+   AddItem( Setting.GetPath(), "id" );
+   AddItem( Prompt.Translation(), "prompt" );
+   AddItem( "number", "type" );
+   AddItem( Setting.GetDefault(), "default"  );
+   EndStruct();
+   return ShuttleGui::TieNumericTextBox( Prompt, Setting, nChars );
+}
+
+wxSlider * ShuttleGuiGetDefinition::TieSlider(
+   const TranslatableString & Prompt,
+   const IntSetting &Setting,
+   const int max,
+   const int min) 
+{
+   StartStruct();
+   AddItem( Setting.GetPath(), "id" );
+   AddItem( Prompt.Translation(), "prompt" );
+   AddItem( "number", "type" );
+   AddItem( Setting.GetDefault(), "default"  );
+   EndStruct();
+   return ShuttleGui::TieSlider( Prompt, Setting, max, min );
+}
+
+wxSpinCtrl * ShuttleGuiGetDefinition::TieSpinCtrl(
+   const TranslatableString &Prompt,
+   const IntSetting &Setting,
+   const int max,
+   const int min) 
+{
+   StartStruct();
+   AddItem( Setting.GetPath(), "id" );
+   AddItem( Prompt.Translation(), "prompt" );
+   AddItem( "number", "type" );
+   AddItem( Setting.GetDefault(), "default"  );
+   EndStruct();
+   return ShuttleGui::TieSpinCtrl( Prompt, Setting, max, min );
+}
+
+}
+
 bool GetInfoCommand::SendPreferences(const CommandContext &context)
 {
    context.StartArray();
-   GlobalPrefsDialog dialog( context.GetProject() );
+   auto pWin = &GetProjectFrame( context.project );
+   GlobalPrefsDialog dialog( pWin, &context.project );
    // wxCommandEvent Evt;
    //dialog.Show();
-   wxWindow * pWin = context.GetProject();
    ShuttleGuiGetDefinition S(pWin, *((context.pOutput)->mStatusTarget) );
-   dialog.ShuttleAll( S );
+    dialog.ShuttleAll( S );
    context.EndArray();
    return true;
 }
@@ -207,14 +426,12 @@ bool GetInfoCommand::SendCommands(const CommandContext &context, int flags )
    PluginManager & pm = PluginManager::Get();
    EffectManager & em = EffectManager::Get();
    {
-      const PluginDescriptor *plug = pm.GetFirstPlugin(PluginTypeEffect | PluginTypeAudacityCommand);
-      while (plug)
-      {
-         auto command = em.GetCommandIdentifier(plug->GetID());
+      for (auto &plug
+           : pm.PluginsOfType(PluginTypeEffect | PluginTypeAudacityCommand)) {
+         auto command = em.GetCommandIdentifier(plug.GetID());
          if (!command.empty()){
-            em.GetCommandDefinition( plug->GetID(), context, flags );
+            em.GetCommandDefinition( plug.GetID(), context, flags );
          }
-         plug = pm.GetNextPlugin(PluginTypeEffect | PluginTypeAudacityCommand );
       }
    }
    context.EndArray();
@@ -224,7 +441,7 @@ bool GetInfoCommand::SendCommands(const CommandContext &context, int flags )
 bool GetInfoCommand::SendBoxes(const CommandContext &context)
 {
    //context.Status("Boxes");
-   wxWindow * pWin = context.GetProject();
+   auto pWin = &GetProjectFrame( context.project );
 
    context.StartArray();
    wxRect R = pWin->GetScreenRect();
@@ -253,42 +470,42 @@ bool GetInfoCommand::SendBoxes(const CommandContext &context)
 
 bool GetInfoCommand::SendTracks(const CommandContext & context)
 {
-   TrackList *projTracks = context.GetProject()->GetTracks();
+   auto &tracks = TrackList::Get( context.project );
    context.StartArray();
-   for (auto trk : projTracks->Leaders())
+   for (auto trk : tracks)
    {
-      TrackPanel *panel = context.GetProject()->GetTrackPanel();
-      Track * fTrack = panel->GetFocusedTrack();
+      auto &trackFocus = TrackFocus::Get( context.project );
+      Track * fTrack = trackFocus.Get();
 
       context.StartStruct();
       context.AddItem( trk->GetName(), "name" );
       context.AddBool( (trk == fTrack), "focused");
       context.AddBool( trk->GetSelected(), "selected" );
       //JKC: Possibly add later...
-      //context.AddItem( trk->GetHeight(), "height" );
-      trk->TypeSwitch( [&] (const WaveTrack* t ) {
+      //context.AddItem(ChannelView::GetChannelGroupHeight(*trk), "height");
+      trk->TypeSwitch( [&] (const WaveTrack &t) {
          float vzmin, vzmax;
-         t->GetDisplayBounds(&vzmin, &vzmax);
+         WaveformScale::Get(t).GetDisplayBounds(vzmin, vzmax);
          context.AddItem( "wave", "kind" );
-         context.AddItem( t->GetStartTime(), "start" );
-         context.AddItem( t->GetEndTime(), "end" );
-         context.AddItem( t->GetPan() , "pan");
-         context.AddItem( t->GetGain() , "gain");
-         context.AddItem( TrackList::Channels(t).size(), "channels");
-         context.AddBool( t->GetSolo(), "solo" );
-         context.AddBool( t->GetMute(), "mute");
+         context.AddItem( t.GetStartTime(), "start" );
+         context.AddItem( t.GetEndTime(), "end" );
+         context.AddItem( t.GetPan() , "pan");
+         context.AddItem( t.GetGain() , "gain");
+         context.AddItem( TrackList::NChannels(t), "channels");
+         context.AddBool( t.GetSolo(), "solo" );
+         context.AddBool( t.GetMute(), "mute");
          context.AddItem( vzmin, "VZoomMin");
          context.AddItem( vzmax, "VZoomMax");
       },
 #if defined(USE_MIDI)
-      [&](const NoteTrack *) {
+      [&](const NoteTrack &) {
          context.AddItem( "note", "kind" );
       },
 #endif
-      [&](const LabelTrack *) {
+      [&](const LabelTrack &) {
          context.AddItem( "label", "kind" );
       },
-      [&](const TimeTrack *) {
+      [&](const TimeTrack &) {
          context.AddItem( "time", "kind" );
       }
       );
@@ -300,19 +517,22 @@ bool GetInfoCommand::SendTracks(const CommandContext & context)
 
 bool GetInfoCommand::SendClips(const CommandContext &context)
 {
-   TrackList *tracks = context.GetProject()->GetTracks();
+   auto &tracks = TrackList::Get( context.project );
    int i=0;
    context.StartArray();
-   for (auto waveTrack : tracks->Leaders<WaveTrack>()) {
-      WaveClipPointers ptrs( waveTrack->SortedClipArray());
-      for(WaveClip * pClip : ptrs ) {
-         context.StartStruct();
-         context.AddItem( (double)i, "track" );
-         context.AddItem( pClip->GetStartTime(), "start" );
-         context.AddItem( pClip->GetEndTime(), "end" );
-         context.AddItem( pClip->GetColourIndex(), "color" );
-         context.EndStruct();
-      }
+   for (auto t : tracks) {
+      t->TypeSwitch([&](WaveTrack &waveTrack) {
+         WaveClipPointers ptrs(waveTrack.SortedClipArray());
+         for (WaveClip * pClip : ptrs) {
+            context.StartStruct();
+            context.AddItem((double)i, "track");
+            context.AddItem(pClip->GetPlayStartTime(), "start");
+            context.AddItem(pClip->GetPlayEndTime(), "end");
+            context.AddItem(pClip->GetColourIndex(), "color");
+            context.EndStruct();
+         }
+      });
+      // Per track numbering counts all tracks
       i++;
    }
    context.EndArray();
@@ -322,34 +542,39 @@ bool GetInfoCommand::SendClips(const CommandContext &context)
 
 bool GetInfoCommand::SendEnvelopes(const CommandContext &context)
 {
-   TrackList *tracks = context.GetProject()->GetTracks();
+   auto &tracks = TrackList::Get( context.project );
    int i=0;
    int j=0;
    context.StartArray();
-   for (auto waveTrack : tracks->Leaders<WaveTrack>()) {
-      WaveClipPointers ptrs( waveTrack->SortedClipArray());
-      for(WaveClip * pClip : ptrs ) {
-         context.StartStruct();
-         context.AddItem( (double)i, "track" );
-         context.AddItem( (double)j, "clip" );
-         context.AddItem( pClip->GetStartTime(), "start" );
-         Envelope * pEnv = pClip->GetEnvelope();
-         context.StartField( "points" );
-         context.StartArray();
-         double offset = pEnv->mOffset;
-         for( size_t k=0;k<pEnv->mEnv.size(); k++)
-         {
-            context.StartStruct( );
-            context.AddItem( pEnv->mEnv[k].GetT()+offset, "t" );
-            context.AddItem( pEnv->mEnv[k].GetVal(), "y" );
+   for (auto t : tracks) {
+      t->TypeSwitch([&](WaveTrack &waveTrack) {
+         WaveClipPointers ptrs(waveTrack.SortedClipArray());
+         j = 0;
+         for (WaveClip * pClip : ptrs) {
+            context.StartStruct();
+            context.AddItem((double)i, "track");
+            context.AddItem((double)j, "clip");
+            context.AddItem(pClip->GetPlayStartTime(), "start");
+            Envelope * pEnv = pClip->GetEnvelope();
+            context.StartField("points");
+            context.StartArray();
+            double offset = pEnv->GetOffset();
+            for (size_t k = 0; k < pEnv->GetNumberOfPoints(); k++)
+            {
+               context.StartStruct();
+               context.AddItem((*pEnv)[k].GetT() + offset, "t");
+               context.AddItem((*pEnv)[k].GetVal(), "y");
+               context.EndStruct();
+            }
+            context.EndArray();
+            context.EndField();
+            context.AddItem(pClip->GetPlayEndTime(), "end");
             context.EndStruct();
+            j++;
          }
-         context.EndArray();
-         context.EndField();
-         context.AddItem( pClip->GetEndTime(), "end" );
-         context.EndStruct();
-         j++;
-      }
+      });
+      // Per track numbering counts all tracks
+      i++;
    }
    context.EndArray();
 
@@ -359,11 +584,11 @@ bool GetInfoCommand::SendEnvelopes(const CommandContext &context)
 
 bool GetInfoCommand::SendLabels(const CommandContext &context)
 {
-   TrackList *tracks = context.GetProject()->GetTracks();
+   auto &tracks = TrackList::Get( context.project );
    int i=0;
    context.StartArray();
-   for (auto t : tracks->Leaders()) {
-      t->TypeSwitch( [&](LabelTrack *labelTrack) {
+   for (auto t : tracks) {
+      t->TypeSwitch( [&](LabelTrack &labelTrack) {
 #ifdef VERBOSE_LABELS_FORMATTING
          for (int nn = 0; nn< (int)labelTrack->mLabels.size(); nn++) {
             const auto &label = labelTrack->mLabels[nn];
@@ -378,8 +603,7 @@ bool GetInfoCommand::SendLabels(const CommandContext &context)
          context.StartArray();
          context.AddItem( (double)i ); // Track number.
          context.StartArray();
-         for (int nn = 0; nn< (int)labelTrack->mLabels.size(); nn++) {
-            const auto &label = labelTrack->mLabels[nn];
+         for ( const auto &label : labelTrack.GetLabels() ) {
             context.StartArray();
             context.AddItem( label.getT0() ); // start
             context.AddItem( label.getT1() ); // end
@@ -395,8 +619,6 @@ bool GetInfoCommand::SendLabels(const CommandContext &context)
    }
    context.EndArray();
 
-
-
    return true;
 }
 
@@ -410,7 +632,7 @@ void GetInfoCommand::ExploreMenu( const CommandContext &context, wxMenu * pMenu,
    if( !pMenu )
       return;
 
-   CommandManager * pMan = context.GetProject()->GetCommandManager();
+   auto &commandManager = CommandManager::Get( context.project );
 
    wxMenuItemList list = pMenu->GetMenuItems();
    size_t lcnt = list.size();
@@ -422,7 +644,7 @@ void GetInfoCommand::ExploreMenu( const CommandContext &context, wxMenu * pMenu,
    for (size_t lndx = 0; lndx < lcnt; lndx++) {
       item = list.Item(lndx)->GetData();
       Label = item->GetItemLabelText();
-      Name = pMan->GetNameFromID( item->GetId() );
+      Name = commandManager.GetNameFromNumericID( item->GetId() );
       Accel = item->GetItemLabel();
       if( Accel.Contains("\t") )
          Accel = Accel.AfterLast('\t');
@@ -442,7 +664,9 @@ void GetInfoCommand::ExploreMenu( const CommandContext &context, wxMenu * pMenu,
       context.AddItem( Label, "label" );
       context.AddItem( Accel, "accel" );
       if( !Name.empty() )
-         context.AddItem( Name, "id" );// It is called Scripting ID outside Audacity.
+         // using GET to expose CommandID in results of GetInfoCommand...
+         // PRL asks, is that all right?
+         context.AddItem( Name.GET(), "id" );// It is called Scripting ID outside Audacity.
       context.EndStruct();
 
       if (item->IsSubMenu()) {
@@ -480,87 +704,31 @@ void GetInfoCommand::ExploreAdornments( const CommandContext &context,
 }
 
 void GetInfoCommand::ExploreTrackPanel( const CommandContext &context,
-   wxPoint P, wxWindow * pWin, int WXUNUSED(Id), int depth )
+   wxPoint P, int depth )
 {
-   AudacityProject * pProj = context.GetProject();
-   TrackPanel * pTP = pProj->GetTrackPanel();
-
-   wxRect trackRect = pWin->GetRect();
-
-   for (auto t : pProj->GetTracks()->Any() + IsVisibleTrack{ pProj }) {
-      trackRect.y = t->GetY() - pTP->mViewInfo->vpos;
-      trackRect.height = t->GetHeight();
-
-#if 0
-      // Work in progress on getting the TCP button positions and sizes.
-      wxRect rect = trackRect;
-      Track *l = t->GetLink();
-
-      if (t->GetLinked()) {
-         rect.height += l->GetHeight();
-      }
-
-      switch (t->GetKind()) {
-         case Track::Wave:
-         {
-            break;
+   AudacityProject * pProj = &context.project;
+   auto &tp = TrackPanel::Get( *pProj );
+   wxRect panelRect{ {}, tp.GetSize() };
+   for (auto leader : TrackList::Get(*pProj)) {
+      for (auto t : leader->Channels()) {
+         auto rulers = tp.FindRulerRects(*t);
+         for (auto &R : rulers) {
+            if (!R.Intersects(panelRect))
+               continue;
+            R.SetPosition( R.GetPosition() + P );
+            context.StartStruct();
+            context.AddItem( depth, "depth" );
+            context.AddItem( "VRuler", "label" );
+            context.StartField("box");
+            context.StartArray();
+            context.AddItem( R.GetLeft() );
+            context.AddItem( R.GetTop() );
+            context.AddItem( R.GetRight() );
+            context.AddItem( R.GetBottom() );
+            context.EndArray();
+            context.EndField();
+            context.EndStruct();
          }
-#ifdef USE_MIDI
-         case Track::Note:
-         {
-            break;
-         }
-#endif // USE_MIDI
-         case Track::Label:
-            break;
-         case Track::Time:
-            break;
-      }
-      {
-         // Start with whole track rect
-         wxRect R = trackRect;
-
-         // Now exclude left, right, and top insets
-         R.x += kLeftInset;
-         R.y += kTopInset;
-         R.width -= kLeftInset * 2;
-         R.height -= kTopInset;
-
-         int labelw = pTP->GetLabelWidth();
-         int vrul = pTP->GetVRulerOffset();
-         bool bIsWave = true;
-         //mTrackInfo.DrawBackground(dc, R, t->GetSelected(), bIsWave, labelw, vrul);
-
-
-         for (Overlay * pOverlay : pTP->mOverlays) {
-            auto R2(pOverlay->GetRectangle(trackRect.GetSize()).first);
-            context.Status( wxString::Format("  [ %2i, %3i, %3i, %3i, %3i, \"%s\" ],", 
-               depth, R2.GetLeft(), R2.GetTop(), R2.GetRight(), R2.GetBottom(), "Overthing" )); 
-         }
-      }
-#endif
-
-      // The VRuler.
-      {  
-         wxRect R = trackRect;
-         R.x += pTP->GetVRulerOffset();
-         R.y += kTopMargin;
-         R.width = pTP->GetVRulerWidth();
-         R.height -= (kTopMargin + kBottomMargin);
-         R.SetPosition( R.GetPosition() + P );
-
-         context.StartStruct();
-         context.AddItem( depth, "depth" );
-         context.AddItem( "VRuler", "label" ); 
-         context.StartField("box");
-         context.StartArray();
-         context.AddItem( R.GetLeft() );
-         context.AddItem( R.GetTop() );
-         context.AddItem( R.GetRight() );
-         context.AddItem( R.GetBottom() );
-         context.EndArray();
-         context.EndField();
-         context.EndStruct();
       }
    }
 }
@@ -574,7 +742,7 @@ void GetInfoCommand::ExploreWindows( const CommandContext &context,
    if( pWin->GetName() == "Track Panel" )
    {
       wxRect R = pWin->GetScreenRect();
-      ExploreTrackPanel(  context, R.GetPosition()-P, pWin, Id, depth );
+      ExploreTrackPanel(  context, R.GetPosition()-P, depth );
       return;
    }
    wxWindowList list = pWin->GetChildren();
@@ -614,3 +782,19 @@ void GetInfoCommand::ExploreWindows( const CommandContext &context,
    }
 }
 
+namespace {
+using namespace MenuTable;
+
+// Register menu items
+
+AttachedItem sAttachment{
+   wxT("Optional/Extra/Part2/Scriptables2"),
+   // Note that the PLUGIN_SYMBOL must have a space between words,
+   // whereas the short-form used here must not.
+   // (So if you did write "Compare Audio" for the PLUGIN_SYMBOL name, then
+   // you would have to use "CompareAudio" here.)
+   Command( wxT("GetInfo"), XXO("Get Info..."),
+      CommandDispatch::OnAudacityCommand, AudioIONotBusyFlag() )
+};
+
+}

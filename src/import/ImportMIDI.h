@@ -18,13 +18,15 @@ into a NoteTrack.
 #ifndef _IMPORT_MIDI_
 #define _IMPORT_MIDI_
 
-#include "../Audacity.h" // for USE_* macros
-#include "audacity/Types.h"
+
+#include "Identifier.h"
 
 #if defined(USE_MIDI)
 
-class wxString;
+class AudacityProject;
 class NoteTrack;
+
+bool AUDACITY_DLL_API DoImportMIDI( AudacityProject &project, const FilePath &fileName );
 
 bool ImportMIDI(const FilePath &fName, NoteTrack * dest);
 

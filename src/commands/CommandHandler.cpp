@@ -16,29 +16,23 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "CommandHandler.h"
 
-#include <wx/event.h>
-#include "../Project.h"
-#include "Command.h"
+#include "../ActiveProject.h"
+#include "Project.h"
+#include "../ProjectWindow.h"
 #include "AppCommandEvent.h"
 #include "ScriptCommandRelay.h"
 #include "../commands/CommandContext.h"
+#include "../commands/Command.h"
 
 CommandHandler::CommandHandler()
- : mCurrentContext(std::make_unique<CommandContext>
-                   (*GetActiveProject()))
-{ }
-
-CommandHandler::~CommandHandler()
 {
 }
 
-void CommandHandler::SetProject(AudacityProject *)
+CommandHandler::~CommandHandler()
 {
-   // TODO:  Review if the extend command handling is ever utilized
-   // mCurrentContext->proj = proj;
 }
 
 void CommandHandler::OnReceiveCommand(AppCommandEvent &event)
@@ -46,19 +40,17 @@ void CommandHandler::OnReceiveCommand(AppCommandEvent &event)
    // First retrieve the actual command from the event 'envelope'.
    OldStyleCommandPointer cmd = event.GetCommand();
 
-   // JKC: In case the user changed the project, let us track that.
-   // This saves us the embarrassment (crash) of a NEW project
-   // being opened, the old one closed and still trying to act
-   // on the old one.
-   SetProject( GetActiveProject() );
-   // Then apply it to current application & project.  Note that the
-   // command may change the context - for example, switching to a
-   // different project.
-   auto result = GuardedCall<bool>( [&] {
-      return cmd->Apply(*mCurrentContext);
-   });
-   wxUnusedVar(result);
+   if (const auto pProject = GetActiveProject().lock()) {
+      // Then apply it to current application & project.  Note that the
+      // command may change the context - for example, switching to a
+      // different project.
+      CommandContext context{ *pProject };
+      auto result = GuardedCall<bool>( [&] {
+         return cmd->Apply( context );
+      });
+      wxUnusedVar(result);
 
-   // Redraw the project
-   mCurrentContext->GetProject()->RedrawProject();
+      // Redraw the project
+      ProjectWindow::Get( context.project ).RedrawProject();
+   }
 }

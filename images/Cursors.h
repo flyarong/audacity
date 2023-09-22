@@ -1,10 +1,5 @@
 // Mac, Win and Linux all support 32 x 32 cursors now.
 
-#define CURSORS_SIZE32
-
-
-#ifdef CURSORS_SIZE32
-
 // Cursors MUST be 32x32 (or they will be resized).
 // You only get black, white and transparent to use.
 
@@ -13,8 +8,14 @@
 // color of saturated red was used.  (middle grey 
 
 
-
+#include "Cursors32/ClipStretchLeft.xpm"
+#include "Cursors32/ClipStretchRight.xpm"
+#include "Cursors32/ClipTrimLeft.xpm"
+#include "Cursors32/ClipTrimRight.xpm"
+#include "Cursors32/CrosshairCursor.xpm"
 #include "Cursors32/DisabledCursor.xpm"
+#include "Cursors32/RearrangeCursor.xpm"
+#include "Cursors32/RearrangingCursor.xpm"
 #include "Cursors32/EnvCursor.xpm"
 #include "Cursors32/TimeCursor.xpm"
 #include "Cursors32/IBeamCursor.xpm"
@@ -31,27 +32,7 @@
 #include "Cursors32/StretchLeftCursor.xpm"
 #include "Cursors32/StretchRightCursor.xpm"
 #endif
+#include "Cursors32/SubViewsCursor.xpm"
 
-#else
-
-#include "Cursors16/DisabledCursor.xpm"
-#include "Cursors16/EnvCursor.xpm"
-#include "Cursors16/TimeCursor.xpm"
-#include "Cursors16/IBeamCursor.xpm"
-#include "Cursors16/DrawCursor.xpm"
-#include "Cursors16/ZoomInCursor.xpm"
-#include "Cursors16/ZoomOutCursor.xpm"
-#include "Cursors16/LabelCursorLeft.xpm"
-#include "Cursors16/LabelCursorRight.xpm"
-#include "Cursors16/BottomFrequencyCursor.xpm"
-#include "Cursors16/TopFrequencyCursor.xpm"
-#include "Cursors16/BandWidthCursor.xpm"
-#ifdef USE_MIDI
-#include "Cursors16/StretchCursor.xpm"
-#include "Cursors16/StretchLeftCursor.xpm"
-#include "Cursors16/StretchRightCursor.xpm"
-#endif
-
-#endif
-
+AUDACITY_DLL_API
 std::unique_ptr<wxCursor> MakeCursor(int WXUNUSED(CursorId), const char * const pXpm[36], int HotX, int HotY);

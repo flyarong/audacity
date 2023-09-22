@@ -13,13 +13,22 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "StereoToMono.h"
+#include "EffectOutputTracks.h"
+#include "LoadEffects.h"
 
-#include <wx/intl.h>
+#include "Mix.h"
+#include "MixAndRender.h"
+#include "Project.h"
+#include "RealtimeEffectList.h"
+#include "WaveTrack.h"
+#include "ProgressDialog.h"
 
-#include "../Project.h"
-#include "../WaveTrack.h"
+const ComponentInterfaceSymbol EffectStereoToMono::Symbol
+{ XO("Stereo To Mono") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectStereoToMono > reg; }
 
 EffectStereoToMono::EffectStereoToMono()
 {
@@ -31,140 +40,158 @@ EffectStereoToMono::~EffectStereoToMono()
 
 // ComponentInterface implementation
 
-ComponentInterfaceSymbol EffectStereoToMono::GetSymbol()
+ComponentInterfaceSymbol EffectStereoToMono::GetSymbol() const
 {
-   return STEREOTOMONO_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectStereoToMono::GetDescription()
+TranslatableString EffectStereoToMono::GetDescription() const
 {
-   return _("Converts stereo tracks to mono");
+   return XO("Converts stereo tracks to mono");
 }
 
 // EffectDefinitionInterface implementation
 
-EffectType EffectStereoToMono::GetType()
+EffectType EffectStereoToMono::GetType() const
 {
    // Really EffectTypeProcess, but this prevents it from showing in the Effect Menu
    return EffectTypeHidden;
 }
 
-bool EffectStereoToMono::IsInteractive()
+bool EffectStereoToMono::IsInteractive() const
 {
    return false;
 }
 
-// EffectClientInterface implementation
-
-unsigned EffectStereoToMono::GetAudioInCount()
+unsigned EffectStereoToMono::GetAudioInCount() const
 {
    return 2;
 }
 
-unsigned EffectStereoToMono::GetAudioOutCount()
+unsigned EffectStereoToMono::GetAudioOutCount() const
 {
    return 1;
 }
 
 // Effect implementation
 
-bool EffectStereoToMono::Process()
+bool EffectStereoToMono::Process(EffectInstance &, EffectSettings &)
 {
    // Do not use mWaveTracks here.  We will possibly DELETE tracks,
    // so we must use the "real" tracklist.
-   this->CopyInputTracks(); // Set up mOutputTracks.
+   EffectOutputTracks outputs { *mTracks,
+      // This effect ignores mT0 and mT1 but always mixes the entire tracks.
+      {{ mTracks->GetStartTime(), mTracks->GetEndTime() }}
+   };
    bool bGoodResult = true;
 
-   auto trackRange = mOutputTracks->SelectedLeaders< WaveTrack >();
+   // Determine the total time (in samples) used by all of the target tracks
+   // only for progress dialog
+   sampleCount totalTime = 0;
+
+   auto trackRange = outputs.Get().Selected<WaveTrack>();
+   for (const auto left : trackRange) {
+      if (left->Channels().size() > 1) {
+         auto start = left->TimeToLongSamples(left->GetStartTime());
+         auto end = left->TimeToLongSamples(left->GetEndTime());
+         totalTime += (end - start);
+      }
+   }
+
+   // Process each stereo track
+   sampleCount curTime = 0;
    bool refreshIter = false;
 
-   int count = 0;
-   while ( trackRange.first != trackRange.second ) {
-      mLeftTrack = *trackRange.first;
-      auto channels = TrackList::Channels( mLeftTrack );
-      if (channels.size() != 2) {
-         // TODO: more-than-two-channels
-         ++ trackRange.first;
-         continue;
-      }
+   mProgress->SetMessage(XO("Mixing down to mono"));
 
-      mRightTrack = * channels.rbegin();
-
-      if ((mLeftTrack->GetRate() == mRightTrack->GetRate())) {
-         auto leftTrackStart = mLeftTrack->TimeToLongSamples(mLeftTrack->GetStartTime());
-         auto rightTrackStart = mRightTrack->TimeToLongSamples(mRightTrack->GetStartTime());
-         mStart = wxMin(leftTrackStart, rightTrackStart);
-
-         auto leftTrackEnd = mLeftTrack->TimeToLongSamples(mLeftTrack->GetEndTime());
-         auto rightTrackEnd = mRightTrack->TimeToLongSamples(mRightTrack->GetEndTime());
-         mEnd = wxMax(leftTrackEnd, rightTrackEnd);
-
-         bGoodResult = ProcessOne(count);
-         if (!bGoodResult)
+   // Don't use range-for, because iterators may be invalidated by erasure from
+   // the track list
+   while (trackRange.first != trackRange.second) {
+      auto track = *trackRange.first;
+      if (track->Channels().size() > 1) {
+         if (!ProcessOne(outputs.Get(), curTime, totalTime, *track))
             break;
-
          // The right channel has been deleted, so we must restart from the beginning
          refreshIter = true;
       }
 
       if (refreshIter) {
-         trackRange = mOutputTracks->SelectedLeaders< WaveTrack >();
+         trackRange = outputs.Get().Selected<WaveTrack>();
          refreshIter = false;
       }
       else
          ++trackRange.first;
-
-      count++;
    }
 
-   this->ReplaceProcessedTracks(bGoodResult);
+   if (bGoodResult)
+      outputs.Commit();
+
    return bGoodResult;
 }
 
-bool EffectStereoToMono::ProcessOne(int count)
+bool EffectStereoToMono::ProcessOne(TrackList &outputs,
+   sampleCount & curTime, sampleCount totalTime, WaveTrack &track)
 {
-   float  curLeftFrame;
-   float  curRightFrame;
-   float  curMonoFrame;
-
-   auto idealBlockLen = mLeftTrack->GetMaxBlockSize() * 2;
-   auto index = mStart;
-   Floats leftBuffer { idealBlockLen };
-   Floats rightBuffer{ idealBlockLen };
+   auto idealBlockLen = track.GetMaxBlockSize() * 2;
    bool bResult = true;
+   sampleCount processed = 0;
 
-   AudacityProject *p = GetActiveProject();
-   auto outTrack =
-      p->GetTrackFactory()->NewWaveTrack(floatSample, mLeftTrack->GetRate());
+   const auto start = track.GetStartTime();
+   const auto end = track.GetEndTime();
 
-   while (index < mEnd) {
-      bResult &= mLeftTrack->Get((samplePtr)leftBuffer.get(), floatSample, index, idealBlockLen);
-      bResult &= mRightTrack->Get((samplePtr)rightBuffer.get(), floatSample, index, idealBlockLen);
-      auto limit = limitSampleBufferSize( idealBlockLen, mEnd - index );
-      for (decltype(limit) i = 0; i < limit; ++i) {
-         index++;
-         curLeftFrame = leftBuffer[i];
-         curRightFrame = rightBuffer[i];
-         curMonoFrame = (curLeftFrame + curRightFrame) / 2.0;
-         leftBuffer[i] = curMonoFrame;
-      }
-      outTrack->Append((samplePtr)leftBuffer.get(), floatSample, limit);
-      if (TrackProgress(count, 2.*(index.as_double() / (mEnd - mStart).as_double())))
+   Mixer::Inputs tracks;
+   tracks.emplace_back(
+      track.SharedPointer<const SampleTrack>(), GetEffectStages(track));
+
+   Mixer mixer(move(tracks),
+      true,                // Throw to abort mix-and-render if read fails:
+      Mixer::WarpOptions{ inputTracks()->GetOwner() },
+      start,
+      end,
+      1,
+      idealBlockLen,
+      false,               // Not interleaved
+      track.GetRate(),
+      floatSample);
+
+   // Always make mono output; don't use WideEmptyCopy
+   auto outTrack = track.EmptyCopy();
+   auto tempList = TrackList::Temporary(nullptr, outTrack, nullptr);
+   assert(outTrack->IsLeader());
+   outTrack->ConvertToSampleFormat(floatSample);
+
+   while (auto blockLen = mixer.Process()) {
+      auto buffer = mixer.GetBuffer();
+      for (auto i = 0; i < blockLen; i++)
+         ((float *)buffer)[i] /= 2.0;
+
+      // If mixing channels that both had only 16 bit effective format
+      // (for example), and no gains or envelopes, still there should be
+      // dithering because of the averaging above, which may introduce samples
+      // lying between the quantization levels.  So default the effectiveFormat
+      // to widest.
+      outTrack->Append(buffer, floatSample, blockLen, 1);
+
+      curTime += blockLen;
+      if (TotalProgress(curTime.as_double() / totalTime.as_double()))
          return false;
    }
-
-   double minStart = wxMin(mLeftTrack->GetStartTime(), mRightTrack->GetStartTime());
-   mLeftTrack->Clear(mLeftTrack->GetStartTime(), mLeftTrack->GetEndTime());
    outTrack->Flush();
-   mLeftTrack->Paste(minStart, outTrack.get());
-   mOutputTracks->GroupChannels( *mLeftTrack,  1 );
-   mOutputTracks->Remove(mRightTrack);
+
+   outputs.UnlinkChannels(track);
+   const auto right = * ++track.GetOwner()->Find(&track);
+   // Should be a consequence of unlinking:
+   assert(right->IsLeader());
+   outputs.Remove(*right);
+
+   track.Clear(start, end);
+   track.Paste(start, *outTrack);
+   RealtimeEffectList::Get(track).Clear();
 
    return bResult;
 }
 
-bool EffectStereoToMono::IsHidden()
+bool EffectStereoToMono::IsHiddenFromMenus() const
 {
    return true;
 }
-

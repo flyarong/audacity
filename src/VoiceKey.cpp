@@ -18,21 +18,17 @@ or "OFF" point
 *//*******************************************************************/
 
 
-#include "Audacity.h"
+
 #include "VoiceKey.h"
 
-#include <wx/string.h>
 #include <math.h>
-#include <stdio.h>
 
-#include <wx/filedlg.h>
 #include <wx/textfile.h>
-#include <wx/intl.h>
 #include <iostream>
 
 #include "WaveTrack.h"
-#include "widgets/ErrorDialog.h"
-#include "Internat.h"
+#include "AudacityMessageBox.h"
+#include "wxPanelWrapper.h"
 
 using std::cout;
 using std::endl;
@@ -96,7 +92,7 @@ sampleCount VoiceKey::OnForward (
          backwards by words.  So 'key' is being used in the sense of an index.
          This error message means that you've selected too short
          a region of audio to be able to use this feature.*/
-      AudacityMessageBox(_("Selection is too small to use voice key."));
+      AudacityMessageBox( XO("Selection is too small to use voice key.") );
       return start;
    }
    else {
@@ -150,7 +146,7 @@ sampleCount VoiceKey::OnForward (
          //To speed things up, create a local buffer to store things in, to avoid the costly t.Get();
          //Only go through the first SignalWindowSizeInt samples, and choose the first that trips the key.
          Floats buffer{ remaining };
-         t.Get((samplePtr)buffer.get(), floatSample,
+         t.GetFloats(buffer.get(),
                lastsubthresholdsample, remaining);
 
 
@@ -244,7 +240,7 @@ sampleCount VoiceKey::OnBackward (
 
    if((mWindowSize) >= (len + 10).as_double() ){
 
-      AudacityMessageBox(_("Selection is too small to use voice key."));
+      AudacityMessageBox( XO("Selection is too small to use voice key.") );
       return end;
    }
    else {
@@ -300,7 +296,7 @@ sampleCount VoiceKey::OnBackward (
          //To speed things up, create a local buffer to store things in, to avoid the costly t.Get();
          //Only go through the first mSilentWindowSizeInt samples, and choose the first that trips the key.
          Floats buffer{ remaining };
-         t.Get((samplePtr)buffer.get(), floatSample,
+         t.GetFloats(buffer.get(),
                lastsubthresholdsample - remaining, remaining);
 
          //Initialize these trend markers atrend and ztrend.  They keep track of the
@@ -382,13 +378,13 @@ sampleCount VoiceKey::OnBackward (
 }
 
 
-//Move froward from the start to find an OFF region.
+//Move forward from the start to find an OFF region.
 sampleCount VoiceKey::OffForward (
    const WaveTrack & t, sampleCount start, sampleCount len)
 {
 
    if((mWindowSize) >= (len + 10).as_double() ){
-      AudacityMessageBox(_("Selection is too small to use voice key."));
+      AudacityMessageBox( XO("Selection is too small to use voice key.") );
 
       return start;
    }
@@ -443,7 +439,7 @@ sampleCount VoiceKey::OffForward (
          //To speed things up, create a local buffer to store things in, to avoid the costly t.Get();
          //Only go through the first SilentWindowSizeInt samples, and choose the first that trips the key.
          Floats buffer{ remaining };
-         t.Get((samplePtr)buffer.get(), floatSample,
+         t.GetFloats(buffer.get(),
                lastsubthresholdsample, remaining);
 
          //Initialize these trend markers atrend and ztrend.  They keep track of the
@@ -526,7 +522,7 @@ sampleCount VoiceKey::OffBackward (
 
    if((mWindowSize) >= (len + 10).as_double() ){
 
-      AudacityMessageBox(_("Selection is too small to use voice key."));
+      AudacityMessageBox( XO("Selection is too small to use voice key.") );
       return end;
    }
    else {
@@ -580,7 +576,7 @@ sampleCount VoiceKey::OffBackward (
          //To speed things up, create a local buffer to store things in, to avoid the costly t.Get();
          //Only go through the first SilentWindowSizeInt samples, and choose the first that trips the key.
          Floats buffer{ remaining };
-         t.Get((samplePtr)buffer.get(), floatSample,
+         t.GetFloats(buffer.get(),
                lastsubthresholdsample - remaining, remaining);
 
          //Initialize these trend markers atrend and ztrend.  They keep track of the
@@ -819,16 +815,25 @@ void VoiceKey::CalibrateNoise(const WaveTrack & t, sampleCount start, sampleCoun
    mDirectionChangesMean = sumdc / samples;
    mDirectionChangesSD =sqrt(sumdc2 / samples - mDirectionChangesMean * mDirectionChangesMean) ;
 
-   wxString text = _("Calibration Results\n");
+   auto text = XO("Calibration Results\n");
+   text +=
    /* i18n-hint: %1.4f is replaced by a number.  sd stands for 'Standard Deviations'*/
-   text +=           wxString::Format(_("Energy                  -- mean: %1.4f  sd: (%1.4f)\n"),mEnergyMean,mEnergySD);
-   text+=            wxString::Format(_("Sign Changes        -- mean: %1.4f  sd: (%1.4f)\n"),mSignChangesMean,mSignChangesSD);
-   text += wxString::Format(_("Direction Changes  -- mean: %1.4f  sd: (%1.4f)\n"), mDirectionChangesMean, mDirectionChangesSD);
-   AudacityMessageDialog{ NULL, text,
-      _("Calibration Complete"),
+      XO("Energy                  -- mean: %1.4f  sd: (%1.4f)\n")
+         .Format( mEnergyMean, mEnergySD );
+   text +=
+      XO("Sign Changes        -- mean: %1.4f  sd: (%1.4f)\n")
+         .Format( mSignChangesMean, mSignChangesSD );
+   text +=
+      XO("Direction Changes  -- mean: %1.4f  sd: (%1.4f)\n")
+         .Format( mDirectionChangesMean, mDirectionChangesSD );
+   AudacityMessageDialog{
+      nullptr,
+      text,
+      XO("Calibration Complete"),
       wxOK | wxICON_INFORMATION,
-      wxPoint(-1, -1) }
-   .ShowModal();
+      wxPoint(-1, -1)
+   }
+      .ShowModal();
 
    AdjustThreshold(mThresholdAdjustment);
 }
@@ -862,7 +867,7 @@ double VoiceKey::TestEnergy (
          //Figure out how much to grab
          auto block = limitSampleBufferSize ( t.GetBestBlockSize(s), len );
 
-         t.Get((samplePtr)buffer.get(), floatSample, s,block);                      //grab the block;
+         t.GetFloats(buffer.get(), s,block);                      //grab the block;
 
          //Now, go through the block and calculate energy
          for(decltype(block) i = 0; i< block; i++)
@@ -905,7 +910,7 @@ double VoiceKey::TestSignChanges(
       //Figure out how much to grab
       auto block = limitSampleBufferSize ( t.GetBestBlockSize(s), len );
 
-      t.Get((samplePtr)buffer.get(), floatSample, s, block);                      //grab the block;
+      t.GetFloats(buffer.get(), s, block);                      //grab the block;
 
       if  (len == originalLen)
          {
@@ -962,7 +967,7 @@ double VoiceKey::TestDirectionChanges(
       //Figure out how much to grab
       auto block = limitSampleBufferSize ( t.GetBestBlockSize(s), len );
 
-      t.Get((samplePtr)buffer.get(), floatSample, s, block);                      //grab the block;
+      t.GetFloats(buffer.get(), s, block);                      //grab the block;
 
       if  (len == originalLen) {
          //The first time through, set stuff up special.

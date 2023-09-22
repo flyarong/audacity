@@ -8,15 +8,15 @@
 
 **********************************************************************/
 
-#include "../../Audacity.h" // for USE_* macros
+
 
 #if defined(USE_VAMP)
 
 #include <memory>
 
-#include "audacity/ModuleInterface.h"
-#include "audacity/EffectInterface.h"
-#include "audacity/PluginInterface.h"
+#include "PluginProvider.h"
+#include "EffectInterface.h"
+#include "PluginInterface.h"
 
 #include <vamp-hostsdk/PluginLoader.h>
 
@@ -26,39 +26,40 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-class VampEffectsModule final : public ModuleInterface
+class VampEffectsModule final : public PluginProvider
 {
 public:
-   VampEffectsModule(ModuleManagerInterface *moduleManager, const wxString *path);
+   VampEffectsModule();
    virtual ~VampEffectsModule();
 
    // ComponentInterface implementation
 
-   PluginPath GetPath() override;
-   ComponentInterfaceSymbol GetSymbol() override;
-   VendorSymbol GetVendor() override;
-   wxString GetVersion() override;
-   wxString GetDescription() override;
+   PluginPath GetPath() const override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   VendorSymbol GetVendor() const override;
+   wxString GetVersion() const override;
+   TranslatableString GetDescription() const override;
 
-   // ModuleInterface implementation
+   // PluginProvider implementation
 
    bool Initialize() override;
    void Terminate() override;
+   EffectFamilySymbol GetOptionalFamilySymbol() override;
 
-   FileExtensions GetFileExtensions() override;
+   const FileExtensions &GetFileExtensions() override;
    FilePath InstallPath() override { return {}; }
 
-   bool AutoRegisterPlugins(PluginManagerInterface & pm) override;
-   PluginPaths FindPluginPaths(PluginManagerInterface & pm) override;
+   void AutoRegisterPlugins(PluginManagerInterface & pm) override;
+   PluginPaths FindModulePaths(PluginManagerInterface & pm) override;
    unsigned DiscoverPluginsAtPath(
-      const PluginPath & path, wxString &errMsg,
+      const PluginPath & path, TranslatableString &errMsg,
       const RegistrationCallback &callback)
          override;
+   
+   bool CheckPluginExist(const PluginPath& path) const override;
 
-   bool IsPluginValid(const PluginPath & path, bool bFast) override;
-
-   ComponentInterface *CreateInstance(const PluginPath & path) override;
-   void DeleteInstance(ComponentInterface *instance) override;
+   std::unique_ptr<ComponentInterface>
+      LoadPlugin(const PluginPath & path) override;
 
 private:
    // VampEffectModule implementation
@@ -66,10 +67,6 @@ private:
    std::unique_ptr<Vamp::Plugin> FindPlugin(const PluginPath & wpath,
                             int & output,
                             bool & hasParameters);
-
-private:
-   ModuleManagerInterface *mModMan;
-   PluginPath mPath;
 };
 
 #endif

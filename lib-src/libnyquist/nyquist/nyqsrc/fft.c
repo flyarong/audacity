@@ -15,6 +15,7 @@
 /* CHANGE LOG
  * --------------------------------------------------------------------
  * 28Apr03  dm  change for portability: min->MIN
+ * 28May15  rd  swap time domain signal before FFT to get correct phase
  */
 
 
@@ -67,9 +68,21 @@
     }
 */
 
+void fft_shift(float *x, int len)
+{
+    int j = len / 2;
+    int i;
+    for (i = 0; i < len / 2; i++) {
+        float temp = x[i];
+        x[i] = x[j];
+        x[j++] = temp;
+    }
+}
+
+
 void n_samples_from_sound(sound_type s, long n, float *table)
 {
-    long blocklen;
+    int blocklen;
     sample_type scale_factor = s->scale;
     s = sound_copy(s);
     while (n > 0) {
@@ -99,7 +112,7 @@ LVAL snd_fft(sound_type s, long len, long step, LVAL winval)
 
     if (!s->extra) { /* this is the first call, so fix up s */
         sound_type w = NULL;
-        long bytes = sizeof(long) * OFFSET + sizeof(float) * 3 * len;
+        long bytes = sizeof(s->extra[0]) * OFFSET + sizeof(float) * 3 * len;
         if (winval) {
             if (soundp(winval)) {
                 w = getsound(winval);
@@ -124,7 +137,7 @@ LVAL snd_fft(sound_type s, long len, long step, LVAL winval)
          * really necessary).
          */
         
-        s->extra = (long *) malloc(bytes);
+        s->extra = (int64_t *) malloc(bytes);
         s->extra[0] = bytes;
         s->CNT = s->INDEX = s->FILLCNT = 0;
         s->TERMCNT = -1;
@@ -139,7 +152,8 @@ LVAL snd_fft(sound_type s, long len, long step, LVAL winval)
             n_samples_from_sound(w, len, window);
         }
     } else {
-        maxlen = (s->extra[0] - sizeof(long) * OFFSET) / (sizeof(float) * 3);
+        maxlen = (long) ((s->extra[0] - sizeof(s->extra[0]) * OFFSET) /
+                         (sizeof(float) * 3));
         if (maxlen != len) xlfail("len changed from initial value");
         float_base = (float *) &(s->extra[OFFSET]);
     }
@@ -148,10 +162,12 @@ LVAL snd_fft(sound_type s, long len, long step, LVAL winval)
     // this code computes window location 
     window = float_base + 2 * len;
     /* step 1: refill buffer with samples */
-    fillptr = s->FILLCNT;
+    fillptr = (long) s->FILLCNT;
     while (fillptr < maxlen) {
-        if (s->INDEX == s->CNT) {
-            sound_get_next(s, &(s->CNT));
+        int icnt = (int) s->CNT;  /* need this to be type int */
+        if (s->INDEX == icnt) {
+            sound_get_next(s, &icnt);
+            s->CNT = icnt;  /* save the count back to s->extra */
             if (s->SAMPLES == zero_block->samples) {
                 if (s->TERMCNT < 0) s->TERMCNT = fillptr;
             }
@@ -183,10 +199,16 @@ LVAL snd_fft(sound_type s, long len, long step, LVAL winval)
         temp_fft[i] = samples[i] * *window++;
     }
     /* perform the fft: */
-    m = round(log(len) / M_LN2); /* compute log-base-2(len) */
+    m = ROUND32(log(len) / M_LN2); /* compute log-base-2(len) */
+    if (m > 27) {  /* 27 comes from fftext.c and seems big enough */
+        xlfail("FFT len greater than 2^27");
+    }
     if (1 << m != len) {
         xlfail("FFT len is not a power of two");
     }
+    /* to get correct phase, you need to swap the left and right halves
+       of the time domain signal before the FFT */
+    fft_shift(temp_fft, len);
     if (!fftInit(m)) rffts(temp_fft, m, 1);
     else xlfail("FFT initialization error");
 
@@ -215,13 +237,15 @@ LVAL snd_fft(sound_type s, long len, long step, LVAL winval)
      */
     skip = step - maxlen;
     while (skip > 0) {
-        long remaining = s->CNT - s->INDEX;
+        long remaining = (long) (s->CNT - s->INDEX);
         if (remaining >= skip) {
             s->INDEX += skip;
             skip = 0;
         } else {
             skip -= remaining;
-            sound_get_next(s, &(s->CNT));
+            int icnt = (int) s->CNT;  /* need this to be type int */
+            sound_get_next(s, &icnt);
+            s->CNT = icnt;      /* save count back into s->extra */
             s->INDEX = 0;
         }
     }

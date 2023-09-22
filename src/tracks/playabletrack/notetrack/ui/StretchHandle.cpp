@@ -8,19 +8,26 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../../../Audacity.h" // for USE_* macros
+
 
 #ifdef USE_MIDI
+#include "../lib-src/header-substitutes/allegro.h"
+
 #include "StretchHandle.h"
 
+#include "../../../ui/CommonTrackPanelCell.h"
 #include "../../../../HitTestResult.h"
 #include "../../../../NoteTrack.h"
-#include "../../../../Project.h"
+#include "ProjectAudioIO.h"
+#include "ProjectHistory.h"
 #include "../../../../RefreshCode.h"
+#include "SyncLock.h"
 #include "../../../../TrackPanelMouseEvent.h"
-#include "../../../../UndoManager.h"
+#include "UndoManager.h"
+#include "ViewInfo.h"
 #include "../../../../../images/Cursors.h"
 
+#include <wx/event.h>
 #include <algorithm>
 
 StretchHandle::StretchHandle
@@ -41,7 +48,7 @@ HitTestPreview StretchHandle::HitPreview( StretchEnum stretchMode, bool unsafe )
       ::MakeCursor(wxCURSOR_BULLSEYE, StretchCursorXpm, 16, 16);
 
    if (unsafe) {
-      return { wxT(""), &*disabledCursor };
+      return { {}, &*disabledCursor };
    }
    else {
       wxCursor *pCursor = NULL;
@@ -56,7 +63,7 @@ HitTestPreview StretchHandle::HitPreview( StretchEnum stretchMode, bool unsafe )
          pCursor = &*stretchRightCursor; break;
       }
       return {
-         _("Click and drag to stretch selected region."),
+         XO("Click and drag to stretch selected region."),
          pCursor
       };
    }
@@ -73,7 +80,7 @@ UIHandlePtr StretchHandle::HitTest
    // later, we may want a different policy, but for now, stretch is
    // selected when the cursor is near the center of the track and
    // within the selection
-   const ViewInfo &viewInfo = pProject->GetViewInfo();
+   auto &viewInfo = ViewInfo::Get( *pProject );
 
    if (!pTrack || !pTrack->GetSelected())
       return {};
@@ -153,7 +160,7 @@ UIHandle::Result StretchHandle::Click
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
    using namespace RefreshCode;
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if ( unsafe )
       return Cancelled;
 
@@ -166,7 +173,7 @@ UIHandle::Result StretchHandle::Click
 
 
    mLeftEdge = evt.rect.GetLeft();
-   ViewInfo &viewInfo = pProject->GetViewInfo();
+   auto &viewInfo = ViewInfo::Get( *pProject );
 
    viewInfo.selectedRegion.setTimes
       ( mStretchState.mBeat0.first, mStretchState.mBeat1.first );
@@ -175,14 +182,14 @@ UIHandle::Result StretchHandle::Click
    // newly selected tracks. (I'm really not sure if the label area
    // needs to be refreshed or how to just refresh non-label areas.-RBD)
 
-   return RefreshAll | UpdateSelection;
+   return RefreshAll;
 }
 
 UIHandle::Result StretchHandle::Drag
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
    using namespace RefreshCode;
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if (unsafe) {
       this->Cancel(pProject);
       return RefreshAll | Cancelled;
@@ -203,9 +210,9 @@ UIHandle::Result StretchHandle::Drag
 }
 
 HitTestPreview StretchHandle::Preview
-(const TrackPanelMouseState &, const AudacityProject *pProject)
+(const TrackPanelMouseState &, AudacityProject *pProject)
 {
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    return HitPreview( mStretchState.mMode, unsafe );
 }
 
@@ -215,7 +222,7 @@ UIHandle::Result StretchHandle::Release
 {
    using namespace RefreshCode;
 
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if (unsafe) {
       this->Cancel(pProject);
       return RefreshAll | Cancelled;
@@ -223,24 +230,23 @@ UIHandle::Result StretchHandle::Release
 
    bool left = mStretchState.mMode == stretchLeft;
    bool right = mStretchState.mMode == stretchRight;
-   ViewInfo &viewInfo = pProject->GetViewInfo();
-   if ( pProject->IsSyncLocked() && ( left || right ) ) {
-      for ( auto track :
-           TrackList::SyncLockGroup( mpTrack.get() ) ) {
-         if ( track != mpTrack.get() ) {
-            if ( left ) {
+   auto &viewInfo = ViewInfo::Get( *pProject );
+   if (SyncLockState::Get(*pProject).IsSyncLocked() && (left || right)) {
+      for (auto track : SyncLock::Group(mpTrack.get())) {
+         if (track != mpTrack.get()) {
+            if (left) {
                auto origT0 = mStretchState.mOrigSel0Quantized;
                auto diff = viewInfo.selectedRegion.t0() - origT0;
-               if ( diff > 0)
-                  track->SyncLockAdjust( origT0 + diff, origT0 );
+               if (diff > 0)
+                  track->SyncLockAdjust(origT0 + diff, origT0);
                else
-                  track->SyncLockAdjust( origT0, origT0 - diff );
-               track->Offset( diff );
+                  track->SyncLockAdjust(origT0, origT0 - diff);
+               track->ShiftBy(diff);
             }
             else {
                auto origT1 = mStretchState.mOrigSel1Quantized;
                auto diff = viewInfo.selectedRegion.t1() - origT1;
-               track->SyncLockAdjust( origT1, origT1 + diff );
+               track->SyncLockAdjust(origT1, origT1 + diff);
             }
          }
       }
@@ -248,19 +254,19 @@ UIHandle::Result StretchHandle::Release
 
    /* i18n-hint: (noun) The track that is used for MIDI notes which can be
    dragged to change their duration.*/
-   pProject->PushState(_("Stretch Note Track"),
+   ProjectHistory::Get( *pProject ).PushState(XO("Stretch Note Track"),
       /* i18n-hint: In the history list, indicates a MIDI note has
       been dragged to change its duration (stretch it). Using either past
       or present tense is fine here.  If unsure, go for whichever is
       shorter.*/
-      _("Stretch"),
-      UndoPush::CONSOLIDATE | UndoPush::AUTOSAVE);
+      XO("Stretch"),
+      UndoPush::CONSOLIDATE);
    return RefreshAll;
 }
 
 UIHandle::Result StretchHandle::Cancel(AudacityProject *pProject)
 {
-   pProject->RollbackState();
+   ProjectHistory::Get( *pProject ).RollbackState();
    return RefreshCode::RefreshNone;
 }
 
@@ -277,12 +283,12 @@ double StretchHandle::GetT1(const Track &track, const ViewInfo &viewInfo)
 void StretchHandle::Stretch(AudacityProject *pProject, int mouseXCoordinate, int trackLeftEdge,
    Track *pTrack)
 {
-   ViewInfo &viewInfo = pProject->GetViewInfo();
+   auto &viewInfo = ViewInfo::Get( *pProject );
 
    if (pTrack == NULL && mpTrack != NULL)
       pTrack = mpTrack.get();
 
-  if (pTrack) pTrack->TypeSwitch( [&](NoteTrack *pNt) {
+  if (pTrack) pTrack->TypeSwitch( [&](NoteTrack &nt) {
       double moveto =
         std::max(0.0, viewInfo.PositionToTime(mouseXCoordinate, trackLeftEdge));
 
@@ -301,9 +307,9 @@ void StretchHandle::Stretch(AudacityProject *pProject, int mouseXCoordinate, int
          dur = t1 - moveto;
          if (dur < mStretchState.mRightBeats * minPeriod)
             return;
-         pNt->StretchRegion
+         nt.StretchRegion
             ( mStretchState.mBeat0, mStretchState.mBeat1, dur );
-         pNt->Offset( moveto - t0 );
+         nt.ShiftBy(moveto - t0);
          mStretchState.mBeat0.first = moveto;
          viewInfo.selectedRegion.setT0(moveto);
          break;
@@ -312,7 +318,7 @@ void StretchHandle::Stretch(AudacityProject *pProject, int mouseXCoordinate, int
          dur = moveto - t0;
          if (dur < mStretchState.mLeftBeats * minPeriod)
             return;
-         pNt->StretchRegion
+         nt.StretchRegion
             ( mStretchState.mBeat0, mStretchState.mBeat1, dur );
          viewInfo.selectedRegion.setT1(moveto);
          mStretchState.mBeat1.first = moveto;
@@ -325,9 +331,9 @@ void StretchHandle::Stretch(AudacityProject *pProject, int mouseXCoordinate, int
          if ( left_dur < mStretchState.mLeftBeats * minPeriod ||
               right_dur < mStretchState.mRightBeats * minPeriod )
             return;
-         pNt->StretchRegion
+         nt.StretchRegion
             ( mStretchState.mBeatCenter, mStretchState.mBeat1, right_dur );
-         pNt->StretchRegion
+         nt.StretchRegion
             ( mStretchState.mBeat0, mStretchState.mBeatCenter, left_dur );
          mStretchState.mBeatCenter.first = moveto;
          break;

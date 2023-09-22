@@ -2,7 +2,7 @@
 
    Audacity: A Digital Audio Editor
    Audacity(R) is copyright (c) 1999-2008 Audacity Team.
-   License: GPL v2.  See License.txt.
+   License: GPL v2 or later.  See License.txt.
 
    ScoreAlignDialog.cpp
    <TODO: authors>
@@ -16,10 +16,8 @@ It \TODO: description
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
-#include "ScoreAlignDialog.h"
 
-#include "../Experimental.h"
+#include "ScoreAlignDialog.h"
 
 #ifdef EXPERIMENTAL_SCOREALIGN
 
@@ -32,23 +30,16 @@ It \TODO: description
 
 #ifndef WX_PRECOMP
 #include <wx/brush.h>
-#include <wx/button.h>
 #include <wx/choice.h>
-#include <wx/image.h>
-#include <wx/dcmemory.h>
 #include <wx/file.h>
-#include <wx/filedlg.h>
-#include <wx/intl.h>
-#include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/statusbr.h>
 #endif
 
 #include <fstream>
-#include <wx/dialog.h>
-#include "../Prefs.h"
-#include "../ShuttleGui.h"
-#include "allegro.h"
+#include "Prefs.h"
+#include "ShuttleGui.h"
+#include "../lib-src/header-substitutes/allegro.h"
 #include "audioreader.h"
 #include "scorealign.h"
 #include "scorealign-glue.h"
@@ -58,7 +49,7 @@ static std::unique_ptr<ScoreAlignDialog> gScoreAlignDialog{};
 //IMPLEMENT_CLASS(ScoreAlignDialog, wxDialogWrapper)
 
 ScoreAlignDialog::ScoreAlignDialog(ScoreAlignParams &params)
-   : wxDialogWrapper(NULL, -1, _("Align MIDI to Audio"),
+   : wxDialogWrapper(NULL, -1, XO("Align MIDI to Audio"),
               wxDefaultPosition, wxDefaultSize,
               wxDEFAULT_DIALOG_STYLE)
 {
@@ -83,7 +74,7 @@ ScoreAlignDialog::ScoreAlignDialog(ScoreAlignParams &params)
 
    //wxButton *ok = safenew wxButton(this, wxID_OK, _("OK"));
    //wxButton *cancel = safenew wxButton(this, wxID_CANCEL, _("Cancel"));
-   //wxSlider *sl = safenew wxSlider(this, ID_SLIDER, 0, 0, 100,
+   //wxSlider *sl = safenew wxSliderWrapper(this, ID_SLIDER, 0, 0, 100,
    //                     wxDefaultPosition, wxSize(20, 124),
    //                     wxSL_HORIZONTAL);
 
@@ -92,88 +83,108 @@ ScoreAlignDialog::ScoreAlignDialog(ScoreAlignParams &params)
 
    S.SetBorder(5);
    S.StartVerticalLay(true);
-   S.StartStatic(wxT("Align MIDI to Audio"));
+   S.StartStatic(XO("Align MIDI to Audio"));
    S.StartMultiColumn(3, wxEXPAND | wxALIGN_CENTER_VERTICAL);
    S.SetStretchyCol(1);
 
-   mFramePeriodLabel = S.AddVariableText(_("Frame Period:"), true,
-                                      wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-   S.SetStyle(wxSL_HORIZONTAL);
-   mFramePeriodSlider = S.Id(ID_FRAMEPERIOD).AddSlider(wxT(""),
+   mFramePeriodLabel = S.AddVariableText(
+      XO("Frame Period:"), true, wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+   mFramePeriodSlider = S.Id(ID_FRAMEPERIOD)
+      .Name(XO("Frame Period"))
+      .Style(wxSL_HORIZONTAL)
+      .MinSize( { 300, -1 } )
+      .AddSlider( {},
        /*pos*/ (int) (p.mFramePeriod * 100 + 0.5), /*max*/ 50, /*min*/ 5);
-   S.SetSizeHints(300, -1);
-   mFramePeriodSlider->SetName(_("Frame Period"));
-   mFramePeriodText = S.AddVariableText(SA_DFT_FRAME_PERIOD_TEXT, true,
-                                      wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+   mFramePeriodText = S.AddVariableText(
+      SA_DFT_FRAME_PERIOD_TEXT, true, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
-   mWindowSizeLabel = S.AddVariableText(_("Window Size:"), true,
-                                      wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-   S.SetStyle(wxSL_HORIZONTAL);
-   mWindowSizeSlider = S.Id(ID_WINDOWSIZE).AddSlider(wxT(""),
+   mWindowSizeLabel = S.AddVariableText(
+      XO("Window Size:"), true, wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+   mWindowSizeSlider = S.Id(ID_WINDOWSIZE)
+      .Name(XO("Window Size"))
+      .Style(wxSL_HORIZONTAL)
+      .AddSlider( {},
        /*pos*/ (int) (p.mWindowSize * 100 + 0.5), /*max*/ 100, /*min*/ 5);
-   mWindowSizeSlider->SetName(_("Window Size"));
-   mWindowSizeText = S.AddVariableText(SA_DFT_WINDOW_SIZE_TEXT, true,
-                                      wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+   mWindowSizeText = S.AddVariableText(
+      SA_DFT_WINDOW_SIZE_TEXT, true, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
-   mForceFinalAlignmentCheckBox = S.Id(ID_FORCEFINALALIGNMENT).AddCheckBox(
-                wxT("Force Final Alignment"),
+   mForceFinalAlignmentCheckBox = S.Id(ID_FORCEFINALALIGNMENT)
+      .Name(XO("Force Final Alignment"))
+      .AddCheckBox(
+                XO("Force Final Alignment"),
                 p.mForceFinalAlignment);
-   mForceFinalAlignmentCheckBox->SetName(_("Force Final Alignment"));
-   mIgnoreSilenceCheckBox = S.Id(ID_IGNORESILENCE).AddCheckBox(
-                              wxT("Ignore Silence at Beginnings and Endings"),
-                              p.mIgnoreSilence);
-   mIgnoreSilenceCheckBox->SetName(
-                     _("Ignore Silence at Beginnings and Endings"));
+   mIgnoreSilenceCheckBox = S.Id(ID_IGNORESILENCE)
+      .Name(XO("Ignore Silence at Beginnings and Endings"))
+      .AddCheckBox(
+         XO("Ignore Silence at Beginnings and Endings"),
+         p.mIgnoreSilence );
    // need a third column after checkboxes:
-   S.AddVariableText(wxT(""), true, wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+   S.AddVariableText({}, true, wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
 
-   mSilenceThresholdLabel = S.AddVariableText(_("Silence Threshold:"),
-                             true, wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-   S.SetStyle(wxSL_HORIZONTAL);
-   mSilenceThresholdSlider = S.Id(ID_SILENCETHRESHOLD).AddSlider(wxT(""),
+   mSilenceThresholdLabel = S.AddVariableText(XO("Silence Threshold:"),
+         true, wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+   mSilenceThresholdSlider = S.Id(ID_SILENCETHRESHOLD)
+      .Name(XO("Silence Threshold"))
+      .Style(wxSL_HORIZONTAL)
+      .AddSlider( {},
          /*pos*/ (int) (p.mSilenceThreshold * 1000 + 0.5), /*max*/ 500);
-   mSilenceThresholdSlider->SetName(_("Silence Threshold"));
-   mSilenceThresholdText = S.AddVariableText(SA_DFT_SILENCE_THRESHOLD_TEXT,
-                              true, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+   mSilenceThresholdText = S.AddVariableText(
+      SA_DFT_SILENCE_THRESHOLD_TEXT,
+      true, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
+   mPresmoothLabel = S.AddVariableText(
    /* i18n-hint: The English would be clearer if it had 'Duration' rather than 'Time'
       This is a NEW experimental effect, and until we have it documented in the user
       manual we don't have a clear description of what this parameter does.
       It is OK to leave it in English. */
-   mPresmoothLabel = S.AddVariableText(_("Presmooth Time:"), true,
-                                      wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-   S.SetStyle(wxSL_HORIZONTAL);
-   mPresmoothSlider = S.Id(ID_PRESMOOTH).AddSlider(wxT(""),
+      XO("Presmooth Time:"), true, wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+   mPresmoothSlider = S.Id(ID_PRESMOOTH)
+   /* i18n-hint: The English would be clearer if it had 'Duration' rather than 'Time'
+      This is a NEW experimental effect, and until we have it documented in the user
+      manual we don't have a clear description of what this parameter does.
+      It is OK to leave it in English. */
+      .Name(XO("Presmooth Time"))
+      .Style(wxSL_HORIZONTAL)
+      .AddSlider( {},
                /*pos*/ (int) (p.mPresmoothTime * 100 + 0.5), /*max*/ 500);
-   mPresmoothSlider->SetName(_("Presmooth Time"));
-   mPresmoothText = S.AddVariableText(SA_DFT_PRESMOOTH_TIME_TEXT, true,
-                                      wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+   mPresmoothText = S.AddVariableText(
+      SA_DFT_PRESMOOTH_TIME_TEXT, true, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
    /* i18n-hint: The English would be clearer if it had 'Duration' rather than 'Time'
       This is a NEW experimental effect, and until we have it documented in the user
       manual we don't have a clear description of what this parameter does.
       It is OK to leave it in English. */
-   mLineTimeLabel = S.AddVariableText(_("Line Time:"), true,
-                                      wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-   S.SetStyle(wxSL_HORIZONTAL);
-   mLineTimeSlider = S.Id(ID_LINETIME).AddSlider(wxT(""),
+   mLineTimeLabel = S.AddVariableText(XO("Line Time:"), true,
+      wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+   mLineTimeSlider = S.Id(ID_LINETIME)
+   /* i18n-hint: The English would be clearer if it had 'Duration' rather than 'Time'
+      This is a NEW experimental effect, and until we have it documented in the user
+      manual we don't have a clear description of what this parameter does.
+      It is OK to leave it in English. */
+      .Name(XO("Line Time"))
+      .Style(wxSL_HORIZONTAL)
+      .AddSlider( {},
                     /*pos*/ (int) (p.mLineTime * 100 + 0.5), /*max*/ 500);
-   mLineTimeSlider->SetName(_("Line Time"));
-   mLineTimeText = S.AddVariableText(SA_DFT_LINE_TIME_TEXT, true,
-                                      wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+   mLineTimeText = S.AddVariableText(
+      SA_DFT_LINE_TIME_TEXT, true, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
    /* i18n-hint: The English would be clearer if it had 'Duration' rather than 'Time'
       This is a NEW experimental effect, and until we have it documented in the user
       manual we don't have a clear description of what this parameter does.
       It is OK to leave it in English. */
-   mSmoothTimeLabel = S.AddVariableText(_("Smooth Time:"), true,
-                                      wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
-   S.SetStyle(wxSL_HORIZONTAL);
-   mSmoothTimeSlider = S.Id(ID_SMOOTHTIME).AddSlider(wxT(""),
+   mSmoothTimeLabel = S.AddVariableText(
+      XO("Smooth Time:"), true, wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+   mSmoothTimeSlider = S.Id(ID_SMOOTHTIME)
+   /* i18n-hint: The English would be clearer if it had 'Duration' rather than 'Time'
+      This is a NEW experimental effect, and until we have it documented in the user
+      manual we don't have a clear description of what this parameter does.
+      It is OK to leave it in English. */
+      .Name(XO("Smooth Time"))
+      .Style(wxSL_HORIZONTAL)
+      .AddSlider( {},
                   /*pos*/ (int) (p.mSmoothTime * 100 + 0.5), /*max*/ 500);
-   mSmoothTimeSlider->SetName(_("Smooth Time"));
-   mSmoothTimeText = S.AddVariableText(SA_DFT_SMOOTH_TIME_TEXT, true,
-                                      wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+   mSmoothTimeText = S.AddVariableText(
+      SA_DFT_SMOOTH_TIME_TEXT, true, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
    S.EndMultiColumn();
    S.EndStatic();

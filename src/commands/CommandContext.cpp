@@ -13,31 +13,22 @@
 \brief Contains definitions for CommandContext
 
 \class CommandContext
-\brief CommandContext provides addiitonal information to an
+\brief CommandContext provides additional information to an
 'Apply()' command.  It provides the project, and provides output
 channels for Error, Progress and Status.  Status is used for general
 messaging from a command back to its invoker.
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "CommandContext.h"
 
-#include "Command.h"
 #include <map>
-#include <wx/string.h>
+#include <wx/log.h>
 #include <wx/variant.h>
 #include <wx/arrstr.h>
 
-#include "../AudacityException.h"
-#include "Validators.h"
-#include "CommandType.h"
-#include "CommandMisc.h"
-#include "CommandBuilder.h"
 #include "CommandTargets.h"
-#include "CommandDirectory.h"
-
-#include "../Project.h"
 
 CommandContext::CommandContext(
       AudacityProject &p
@@ -93,12 +84,6 @@ void CommandContext::Progress( double d ) const
    if( pOutput )
       pOutput->Progress( d );
 }
-
-AudacityApp * CommandContext::GetApp() const
-{  return (AudacityApp *) wxTheApp;}
-
-AudacityProject *CommandContext::GetProject() const
-{  return GetActiveProject();}
 
 void CommandContext::StartArray() const
 {

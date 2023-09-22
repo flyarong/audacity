@@ -11,40 +11,41 @@
 #ifndef __AUDACITY_EFFECT_REPAIR__
 #define __AUDACITY_EFFECT_REPAIR__
 
-#include "Effect.h"
+#include "StatefulEffect.h"
 
-#define REPAIR_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Repair") }
+class WaveChannel;
 
-class WaveTrack;
-
-class EffectRepair final : public Effect
+class EffectRepair final : public StatefulEffect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectRepair();
    virtual ~EffectRepair();
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-   bool IsInteractive() override;
+   EffectType GetType() const override;
+   bool IsInteractive() const override;
 
    // Effect implementation
 
-   bool Process() override;
+   bool Process(EffectInstance &instance, EffectSettings &settings) override;
+
+   bool NeedsDither() const override;
 
 private:
-   // EffectRepair implementaion
+   // EffectRepair implementation
 
-   bool ProcessOne(int count, WaveTrack * track,
-                   sampleCount start,
-                   size_t len,
-                   size_t repairStart, // offset relative to start
-                   size_t repairLen);
+   bool ProcessOne(int count, WaveChannel &track,
+      sampleCount start, size_t len,
+      size_t repairStart, // offset relative to start
+      size_t repairLen);
 };
 
 #endif // __AUDACITY_EFFECT_REPAIT__

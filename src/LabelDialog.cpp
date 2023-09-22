@@ -13,33 +13,31 @@
 
 *//*******************************************************************/
 
-#include "Audacity.h"
+
 #include "LabelDialog.h"
 
-#include <wx/button.h>
 #include <wx/defs.h>
 #include <wx/choice.h>
 #include <wx/dc.h>
-#include <wx/dialog.h>
-#include <wx/filedlg.h>
 #include <wx/grid.h>
-#include <wx/intl.h>
 #include <wx/scrolbar.h>
 #include <wx/settings.h>
-#include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/textdlg.h>
 
 #include "ShuttleGui.h"
-#include "Internat.h"
 #include "LabelTrack.h"
 #include "Prefs.h"
 #include "Project.h"
+#include "ProjectWindow.h"
+#include "SelectFile.h"
 #include "ViewInfo.h"
-#include "widgets/NumericTextCtrl.h"
-#include "widgets/ErrorDialog.h"
+#include "tracks/labeltrack/ui/LabelTrackView.h"
+#include "AudacityMessageBox.h"
+#include "AudacityTextEntryDialog.h"
 #include "widgets/Grid.h"
-#include "widgets/HelpSystem.h"
+#include "HelpSystem.h"
+#include "NumericConverterFormats.h"
 
 #include "FileNames.h"
 #include <limits>
@@ -94,30 +92,28 @@ BEGIN_EVENT_TABLE(LabelDialog, wxDialogWrapper)
 END_EVENT_TABLE()
 
 LabelDialog::LabelDialog(wxWindow *parent,
-                         TrackFactory &factory,
+                         AudacityProject &project,
                          TrackList *tracks,
                          LabelTrack *selectedTrack,
                          int index,
                          ViewInfo &viewinfo,
-                         double rate,
                          const NumericFormatSymbol & format,
                          const NumericFormatSymbol &freqFormat)
 : wxDialogWrapper(parent,
            wxID_ANY,
-           _("Edit Labels"),
+           XO("Edit Labels"),
            wxDefaultPosition,
            wxSize(800, 600),
-           wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
-  mFactory(factory),
-  mTracks(tracks)
+           wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
+  , mProject{ project }
+  , mTracks(tracks)
   , mSelectedTrack(selectedTrack)
   , mIndex(index)
-  , mViewInfo(&viewinfo),
-  mRate(rate),
-  mFormat(format)
+  , mViewInfo(&viewinfo)
+  , mFormat(format)
   , mFreqFormat(freqFormat)
 {
-   SetName(GetTitle());
+   SetName();
    Populate();
 }
 
@@ -128,21 +124,26 @@ LabelDialog::~LabelDialog()
 void LabelDialog::PopulateLabels()
 {
    // Build the initial (empty) grid
-   mGrid->CreateGrid(0, Col_Max);
+   mGrid->CreateGrid(0, Col_Max, wxGrid::wxGridSelectRows);
    mGrid->SetDefaultCellAlignment(wxALIGN_LEFT, wxALIGN_CENTER);
+   mGrid->SetRowLabelSize(0);
 
-   /* i18n-hint: (noun).  A track contains waves, audio etc.*/
-   mGrid->SetColLabelValue(0,_("Track"));
-   /* i18n-hint: (noun)*/
-   mGrid->SetColLabelValue(1,_("Label"));
-   /* i18n-hint: (noun) of a label*/
-   mGrid->SetColLabelValue(2,_("Start Time"));
-   /* i18n-hint: (noun) of a label*/
-   mGrid->SetColLabelValue(3,_("End Time"));
-   /* i18n-hint: (noun) of a label*/
-   mGrid->SetColLabelValue(4,_("Low Frequency"));
-   /* i18n-hint: (noun) of a label*/
-   mGrid->SetColLabelValue(5,_("High Frequency"));
+   size_t ii = 0;
+   for ( const auto &label : {
+      /* i18n-hint: (noun).  A track contains waves, audio etc.*/
+      XO("Track"),
+      /* i18n-hint: (noun)*/
+      XO("Label"),
+      /* i18n-hint: (noun) of a label*/
+      XO("Start Time"),
+      /* i18n-hint: (noun) of a label*/
+      XO("End Time"),
+      /* i18n-hint: (noun) of a label*/
+      XO("Low Frequency"),
+      /* i18n-hint: (noun) of a label*/
+      XO("High Frequency"),
+   })
+      mGrid->SetColLabelValue( ii++, label.Translation() );
 
    // Create and remember editors.  No need to DELETE these as the wxGrid will
    // do it for us.  (The DecRef() that is needed after GetDefaultEditorForType
@@ -176,7 +177,7 @@ void LabelDialog::PopulateLabels()
    attr->SetAlignment(wxALIGN_CENTER, wxALIGN_CENTER);
 
    mGrid->SetColAttr(Col_Hfreq, attr->Clone());
-   
+
    // Seems there's a bug in wxGrid.  Adding only 1 row does not
    // allow SetCellSize() to work properly and you will not get
    // the expected 1 row by 4 column cell.
@@ -249,23 +250,25 @@ void LabelDialog::Populate()
 
 void LabelDialog::PopulateOrExchange( ShuttleGui & S )
 {
-   S.AddFixedText(_("Press F2 or double click to edit cell contents."));
+   S.AddFixedText(XO("Press F2 or double click to edit cell contents."));
    S.StartHorizontalLay(wxEXPAND,1);
    {
       S.StartVerticalLay(wxEXPAND,1);
       {
-         mGrid = safenew Grid(this, wxID_ANY);
-         S.Prop(1).AddWindow( mGrid );
+         mGrid = safenew Grid(
+            FormatterContext::ProjectContext(mProject), S.GetParent(),
+            wxID_ANY);
+         S.Prop(1).AddWindow(mGrid);
       }
       S.EndVerticalLay();
       S.StartVerticalLay(0);
       {
-         //S.Id(ID_INSERTA).AddButton(_("&Insert"), wxALIGN_LEFT);
-         S.Id(ID_INSERTB).AddButton(_("&Insert"), wxALIGN_LEFT);
-         //S.Id(EditButtonID).AddButton(_("&Edit"), wxALIGN_LEFT);
-         S.Id(ID_REMOVE).AddButton(_("De&lete"), wxALIGN_LEFT);
-         S.Id(ID_IMPORT).AddButton(_("I&mport..."), wxALIGN_LEFT);
-         S.Id(ID_EXPORT).AddButton(_("&Export..."), wxALIGN_LEFT);
+         //S.Id(ID_INSERTA).AddButton(XO("&Insert"), wxALIGN_LEFT);
+         S.Id(ID_INSERTB).AddButton(XXO("&Insert"), wxALIGN_LEFT);
+         //S.Id(EditButtonID).AddButton(XO("&Edit"), wxALIGN_LEFT);
+         S.Id(ID_REMOVE).AddButton(XXO("De&lete"), wxALIGN_LEFT);
+         S.Id(ID_IMPORT).AddButton(XXO("I&mport..."), wxALIGN_LEFT);
+         S.Id(ID_EXPORT).AddButton(XXO("&Export..."), wxALIGN_LEFT);
       }
       S.EndVerticalLay();
    }
@@ -280,7 +283,7 @@ void LabelDialog::PopulateOrExchange( ShuttleGui & S )
 
 void LabelDialog::OnHelp(wxCommandEvent & WXUNUSED(event))
 {
-   wxString page = GetHelpPageName();
+   const auto &page = GetHelpPageName();
    HelpSystem::ShowHelp(this, page, true);
 }
 
@@ -291,13 +294,10 @@ bool LabelDialog::TransferDataToWindow()
    int i;
 
    // Set the editor parameters.  Do this each time since they may change
-   // due to NEW tracks and change in NumericTextCtrl format.  Rate won't
-   // change but might as well leave it here.
+   // due to NEW tracks and change in NumericTextCtrl format.
    mChoiceEditor->SetChoices(mTrackNames);
    mTimeEditor->SetFormat(mFormat);
-   mTimeEditor->SetRate(mRate);
    mFrequencyEditor->SetFormat(mFreqFormat);
-   mFrequencyEditor->SetRate(mRate);
 
    // Disable redrawing until we're done
    mGrid->BeginBatch();
@@ -352,7 +352,11 @@ bool LabelDialog::Show(bool show)
 {
    bool ret = wxDialogWrapper::Show(show);
 
-   mGrid->SetFocus();   // Required for Linux and Mac.
+#if defined(__WXMAC__) || defined(__WXGTK__)
+   if (show) {
+      mGrid->SetFocus();   // Required for Linux and Mac.
+   }
+#endif
 
    // Set initial row
    // (This will not work until the grid is actually displayed)
@@ -392,7 +396,7 @@ bool LabelDialog::TransferDataFromWindow()
       wxString name = mTrackNames[tndx + 1].AfterFirst(wxT('-')).Mid(1);
 
       // Create the NEW track and add to track list
-      auto newTrack = mFactory.NewLabelTrack();
+      auto newTrack = std::make_shared<LabelTrack>();
       newTrack->SetName(name);
       mTracks->Add( newTrack );
       tndx++;
@@ -416,8 +420,8 @@ bool LabelDialog::TransferDataFromWindow()
          return false;
 
       // Add the label to it
-      lt->AddLabel(rd.selectedRegion, rd.title, -2);
-      lt->Unselect();
+      lt->AddLabel(rd.selectedRegion, rd.title);
+      LabelTrackView::Get( *lt ).ResetTextSelection();
    }
 
    return true;
@@ -523,8 +527,9 @@ void LabelDialog::FindInitialRow()
 void LabelDialog::OnUpdate(wxCommandEvent &event)
 {
    // Remember the NEW format and repopulate grid
-   mFormat = NumericConverter::LookupFormat(
-      NumericConverter::TIME, event.GetString() );
+   mFormat = NumericConverterFormats::Lookup(
+      FormatterContext::ProjectContext(mProject),
+      NumericConverterType_TIME(), event.GetString() );
    TransferDataToWindow();
 
    event.Skip(false);
@@ -533,8 +538,9 @@ void LabelDialog::OnUpdate(wxCommandEvent &event)
 void LabelDialog::OnFreqUpdate(wxCommandEvent &event)
 {
    // Remember the NEW format and repopulate grid
-   mFreqFormat = NumericConverter::LookupFormat(
-      NumericConverter::FREQUENCY, event.GetString() );
+   mFreqFormat = NumericConverterFormats::Lookup(
+      FormatterContext::ProjectContext(mProject),
+      NumericConverterType_FREQUENCY(), event.GetString() );
    TransferDataToWindow();
 
    event.Skip(false);
@@ -622,14 +628,14 @@ void LabelDialog::OnImport(wxCommandEvent & WXUNUSED(event))
 {
    // Ask user for a filename
    wxString fileName =
-       FileNames::SelectFile(FileNames::Operation::Open,
-                    _("Select a text file containing labels"),
-                    wxEmptyString,     // Path
-                    wxT(""),       // Name
-                    wxT(".txt"),   // Extension
-                    _("Text files (*.txt)|*.txt|All files|*"),
-                    wxRESIZE_BORDER, // Flags
-                    this);    // Parent
+       SelectFile(FileNames::Operation::Open,
+         XO("Select a text file containing labels"),
+         wxEmptyString,     // Path
+         wxT(""),       // Name
+         wxT("txt"),   // Extension
+         { FileNames::TextFiles, FileNames::AllFiles },
+         wxRESIZE_BORDER, // Flags
+         this);    // Parent
 
    // They gave us one...
    if (!fileName.empty()) {
@@ -639,12 +645,12 @@ void LabelDialog::OnImport(wxCommandEvent & WXUNUSED(event))
       f.Open(fileName);
       if (!f.IsOpened()) {
          AudacityMessageBox(
-            wxString::Format( _("Could not open file: %s"), fileName ));
+            XO("Could not open file: %s").Format( fileName ) );
       }
       else {
          // Create a temporary label track and load the labels
          // into it
-         auto lt = mFactory.NewLabelTrack();
+         auto lt = std::make_shared<LabelTrack>();
          lt->Import(f);
 
          // Add the labels to our collection
@@ -664,19 +670,19 @@ void LabelDialog::OnExport(wxCommandEvent & WXUNUSED(event))
 
    // Silly user (could just disable the button, but that's a hassle ;-))
    if (cnt == 0) {
-      AudacityMessageBox(_("No labels to export."));
+      AudacityMessageBox( XO("No labels to export.") );
       return;
    }
 
    // Extract the actual name.
    wxString fName = mTrackNames[mTrackNames.size() - 1].AfterFirst(wxT('-')).Mid(1);
 
-   fName = FileNames::SelectFile(FileNames::Operation::Export,
-      _("Export Labels As:"),
+   fName = SelectFile(FileNames::Operation::Export,
+      XO("Export Labels As:"),
       wxEmptyString,
       fName,
       wxT("txt"),
-      wxT("*.txt"),
+      { FileNames::TextFiles },
       wxFD_SAVE | wxFD_OVERWRITE_PROMPT | wxRESIZE_BORDER,
       this);
 
@@ -708,18 +714,18 @@ void LabelDialog::OnExport(wxCommandEvent & WXUNUSED(event))
    f.Open();
    if (!f.IsOpened()) {
       AudacityMessageBox(
-         wxString::Format( _("Couldn't write to file: %s"), fName ) );
+         XO("Couldn't write to file: %s").Format( fName ) );
       return;
    }
 
    // Transfer our collection to a temporary label track
-   auto lt = mFactory.NewLabelTrack();
+   auto lt = std::make_shared<LabelTrack>();
    int i;
 
    for (i = 0; i < cnt; i++) {
       RowData &rd = mData[i];
 
-      lt->AddLabel(rd.selectedRegion, rd.title,-2);
+      lt->AddLabel(rd.selectedRegion, rd.title);
    }
 
    // Export them and clean
@@ -735,7 +741,7 @@ void LabelDialog::OnExport(wxCommandEvent & WXUNUSED(event))
 
 void LabelDialog::OnSelectCell(wxGridEvent &event)
 {
-   for (auto t: mTracks->Any())
+   for (auto t: *mTracks)
       t->SetSelected( true );
 
    if (!mData.empty())
@@ -743,7 +749,7 @@ void LabelDialog::OnSelectCell(wxGridEvent &event)
       RowData &rd = mData[event.GetRow()];
       mViewInfo->selectedRegion = rd.selectedRegion;
 
-      GetActiveProject()->RedrawProject();
+      ProjectWindow::Get( mProject ).RedrawProject();
    }
 
    event.Skip();
@@ -807,13 +813,13 @@ void LabelDialog::OnChangeTrack(wxGridEvent & WXUNUSED(event), int row, RowData 
    // User selected the "New..." choice so ask for a NEW name
    if ( make_iterator_range( mTrackNames ).index( val ) == 0 ) {
       AudacityTextEntryDialog d(this,
-                          _("New Label Track"),
-                          _("Enter track name"),
-                          /* i18n-hint: (noun) it's the name of a kind of track.*/
-                          _("Label Track"));
+         XO("New Label Track"),
+         XO("Enter track name"),
+         /* i18n-hint: (noun) it's the name of a kind of track.*/
+         XO("Label Track").Translation());
 
       // User canceled so repopulating the grid will set the track
-      // name to the orignal value
+      // name to the original value
       if (d.ShowModal() == wxID_CANCEL) {
          TransferDataToWindow();
          return;
@@ -886,7 +892,7 @@ void LabelDialog::OnChangeHfreq(wxGridEvent & WXUNUSED(event), int row, RowData 
    rd->selectedRegion.setF1(f, false);
    mGrid->SetCellValue(row, Col_Lfreq, wxString::Format(wxT("%g"),
                                                         rd->selectedRegion.f0()));
-   
+
    return;
 }
 
@@ -895,7 +901,7 @@ void LabelDialog::ReadSize(){
    int prefWidth, prefHeight;
    gPrefs->Read(wxT("/LabelEditor/Width"), &prefWidth, sz.x);
    gPrefs->Read(wxT("/LabelEditor/Height"), &prefHeight, sz.y);
-   
+
    wxRect screenRect(wxGetClientDisplayRect());
    wxSize prefSize = wxSize(prefWidth, prefHeight);
    prefSize.DecTo(screenRect.GetSize());

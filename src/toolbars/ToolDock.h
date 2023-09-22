@@ -13,11 +13,12 @@
 #ifndef __AUDACITY_TOOLDOCK__
 #define __AUDACITY_TOOLDOCK__
 
+#include <map>
 #include <vector>
-#include "../MemoryX.h" // for std::move
 #include <wx/defs.h>
 
 #include "ToolBar.h"
+#include "MemoryX.h"
 
 class wxCommandEvent;
 class wxEraseEvent;
@@ -28,7 +29,6 @@ class wxRect;
 class wxWindow;
 
 class GrabberEvent;
-class ToolManager;
 
 ////////////////////////////////////////////////////////////
 /// class ToolDock
@@ -40,8 +40,8 @@ class ToolManager;
 enum
 {
    NoDockID = 0,
-   TopDockID,
-   BotDockID,
+   TopDockID = ToolBar::TopDockID,
+   BotDockID = ToolBar::BotDockID,
    DockCount = 2
 };
 
@@ -230,6 +230,7 @@ public:
    Iterator end() const { return Iterator {}; }
 
    Position Find(const ToolBar *bar) const;
+   ToolBar* FindToolBar(Identifier id) const;
 
    bool Contains(const ToolBar *bar) const
    {
@@ -291,14 +292,14 @@ class ToolDock final : public wxPanelWrapper
 {
 public:
 
-   ToolDock( ToolManager *manager, wxWindow *parent, int dockid );
+   ToolDock( wxEvtHandler *manager, wxWindow *parent, int dockid );
    ~ToolDock();
 
    bool AcceptsFocus() const override { return false; };
 
    void LoadConfig();
    void LayoutToolBars();
-   void Expose( int type, bool show );
+   void Expose( Identifier type, bool show );
    int GetOrder( ToolBar *bar );
    void Dock( ToolBar *bar, bool deflate,
               ToolBarConfiguration::Position ndx
@@ -333,7 +334,7 @@ public:
 
 
 
-   ToolManager *mManager;
+   wxEvtHandler *mManager;
 
    // Stores adjacency relations that we want to realize in the dock layout
    ToolBarConfiguration mConfiguration;
@@ -341,7 +342,7 @@ public:
    // Configuration as modified by the constraint of the main window width
    ToolBarConfiguration mWrappedConfiguration;
 
-   ToolBar *mBars[ ToolBarCount ];
+   std::map<Identifier, ToolBar*> mBars;
 
  public:
 

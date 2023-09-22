@@ -11,8 +11,6 @@
 #ifndef __AUDACITY_NOTE_TRACK_SLIDER_HANDLES__
 #define __AUDACITY_NOTE_TRACK_SLIDER_HANDLES__
 
-#include "../../../../Experimental.h"
-
 #ifdef EXPERIMENTAL_MIDI_OUT
 
 #include "../../../ui/SliderHandle.h"
@@ -24,7 +22,7 @@ class VelocitySliderHandle final : public SliderHandle
 {
    VelocitySliderHandle(const VelocitySliderHandle&) = delete;
 
-   std::shared_ptr<NoteTrack> GetNoteTrack();
+   std::shared_ptr<NoteTrack> GetNoteTrack() const;
 
 public:
    explicit VelocitySliderHandle
@@ -41,6 +39,9 @@ protected:
    (AudacityProject *pProject, float newValue) override;
    Result CommitChanges
    (const wxMouseEvent &event, AudacityProject *pProject) override;
+
+   TranslatableString Tip(
+      const wxMouseState &state, AudacityProject &) const override;
 
    bool StopsOnKeystroke () override { return true; }
 

@@ -8,14 +8,13 @@ Paul Licameli
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+
 #include "SliderHandle.h"
 
 #include "../../widgets/ASlider.h"
 #include "../../HitTestResult.h"
-#include "../../Project.h"
 #include "../../RefreshCode.h"
-#include "../../Track.h"
+#include "Track.h"
 #include "../../TrackPanelMouseEvent.h"
 
 SliderHandle::SliderHandle
@@ -26,7 +25,7 @@ SliderHandle::SliderHandle
 {
 }
 
-void SliderHandle::Enter(bool)
+void SliderHandle::Enter(bool, AudacityProject *)
 {
    mChangeHighlight = RefreshCode::RefreshCell;
 }
@@ -75,10 +74,13 @@ UIHandle::Result SliderHandle::Drag
 }
 
 HitTestPreview SliderHandle::Preview
-(const TrackPanelMouseState &, const AudacityProject *)
+(const TrackPanelMouseState &st, AudacityProject *project)
 {
-   // No special message or cursor
-   return {};
+   // No special cursor
+   TranslatableString message;
+   if (project)
+      message = Tip(st.state, *project);
+   return { message, {}, message };
 }
 
 UIHandle::Result SliderHandle::Release
@@ -113,6 +115,6 @@ UIHandle::Result SliderHandle::Cancel(AudacityProject *pProject)
 
 LWSlider *SliderHandle::GetSlider( AudacityProject *pProject )
 {
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto pTrack = TrackList::Get( *pProject ).Lock(mpTrack);
    return mSliderFn( pProject, mRect, pTrack.get() );
 }

@@ -12,14 +12,14 @@
 
 **********************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
+
 
 #if USE_SOUNDTOUCH
 
 #ifndef __AUDACITY_EFFECT_SOUNDTOUCH__
 #define __AUDACITY_EFFECT_SOUNDTOUCH__
 
-#include "Effect.h"
+#include "StatefulEffect.h"
 
 // forward declaration of a class defined in SoundTouch.h
 // which is not included here
@@ -27,16 +27,15 @@ namespace soundtouch { class SoundTouch; }
 
 
 class TimeWarper;
+class LabelTrack;
+class NoteTrack;
+class WaveChannel;
 class WaveTrack;
 
-class EffectSoundTouch /* not final */ : public Effect
+class EffectSoundTouch /* not final */ : public StatefulEffect
 {
 public:
    
-   // Effect implementation
-
-   void End() override;
-
    // EffectSoundTouch implementation
 
 #ifdef USE_MIDI
@@ -48,26 +47,35 @@ public:
 protected:
    // Effect implementation
 
-   bool ProcessWithTimeWarper(const TimeWarper &warper);
-
-   std::unique_ptr<soundtouch::SoundTouch> mSoundTouch;
-   double mCurT0;
-   double mCurT1;
+   using InitFunction = std::function< void(soundtouch::SoundTouch *soundtouch) >;
+   bool ProcessWithTimeWarper(InitFunction initer,
+                              const TimeWarper &warper,
+                              bool preserveLength);
 
 private:
    bool ProcessLabelTrack(LabelTrack *track, const TimeWarper &warper);
 #ifdef USE_MIDI
    bool ProcessNoteTrack(NoteTrack *track, const TimeWarper &warper);
 #endif
-   bool ProcessOne(
-      WaveTrack * t, sampleCount start, sampleCount end,
+   bool ProcessOne(soundtouch::SoundTouch *pSoundTouch,
+      WaveTrack &orig, WaveTrack &out, sampleCount start, sampleCount end,
       const TimeWarper &warper);
-   bool ProcessStereo(WaveTrack* leftTrack, WaveTrack* rightTrack,
-                     sampleCount start, sampleCount end,
-                      const TimeWarper &warper);
-   bool ProcessStereoResults(const size_t outputCount,
-                              WaveTrack* outputLeftTrack,
-                              WaveTrack* outputRightTrack);
+   bool ProcessStereo(soundtouch::SoundTouch *pSoundTouch,
+      WaveTrack &orig, WaveTrack &out,
+      sampleCount start, sampleCount end,
+      const TimeWarper &warper);
+   bool ProcessStereoResults(soundtouch::SoundTouch *pSoundTouch,
+      const size_t outputCount,
+      WaveChannel &outputLeftTrack,
+      WaveChannel &outputRightTrack);
+   /*!
+    @pre `orig.IsLeader()`
+    @pre `out.IsLeader()`
+    @pre `out.NChannels() == orig.NChannels()`
+    */
+   void Finalize(WaveTrack &orig, WaveTrack &out, const TimeWarper &warper);
+
+   bool   mPreserveLength;
 
    int    mCurTrackNum;
 

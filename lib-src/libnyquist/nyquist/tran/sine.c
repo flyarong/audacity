@@ -14,7 +14,7 @@ void sine_free(snd_susp_type a_susp);
 
 typedef struct sine_susp_struct {
     snd_susp_node susp;
-    long terminate_cnt;
+    int64_t terminate_cnt;
 
     long phase;
     long ph_incr;
@@ -49,39 +49,39 @@ void sine__fetch(snd_susp_type a_susp, snd_list_type snd_list)
     snd_list->block = out;
 
     while (cnt < max_sample_block_len) { /* outer loop */
-	/* first compute how many samples to generate in inner loop: */
-	/* don't overflow the output sample block: */
-	togo = max_sample_block_len - cnt;
+        /* first compute how many samples to generate in inner loop: */
+        /* don't overflow the output sample block: */
+        togo = max_sample_block_len - cnt;
 
-	/* don't run past terminate time */
-	if (susp->terminate_cnt != UNKNOWN &&
-	    susp->terminate_cnt <= susp->susp.current + cnt + togo) {
-	    togo = susp->terminate_cnt - (susp->susp.current + cnt);
-	    if (togo < 0) togo = 0;  /* avoids rounding errros */
-	    if (togo == 0) break;
-	}
+        /* don't run past terminate time */
+        if (susp->terminate_cnt != UNKNOWN &&
+            susp->terminate_cnt <= susp->susp.current + cnt + togo) {
+            togo = (int) (susp->terminate_cnt - (susp->susp.current + cnt));
+            if (togo < 0) togo = 0;  /* avoids rounding errros */
+            if (togo == 0) break;
+        }
 
-	n = togo;
-	phase_reg = susp->phase;
-	ph_incr_reg = susp->ph_incr;
-	out_ptr_reg = out_ptr;
-	if (n) do { /* the inner sample computation loop */
+        n = togo;
+        phase_reg = susp->phase;
+        ph_incr_reg = susp->ph_incr;
+        out_ptr_reg = out_ptr;
+        if (n) do { /* the inner sample computation loop */
             *out_ptr_reg++ = sine_table[phase_reg >> SINE_TABLE_SHIFT];
             phase_reg += ph_incr_reg;
             phase_reg &= SINE_TABLE_MASK;
-	} while (--n); /* inner loop */
+        } while (--n); /* inner loop */
 
-	susp->phase = (susp->phase + susp->ph_incr * togo) & SINE_TABLE_MASK;
-	out_ptr += togo;
-	cnt += togo;
+        susp->phase = (susp->phase + susp->ph_incr * togo) & SINE_TABLE_MASK;
+        out_ptr += togo;
+        cnt += togo;
     } /* outer loop */
 
     /* test for termination */
     if (togo == 0 && cnt == 0) {
-	snd_list_terminate(snd_list);
+        snd_list_terminate(snd_list);
     } else {
-	snd_list->block_len = cnt;
-	susp->susp.current += cnt;
+        snd_list->block_len = cnt;
+        susp->susp.current += cnt;
     }
 } /* sine__fetch */
 
@@ -106,10 +106,10 @@ sound_type snd_make_sine(time_type t0, double hz, rate_type sr, time_type d)
     sample_type scale_factor = 1.0F;
     falloc_generic(susp, sine_susp_node, "snd_make_sine");
     susp->phase = 0;
-    susp->ph_incr = round(((hz * SINE_TABLE_LEN) * (1 << SINE_TABLE_SHIFT) / sr));
+    susp->ph_incr = ROUND32(((hz * SINE_TABLE_LEN) * (1 << SINE_TABLE_SHIFT) / sr));
     susp->susp.fetch = sine__fetch;
 
-    susp->terminate_cnt = check_terminate_cnt(round((d) * sr));
+    susp->terminate_cnt = check_terminate_cnt(ROUNDBIG((d) * sr));
     /* initialize susp state */
     susp->susp.free = sine_free;
     susp->susp.sr = sr;

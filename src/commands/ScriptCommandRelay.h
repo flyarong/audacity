@@ -16,44 +16,24 @@
 #ifndef __SCRIPT_COMMAND_RELAY__
 #define __SCRIPT_COMMAND_RELAY__
 
-#include "../Audacity.h"
 
-#include "../MemoryX.h"
 
-class CommandHandler;
-class ResponseQueue;
-class Response;
-class ResponseQueueTarget;
-class AudacityProject;
-class OldStyleCommand;
-using OldStyleCommandPointer = std::shared_ptr<OldStyleCommand>;
+#include <memory>
+
 class wxString;
 
-typedef int (*tpExecScriptServerFunc)( wxString * pIn, wxString * pOut);
-typedef int (*tpRegScriptServerFunc)(tpExecScriptServerFunc pFn);
+typedef int(*tpExecScriptServerFunc)(wxString * pIn, wxString * pOut);
+typedef int(*tpRegScriptServerFunc)(tpExecScriptServerFunc pFn);
 
-extern "C" {
-      AUDACITY_DLL_API int ExecCommand(wxString *pIn, wxString *pOut);
-} // End 'extern C'
-
-class ScriptCommandRelay
+class AUDACITY_DLL_API ScriptCommandRelay
 {
-   private:
-      // N.B. Static class members also have to be declared in the .cpp file
-      static CommandHandler *sCmdHandler;
-      static tpRegScriptServerFunc sScriptFn;
-      static ResponseQueue sResponseQueue;
-
-   public:
-
-      static void SetRegScriptServerFunc(tpRegScriptServerFunc scriptFn);
-      static void SetCommandHandler(CommandHandler &ch);
-
-      static void Run();
-      static void PostCommand(AudacityProject *project, const OldStyleCommandPointer &cmd);
-      static void SendResponse(const wxString &response);
-      static Response ReceiveResponse();
-      static std::shared_ptr<ResponseQueueTarget> GetResponseTarget();
+public:
+   static void StartScriptServer(tpRegScriptServerFunc scriptFn);
 };
+
+// The void * return is actually a Lisp LVAL and will be cast to such as needed.
+extern void * ExecForLisp( char * pIn );
+extern void * nyq_make_opaque_string( int size, unsigned char *src );
+extern void * nyq_reformat_aud_do_response(const wxString & Str);
 
 #endif /* End of include guard: __SCRIPT_COMMAND_RELAY__ */

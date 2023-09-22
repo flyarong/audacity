@@ -17,72 +17,101 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "SetProjectCommand.h"
 
-#include "../Project.h"
-#include "../Track.h"
-#include "../TrackPanel.h"
-#include "../WaveTrack.h"
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
+#include "CommandDispatch.h"
+#include "CommandManager.h"
+#include "../CommonCommandFlags.h"
+#include "LoadCommands.h"
+#include "Project.h"
+#include "ProjectRate.h"
+#include "../ProjectWindows.h"
+#include "WaveTrack.h"
+#include "SettingsVisitor.h"
+#include "ShuttleGui.h"
 #include "CommandContext.h"
 #include "../toolbars/SelectionBar.h"
+
+#include <wx/frame.h>
+
+const ComponentInterfaceSymbol SetProjectCommand::Symbol
+{ XO("Set Project") };
+
+namespace{ BuiltinCommandsModule::Registration< SetProjectCommand > reg; }
 
 SetProjectCommand::SetProjectCommand()
 {
 }
 
-
-bool SetProjectCommand::DefineParams( ShuttleParams & S ){ 
+template<bool Const>
+bool SetProjectCommand::VisitSettings( SettingsVisitorBase<Const> & S ){
    S.OptionalN( bHasName        ).Define(     mName,        wxT("Name"),       _("Project") );
    S.OptionalN( bHasRate        ).Define(     mRate,        wxT("Rate"),       44100.0, 1.0, 1000000.0);
-   S.OptionalY( bHasSizing      ).Define(     mPosX,        wxT("X"),          10.0, 0.0, 2000.0);
-   S.OptionalY( bHasSizing      ).Define(     mPosY,        wxT("Y"),          10.0, 0.0, 2000.0);
-   S.OptionalY( bHasSizing      ).Define(     mWidth,       wxT("Width"),      1000.0, 200.0, 4000.0);
-   S.OptionalY( bHasSizing      ).Define(     mHeight,      wxT("Height"),      900.0, 200.0, 4000.0);
+   S.OptionalY( bHasSizing      ).Define(     mPosX,        wxT("X"),          10, 0, 2000);
+   S.OptionalY( bHasSizing      ).Define(     mPosY,        wxT("Y"),          10, 0, 2000);
+   S.OptionalY( bHasSizing      ).Define(     mWidth,       wxT("Width"),      1000, 200, 4000);
+   S.OptionalY( bHasSizing      ).Define(     mHeight,      wxT("Height"),      900, 200, 4000);
    return true;
 };
+
+bool SetProjectCommand::VisitSettings( SettingsVisitor & S )
+   { return VisitSettings<false>(S); }
+
+bool SetProjectCommand::VisitSettings( ConstSettingsVisitor & S )
+   { return VisitSettings<true>(S); }
 
 void SetProjectCommand::PopulateOrExchange(ShuttleGui & S)
 {
    S.AddSpace(0, 5);
    S.StartMultiColumn(3, wxALIGN_CENTER);
    {
-      S.Optional( bHasName      ).TieTextBox(         _("Name:"),     mName );
-      S.Optional( bHasRate      ).TieTextBox(         _("Rate:"),     mRate );
-      S.TieCheckBox( _("Resize:"), bHasSizing    );
+      S.Optional( bHasName      ).TieTextBox(         XXO("Name:"),     mName );
+      S.Optional( bHasRate      ).TieTextBox(         XXO("Rate:"),     mRate );
+      S.TieCheckBox( XXO("Resize:"), bHasSizing    );
       S.AddSpace(0,0);
    }
    S.EndMultiColumn();
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieNumericTextBox(  _("X:"),        mPosX );
-      S.TieNumericTextBox(  _("Y:"),        mPosY );
-      S.TieNumericTextBox(  _("Width:"),    mWidth );
-      S.TieNumericTextBox(  _("Height:"),   mHeight );
+      S.TieNumericTextBox(  XXO("X:"),        mPosX );
+      S.TieNumericTextBox(  XXO("Y:"),        mPosY );
+      S.TieNumericTextBox(  XXO("Width:"),    mWidth );
+      S.TieNumericTextBox(  XXO("Height:"),   mHeight );
    }
    S.EndMultiColumn();
 }
 
 bool SetProjectCommand::Apply(const CommandContext & context)
 {
-   AudacityProject * pProj = context.GetProject();
+   auto &project = context.project;
+   auto &window = GetProjectFrame( project );
    if( bHasName )
-      pProj->SetLabel(mName);
+      window.SetLabel(mName);
 
-   if( bHasRate && mRate >= 1 && mRate <= 1000000 )
-   {
-      auto *bar = pProj->GetSelectionBar();
-      if( bar ){
-         bar->SetRate( mRate );
-      }
-   }
+   if (bHasRate && mRate >= 1 && mRate <= 1000000)
+      ProjectRate::Get(project).SetRate(mRate);
 
    if( bHasSizing )
    {
-      pProj->SetPosition( wxPoint( mPosX, mPosY));
-      pProj->SetSize( wxSize( mWidth, mHeight ));
+      window.SetPosition( wxPoint( mPosX, mPosY));
+      window.SetSize( wxSize( mWidth, mHeight ));
    }
    return true;
+}
+
+namespace {
+using namespace MenuTable;
+
+// Register menu items
+
+AttachedItem sAttachment1{
+   wxT("Optional/Extra/Part2/Scriptables1"),
+   // Note that the PLUGIN_SYMBOL must have a space between words,
+   // whereas the short-form used here must not.
+   // (So if you did write "Compare Audio" for the PLUGIN_SYMBOL name, then
+   // you would have to use "CompareAudio" here.)
+   Command( wxT("SetProject"), XXO("Set Project..."),
+      CommandDispatch::OnAudacityCommand, AudioIONotBusyFlag() )
+};
 }

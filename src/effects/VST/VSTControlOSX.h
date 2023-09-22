@@ -15,7 +15,8 @@
 #include <Carbon/Carbon.h>
 #endif
 
-#include <wx/osx/private.h> // to inherit wxWidgetCocoaImpl
+#include <wx/osx/core/private.h>
+#include <wx/osx/cocoa/private.h>
 
 #include "VSTControl.h"
 
@@ -32,7 +33,7 @@ public:
    VSTControl();
    ~VSTControl();
 
-   bool Create(wxWindow *parent, VSTEffectLink *link);
+   bool Create(wxWindow *parent, VSTLink *link);
    void Close();
 
 private:

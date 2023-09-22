@@ -14,28 +14,38 @@
 setting used in debugging batch (aka macros) processing.
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "BatchPrefs.h"
 
 #include <wx/defs.h>
-#include <wx/intl.h>
 #include <wx/textdlg.h>
 
-#include "../Languages.h"
-#include "../Prefs.h"
-#include "../Project.h"
-#include "../BatchCommandDialog.h"
-#include "../ShuttleGui.h"
-#include "../toolbars/ToolManager.h"
+#include "Prefs.h"
+#include "ShuttleGui.h"
 
 BEGIN_EVENT_TABLE(BatchPrefs, PrefsPanel)
 END_EVENT_TABLE()
 
 /// Constructor
 BatchPrefs::BatchPrefs(wxWindow * parent, wxWindowID winid):
-   PrefsPanel(parent, winid, _("Batch"))
+   PrefsPanel(parent, winid, XO("Batch"))
 {
    Populate();
+}
+
+ComponentInterfaceSymbol BatchPrefs::GetSymbol() const
+{
+   return BATCH_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString BatchPrefs::GetDescription() const
+{
+   return XO("Preferences for Batch");
+}
+
+ManualPageID BatchPrefs::HelpPageName()
+{
+   return  "Batch_Preferences";
 }
 
 /// Creates the dialog and its contents.
@@ -57,11 +67,11 @@ void BatchPrefs::PopulateOrExchange( ShuttleGui & S )
    S.StartScroller();
    S.StartHorizontalLay( wxEXPAND, 0 );
 
-   S.StartStatic( _("Behaviors"),1 );
+   S.StartStatic( XO("Behaviors"),1 );
    {
-#ifdef __WXDEBUG__
-      S.TieCheckBox( _("&Don't apply effects in batch mode"),
-         wxT("/Batch/Debug"), false);
+#ifdef _DEBUG
+      S.TieCheckBox( XXO("&Don't apply effects in batch mode"),
+         {wxT("/Batch/Debug"), false});
 #endif
    }
    S.EndStatic();
@@ -83,8 +93,18 @@ BatchPrefs::~BatchPrefs()
 {
 }
 
-PrefsPanel *BatchPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew BatchPrefs(parent, winid);
+#if 0
+namespace{
+PrefsPanel::Registration sAttachment{ "Batch",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew BatchPrefs(parent, winid);
+   },
+   false,
+   // Register with an explicit ordering hint because this one is
+   // only conditionally compiled
+   { "", { Registry::OrderingHint::Before, "KeyConfig" } }
+};
 }
+#endif

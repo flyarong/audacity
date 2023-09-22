@@ -27,21 +27,38 @@ class KeyView;
 struct NormalizedKeyString;
 enum ViewByType : int;
 
+#define KEY_CONFIG_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Key Config") }
+
 class KeyConfigPrefs final : public PrefsPanel
 {
 public:
-   KeyConfigPrefs(wxWindow * parent, wxWindowID winid, const CommandID &name);
+   KeyConfigPrefs(wxWindow * parent, wxWindowID winid,
+      AudacityProject *pProject,
+      const CommandID &name);
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+
    bool Commit() override;
    void Cancel() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
 private:
    void Populate();
    void RefreshBindings(bool bSort);
+   void RefreshKeyInfo();
+   void ClearAllKeys();
+   bool ContainsIllegalDups(TranslatableString & fMatching, 
+      TranslatableString & sMatching) const;
+   TranslatableString MergeWithExistingKeys(
+      const std::vector<NormalizedKeyString> &toAdd);
    void FilterKeys( std::vector<NormalizedKeyString> & arr );
    CommandID NameFromKey(const NormalizedKeyString & key);
    void SetKeyForSelected(const NormalizedKeyString & key);
+
+   // See bug #2315 for discussion. This should be reviewed
+   // and (possibly) removed after wx3.1.3.
+   void OnShow(wxShowEvent & e);
 
    void OnViewBy(wxCommandEvent & e);
    void OnDefaults(wxCommandEvent & e);
@@ -53,12 +70,13 @@ private:
    void OnSelected(wxCommandEvent & e);
 
    void OnHotkeyKeyDown(wxKeyEvent & e);
-   void OnHotkeyChar(wxKeyEvent & e);
-   void OnHotkeyKillFocus(wxFocusEvent & e);
+   void OnHotkeyChar(wxEvent & e);
+   void OnHotkeyKillFocus(wxEvent & e);
+   void OnHotkeyContext(wxEvent & e);
 
    void OnFilterTimer(wxTimerEvent & e);
    void OnFilterKeyDown(wxKeyEvent & e);
-   void OnFilterChar(wxKeyEvent & e);
+   void OnFilterChar(wxEvent & e);
 
    KeyView *mView;
    wxTextCtrl *mKey;
@@ -75,6 +93,8 @@ private:
    wxRadioButton *mViewByName;
    wxRadioButton *mViewByKey;
 
+   AudacityProject *mProject{};
+
    CommandManager *mManager;
    int mCommandSelected;
 
@@ -88,15 +108,9 @@ private:
 };
 
 
-/// A PrefsPanelFactory that creates one KeyConfigPrefs panel.
-class KeyConfigPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   KeyConfigPrefsFactory(const CommandID &name = {})
-      : mName{ name } {}
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-
-private:
-   CommandID mName;
-};
+/// A PrefsPanel::Factory that creates one KeyConfigPrefs panel.
+/// This factory can be parametrized by name, which specifies a command to be
+/// focused initially
+extern PrefsPanel::Factory KeyConfigPrefsFactory(
+   const CommandID &name = {} );
 #endif

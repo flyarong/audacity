@@ -12,54 +12,54 @@
 #ifndef __AUDACITY_EFFECT_NOISE_REMOVAL__
 #define __AUDACITY_EFFECT_NOISE_REMOVAL__
 
-#include "../Audacity.h"
 
-#include "../Experimental.h"
 
 #if !defined(EXPERIMENTAL_NOISE_REDUCTION)
 
-#include "Effect.h"
-
-#include "../MemoryX.h"
-#include "../SampleFormat.h"
+#include "StatefulEffect.h"
+#include "EffectUI.h"
 
 class wxButton;
 class wxSizer;
 class wxSlider;
-class wxString;
 
 class Envelope;
+class EffectSettingsAccess;
 class WaveTrack;
 
 class wxRadioButton;
 class wxTextCtrl;
 
-#include "../RealFFTf.h"
+#include "RealFFTf.h"
+#include "SampleFormat.h"
 
-#define NOISEREMOVAL_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Noise Removal") }
-
-class EffectNoiseRemoval final : public Effect
+class EffectNoiseRemoval final : public StatefulEffect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectNoiseRemoval();
    virtual ~EffectNoiseRemoval();
 
    // ComponentInterface implementation
 
    ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-   bool SupportsAutomation() override;
+   EffectType GetType() const override;
+   bool SupportsAutomation() const override;
 
    // Effect implementation
 
-   bool PromptUser(wxWindow *parent) override;
+   int ShowHostInterface(EffectBase &plugin, wxWindow &parent,
+      const EffectDialogFactory &factory,
+      std::shared_ptr<EffectInstance> &pInstance, EffectSettingsAccess &access,
+      bool forceModal = false) override;
    bool Init() override;
-   bool CheckWhetherSkipEffect() override;
-   bool Process() override;
+   bool CheckWhetherSkipEffect(const EffectSettings &settings) const override;
+   bool Process(EffectInstance &instance, EffectSettings &settings) override;
    void End() override;
 
 private:
@@ -100,7 +100,7 @@ private:
    void FinishTrack();
 
    // Variables that only exist during processing
-   std::unique_ptr<WaveTrack> mOutputTrack;
+   std::shared_ptr<WaveTrack> mOutputTrack;
    sampleCount       mInSampleCount;
    sampleCount       mOutSampleCount;
    int                   mInputPos;
@@ -138,13 +138,13 @@ class NoiseRemovalDialog final : public EffectDialog
 {
 public:
    // constructors and destructors
-   NoiseRemovalDialog(EffectNoiseRemoval * effect,
+   NoiseRemovalDialog(EffectNoiseRemoval * effect, EffectSettingsAccess &access,
                       wxWindow *parent);
 
    wxSizer *MakeNoiseRemovalDialog(bool call_fit = true,
                                    bool set_sizer = true);
 
-   void PopulateOrExchange(ShuttleGui & S);
+   void PopulateOrExchange(ShuttleGui & S) override;
    bool TransferDataToWindow() override;
    bool TransferDataFromWindow() override;
 
@@ -152,7 +152,7 @@ private:
    // handlers
    void OnGetProfile( wxCommandEvent &event );
    void OnKeepNoise( wxCommandEvent &event );
-   void OnPreview(wxCommandEvent &event);
+   void OnPreview(wxCommandEvent &event) override;
    void OnRemoveNoise( wxCommandEvent &event );
    void OnCancel( wxCommandEvent &event );
 
@@ -168,6 +168,7 @@ private:
  public:
 
    EffectNoiseRemoval * m_pEffect;
+   EffectSettingsAccess &mAccess;
 
    wxButton * m_pButton_GetProfile;
    wxButton * m_pButton_Preview;

@@ -18,24 +18,29 @@ threshold of difference in two selected tracks
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "CompareAudioCommand.h"
 
-#include "../MemoryX.h"
-#include "../Project.h"
-#include "../WaveTrack.h"
-#include "Command.h"
+#include "CommandDispatch.h"
+#include "CommandManager.h"
+#include "../CommonCommandFlags.h"
+#include "LoadCommands.h"
+#include "ViewInfo.h"
+#include "WaveTrack.h"
 
 
 #include <float.h>
-#include <wx/intl.h>
 
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
-#include "../widgets/ErrorDialog.h"
+#include "SettingsVisitor.h"
+#include "ShuttleGui.h"
+#include "AudacityMessageBox.h"
 #include "../widgets/valnum.h"
-#include "../SampleFormat.h"
 #include "CommandContext.h"
+
+const ComponentInterfaceSymbol CompareAudioCommand::Symbol
+{ XO("Compare Audio") };
+
+namespace{ BuiltinCommandsModule::Registration< CompareAudioCommand > reg; }
 
 extern void RegisterCompareAudio( Registrar & R){
    R.AddCommand( std::make_unique<CompareAudioCommand>() );
@@ -44,14 +49,16 @@ extern void RegisterCompareAudio( Registrar & R){
 
 }
 
-bool CompareAudioCommand::DefineParams( ShuttleParams & S ){
+template<bool Const>
+bool CompareAudioCommand::VisitSettings( SettingsVisitorBase<Const> & S ){
    S.Define( errorThreshold,  wxT("Threshold"),   0.0f,  0.0f,    0.01f,    1.0f );
    return true;
 }
+bool CompareAudioCommand::VisitSettings( SettingsVisitor & S )
+   { return VisitSettings<false>(S); }
 
-bool CompareAudioCommand::Apply(){
-   return true;
-}
+bool CompareAudioCommand::VisitSettings( ConstSettingsVisitor & S )
+   { return VisitSettings<true>(S); }
 
 void CompareAudioCommand::PopulateOrExchange(ShuttleGui & S)
 {
@@ -59,7 +66,7 @@ void CompareAudioCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieTextBox(_("Threshold:"),errorThreshold);
+      S.TieTextBox(XXO("Threshold:"),errorThreshold);
    }
    S.EndMultiColumn();
 }
@@ -68,8 +75,9 @@ void CompareAudioCommand::PopulateOrExchange(ShuttleGui & S)
 bool CompareAudioCommand::GetSelection(const CommandContext &context, AudacityProject &proj)
 {
    // Get the selected time interval
-   mT0 = proj.mViewInfo.selectedRegion.t0();
-   mT1 = proj.mViewInfo.selectedRegion.t1();
+   auto &selectedRegion = ViewInfo::Get( proj ).selectedRegion;
+   mT0 = selectedRegion.t0();
+   mT1 = selectedRegion.t1();
    if (mT0 >= mT1)
    {
       context.Error(wxT("There is no selection!"));
@@ -78,23 +86,23 @@ bool CompareAudioCommand::GetSelection(const CommandContext &context, AudacityPr
 
    // Get the selected tracks and check that there are at least two to
    // compare
-   auto trackRange = proj.GetTracks()->Selected< const WaveTrack >();
+   auto trackRange = TrackList::Get(proj).Selected<const WaveTrack>();
    mTrack0 = *trackRange.first;
-   if (mTrack0 == NULL)
-   {
+   if (!mTrack0) {
       context.Error(wxT("No tracks selected! Select two tracks to compare."));
       return false;
    }
    mTrack1 = * ++ trackRange.first;
-   if (mTrack1 == NULL)
-   {
+   if (!mTrack1) {
       context.Error(wxT("Only one track selected! Select two tracks to compare."));
       return false;
    }
-   if ( * ++ trackRange.first )
-   {
-      context.Status(wxT("More than two tracks selected - only the first two will be compared."));
+   if (TrackList::NChannels(*mTrack0) != TrackList::NChannels(*mTrack1)) {
+      context.Error(wxT("Selected tracks must have the same number of channels!"));
+      return false;
    }
+   if (* ++ trackRange.first)
+      context.Status(wxT("More than two tracks selected - only the first two will be compared."));
    return true;
 }
 
@@ -110,7 +118,7 @@ inline int min(int a, int b)
 
 bool CompareAudioCommand::Apply(const CommandContext & context)
 {
-   if (!GetSelection(context, *context.GetProject()))
+   if (!GetSelection(context, context.project))
    {
       return false;
    }
@@ -130,30 +138,30 @@ bool CompareAudioCommand::Apply(const CommandContext & context)
    // Compare tracks block by block
    auto s0 = mTrack0->TimeToLongSamples(mT0);
    auto s1 = mTrack0->TimeToLongSamples(mT1);
-   auto position = s0;
-   auto length = s1 - s0;
-   while (position < s1)
-   {
-      // Get a block of data into the buffers
-      auto block = limitSampleBufferSize(
-         mTrack0->GetBestBlockSize(position), s1 - position
-      );
-      mTrack0->Get((samplePtr)buff0.get(), floatSample, position, block);
-      mTrack1->Get((samplePtr)buff1.get(), floatSample, position, block);
+   const auto channels0 = mTrack0->Channels();
+   auto iter = mTrack1->Channels().begin();
+   for (const auto pChannel0 : channels0) {
+      const auto pChannel1 = *iter++;
+      auto position = s0;
+      auto length = s1 - s0;
+      while (position < s1) {
+         // Get a block of data into the buffers
+         auto block = limitSampleBufferSize(
+            pChannel0->GetBestBlockSize(position), s1 - position
+         );
+         pChannel0->GetFloats(buff0.get(), position, block);
+         pChannel1->GetFloats(buff1.get(), position, block);
 
-      for (decltype(block) buffPos = 0; buffPos < block; ++buffPos)
-      {
-         if (CompareSample(buff0[buffPos], buff1[buffPos]) > errorThreshold)
-         {
-            ++errorCount;
-         }
+         for (decltype(block) buffPos = 0; buffPos < block; ++buffPos)
+            if (CompareSample(buff0[buffPos], buff1[buffPos]) > errorThreshold)
+               ++errorCount;
+
+         position += block;
+         context.Progress(
+            (position - s0).as_double() /
+            length.as_double()
+         );
       }
-
-      position += block;
-      context.Progress(
-         (position - s0).as_double() /
-         length.as_double()
-      );
    }
 
    // Output the results
@@ -162,4 +170,20 @@ bool CompareAudioCommand::Apply(const CommandContext & context)
    context.Status(wxString::Format(wxT("%.4f"), errorSeconds));
    context.Status(wxString::Format(wxT("Finished comparison: %li samples (%.3f seconds) exceeded the error threshold of %f."), errorCount, errorSeconds, errorThreshold));
    return true;
+}
+
+namespace {
+using namespace MenuTable;
+
+// Register menu items
+
+AttachedItem sAttachment{
+   wxT("Optional/Extra/Part2/Scriptables2"),
+   // Note that the PLUGIN_SYMBOL must have a space between words,
+   // whereas the short-form used here must not.
+   // (So if you did write "Compare Audio" for the PLUGIN_SYMBOL name, then
+   // you would have to use "CompareAudio" here.)
+   Command( wxT("CompareAudio"), XXO("Compare Audio..."),
+      CommandDispatch::OnAudacityCommand, AudioIONotBusyFlag() ),
+};
 }

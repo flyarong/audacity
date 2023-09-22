@@ -1,20 +1,12 @@
-/**********************************************************************
+/*!********************************************************************
 
   Audacity: A Digital Audio Editor
 
-  AUControl.h
+  @file AUControl.h
 
   Leland Lucius
 
-********************************************************************//**
-
-\class AUControl
-\brief a wxControl with Cocoa/Carbon support
-
-\class AUControlImpl
-\brief a wxWidgetCocoaImpl 
-
-*//********************************************************************/
+**********************************************************************/
 #ifndef AUDACITY_AUCONTROL_H
 #define AUDACITY_AUCONTROL_H
 
@@ -22,18 +14,12 @@
 #include <Carbon/Carbon.h>
 #endif
 
-#include <wx/osx/private.h> // to inherit wxWidgetCocoaImpl
-#include <wx/control.h> // to inherit
+#include <wx/osx/core/private.h>
+#include <wx/osx/cocoa/private.h>
+#include <wx/control.h>
 
 #include <AudioUnit/AudioComponent.h>
 #include <AudioUnit/AudioUnit.h>
-
-class AUControlImpl final : public wxWidgetCocoaImpl
-{
-public :
-   AUControlImpl(wxWindowMac *peer, NSView *view);
-   ~AUControlImpl();
-};
 
 class AUControl final : public wxControl
 {
@@ -47,6 +33,7 @@ public:
    void CreateCocoa();
    void CreateGeneric();
    void CocoaViewResized();
+   void ForceRedraw();
 
    void OnSize(wxSizeEvent & evt);
 
@@ -55,24 +42,22 @@ public:
    void CreateCarbonOverlay();
    void CarbonViewResized();
    static pascal OSStatus ControlEventHandlerCallback(EventHandlerCallRef handler,
-                                                      EventRef event,
-                                                      void *data);
 #endif
 
 private:
-   AudioComponent mComponent;
-   AudioUnit mUnit;
+   AudioComponent mComponent{};
+   AudioUnit mUnit{};
 
-   NSView *mAUView;
-   NSView *mView;
+   NSView *mAUView{};
+   NSView *mView{};
 
-   wxSize mLastMin;
-   bool mSettingSize;
+   wxSize mLastMin{};
+   bool mSettingSize{ false };
 
 #if !defined(_LP64)
-   AudioComponentInstance mInstance;
-   WindowRef mWindowRef;
-   HIViewRef mHIView;
+   AudioComponentInstance mInstance{};
+   WindowRef mWindowRef{};
+   HIViewRef mHIView{};
 #endif
 
    DECLARE_EVENT_TABLE()

@@ -12,14 +12,19 @@
 \brief An effect to add silence.
 
 *//*******************************************************************/
-
-#include "../Audacity.h"
 #include "Silence.h"
+#include "EffectEditor.h"
+#include "LoadEffects.h"
 
-#include <wx/intl.h>
+#include "ShuttleGui.h"
+#include "WaveTrack.h"
+#include "../widgets/NumericTextCtrl.h"
 
-#include "../ShuttleGui.h"
-#include "../WaveTrack.h"
+const ComponentInterfaceSymbol EffectSilence::Symbol
+/* i18n-hint: noun */
+{ XC("Silence", "generator") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectSilence > reg; }
 
 EffectSilence::EffectSilence()
 {
@@ -32,74 +37,78 @@ EffectSilence::~EffectSilence()
 
 // ComponentInterface implementation
 
-ComponentInterfaceSymbol EffectSilence::GetSymbol()
+ComponentInterfaceSymbol EffectSilence::GetSymbol() const
 {
-   return SILENCE_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectSilence::GetDescription()
+TranslatableString EffectSilence::GetDescription() const
 {
-   return _("Creates audio of zero amplitude");
+   return XO("Creates audio of zero amplitude");
 }
 
-wxString EffectSilence::ManualPage()
+ManualPageID EffectSilence::ManualPage() const
 {
-   return wxT("Silence");
+   return L"Silence";
 }
 
 
 // EffectDefinitionInterface implementation
 
-EffectType EffectSilence::GetType()
+EffectType EffectSilence::GetType() const
 {
    return EffectTypeGenerate;
 }
 
 // Effect implementation
 
-void EffectSilence::PopulateOrExchange(ShuttleGui & S)
+std::unique_ptr<EffectEditor> EffectSilence::PopulateOrExchange(
+   ShuttleGui & S, EffectInstance &, EffectSettingsAccess &access,
+   const EffectOutputs *)
 {
    S.StartVerticalLay();
    {
       S.StartHorizontalLay();
       {
-         S.AddPrompt(_("Duration:"));
+         S.AddPrompt(XXO("&Duration:"));
+         auto &extra = access.Get().extra;
          mDurationT = safenew
-            NumericTextCtrl(S.GetParent(), wxID_ANY,
-                              NumericConverter::TIME,
-                              GetDurationFormat(),
-                              GetDuration(),
-                               mProjectRate,
+            NumericTextCtrl(FormatterContext::SampleRateContext(mProjectRate),
+                              S.GetParent(), wxID_ANY,
+                              NumericConverterType_TIME(),
+                              extra.GetDurationFormat(),
+                              extra.GetDuration(),
                                NumericTextCtrl::Options{}
                                   .AutoPos(true));
-         mDurationT->SetName(_("Duration"));
-         S.AddWindow(mDurationT, wxALIGN_CENTER | wxALL);
+         S.Name(XO("Duration"))
+            .Position(wxALIGN_CENTER | wxALL)
+            .AddWindow(mDurationT);
       }
       S.EndHorizontalLay();
    }
    S.EndVerticalLay();
 
-   return;
+   return nullptr;
 }
 
-bool EffectSilence::TransferDataToWindow()
+bool EffectSilence::TransferDataToWindow(const EffectSettings &settings)
 {
-   mDurationT->SetValue(GetDuration());
+   mDurationT->SetValue(settings.extra.GetDuration());
 
    return true;
 }
 
-bool EffectSilence::TransferDataFromWindow()
+bool EffectSilence::TransferDataFromWindow(EffectSettings &settings)
 {
-   SetDuration(mDurationT->GetValue());
+   settings.extra.SetDuration(mDurationT->GetValue());
 
    return true;
 }
 
-bool EffectSilence::GenerateTrack(WaveTrack *tmp,
-                                  const WaveTrack & WXUNUSED(track),
-                                  int WXUNUSED(ntrack))
+bool EffectSilence::GenerateTrack(
+   const EffectSettings &settings, TrackList &tmp)
 {
-   tmp->InsertSilence(0.0, GetDuration());
+   (*tmp.Any<WaveTrack>().begin())
+      ->InsertSilence(0.0, settings.extra.GetDuration());
    return true;
 }

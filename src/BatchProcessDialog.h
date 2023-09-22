@@ -15,6 +15,8 @@
 #include <wx/defs.h>
 
 #include "BatchCommands.h"
+#include "Prefs.h"
+#include "wxPanelWrapper.h"
 
 class wxWindow;
 class wxTextCtrl;
@@ -22,12 +24,14 @@ class wxListCtrl;
 class wxListEvent;
 class wxButton;
 class wxTextCtrl;
+class AudacityProject;
 class ShuttleGui;
 
 class ApplyMacroDialog : public wxDialogWrapper {
  public:
    // constructors and destructors
-   ApplyMacroDialog(wxWindow * parent, bool bInherited=false);
+   ApplyMacroDialog(
+      wxWindow * parent, AudacityProject &project, bool bInherited=false);
    virtual ~ApplyMacroDialog();
  public:
    // Populate methods NOT virtual.
@@ -38,13 +42,12 @@ class ApplyMacroDialog : public wxDialogWrapper {
    virtual void OnCancel(wxCommandEvent & event);
    virtual void OnHelp(wxCommandEvent & event);
 
-   virtual wxString GetHelpPageName() {return "Apply_Macro";};
+   virtual ManualPageID GetHelpPageName() {return "Apply_Macro";}
 
    void PopulateMacros();
    static CommandID MacroIdOfName( const wxString & MacroName );
    void ApplyMacroToProject( int iMacro, bool bHasGui=true );
    void ApplyMacroToProject( const CommandID & MacroID, bool bHasGui=true );
-
 
    // These will be reused in the derived class...
    wxListCtrl *mList;
@@ -58,35 +61,42 @@ class ApplyMacroDialog : public wxDialogWrapper {
    bool mAbort;
    bool mbExpanded;
    wxString mActiveMacro;
+   wxString mMacroBeingRenamed;
 
 protected:
+   AudacityProject &mProject;
    const MacroCommandsCatalog mCatalog;
 
    DECLARE_EVENT_TABLE()
 };
 
-class MacrosWindow final : public ApplyMacroDialog
+class MacrosWindow final : public ApplyMacroDialog,
+                           public PrefsListener
 {
 public:
-   MacrosWindow(wxWindow * parent, bool bExpanded=true);
+   MacrosWindow(
+      wxWindow * parent, AudacityProject &project, bool bExpanded=true);
    ~MacrosWindow();
    void UpdateDisplay( bool bExpanded );
 
 private:
+   TranslatableString WindowTitle() const;
+
    void Populate();
    void PopulateOrExchange(ShuttleGui &S);
    void OnApplyToProject(wxCommandEvent & event) override;
    void OnApplyToFiles(wxCommandEvent & event) override;
    void OnCancel(wxCommandEvent &event) override;
 
-   virtual wxString GetHelpPageName() override {return 
+   virtual ManualPageID GetHelpPageName() override {return 
       mbExpanded ? "Manage_Macros"
-         : "Apply_Macro";};
+         : "Apply_Macro";}
 
    void PopulateList();
    void AddItem(const CommandID &command, wxString const &params);
    bool ChangeOK();
    void UpdateMenus();
+   void ShowActiveMacro();
 
    void OnMacroSelected(wxListEvent &event);
    void OnListSelected(wxListEvent &event);
@@ -95,6 +105,11 @@ private:
    void OnAdd(wxCommandEvent &event);
    void OnRemove(wxCommandEvent &event);
    void OnRename(wxCommandEvent &event);
+   void OnRestore(wxCommandEvent &event);
+   void OnImport(wxCommandEvent &event);
+   void OnExport(wxCommandEvent &event);
+   void OnSave(wxCommandEvent &event);
+
    void OnExpand(wxCommandEvent &event);
    void OnShrink(wxCommandEvent &event);
    void OnSize(wxSizeEvent &event);
@@ -106,7 +121,6 @@ private:
    void OnDelete(wxCommandEvent &event);
    void OnUp(wxCommandEvent &event);
    void OnDown(wxCommandEvent &event);
-   void OnDefaults(wxCommandEvent &event);
 
    void OnOK(wxCommandEvent &event);
 
@@ -115,9 +129,17 @@ private:
    void InsertCommandAt(int item);
    bool SaveChanges();
 
+   // PrefsListener implementation
+   void UpdatePrefs() override;
+
+   AudacityProject &mProject;
+
    wxButton *mRemove;
    wxButton *mRename;
-   wxButton *mDefaults;
+   wxButton *mRestore;
+   wxButton *mImport;
+   wxButton *mExport;
+   wxButton *mSave;
 
    int mSelectedCommand;
    bool mChanged;

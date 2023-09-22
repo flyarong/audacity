@@ -13,34 +13,35 @@
 \brief An Extreme Time Stretch and Time Smear effect
 
 *//*******************************************************************/
-
-#include "../Audacity.h"
 #include "Paulstretch.h"
+#include "EffectEditor.h"
+#include "EffectOutputTracks.h"
+#include "LoadEffects.h"
 
 #include <algorithm>
 
 #include <math.h>
-#include <float.h>
 
-#include <wx/intl.h>
 #include <wx/valgen.h>
 
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
-#include "../FFT.h"
+#include "ShuttleGui.h"
+#include "FFT.h"
 #include "../widgets/valnum.h"
-#include "../widgets/ErrorDialog.h"
-#include "../Prefs.h"
+#include "AudacityMessageBox.h"
+#include "Prefs.h"
+#include "SyncLock.h"
 
-#include "../WaveTrack.h"
+#include "WaveTrack.h"
 
-// Define keys, defaults, minimums, and maximums for the effect parameters
-//
-//     Name    Type     Key                     Def      Min      Max      Scale
-Param( Amount, float,   wxT("Stretch Factor"),   10.0,    1.0,     FLT_MAX, 1   );
-Param( Time,   float,   wxT("Time Resolution"),  0.25f,   0.00099f,  FLT_MAX, 1   );
+const EffectParameterMethods& EffectPaulstretch::Parameters() const
+{
+   static CapturedParameters<EffectPaulstretch,
+      Amount, Time
+   > parameters;
+   return parameters;
+}
 
-/// \brief Class that helps EffectPaulStretch.  It does the FFTs and inner loop 
+/// \brief Class that helps EffectPaulStretch.  It does the FFTs and inner loop
 /// of the effect.
 class PaulStretch
 {
@@ -83,14 +84,18 @@ private:
 // EffectPaulstretch
 //
 
+const ComponentInterfaceSymbol EffectPaulstretch::Symbol
+{ XO("Paulstretch") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectPaulstretch > reg; }
+
 BEGIN_EVENT_TABLE(EffectPaulstretch, wxEvtHandler)
     EVT_TEXT(wxID_ANY, EffectPaulstretch::OnText)
 END_EVENT_TABLE()
 
 EffectPaulstretch::EffectPaulstretch()
 {
-   mAmount = DEF_Amount;
-   mTime_resolution = DEF_Time;
+   Parameters().Reset(*this);
 
    SetLinearEffectFlag(true);
 }
@@ -101,57 +106,32 @@ EffectPaulstretch::~EffectPaulstretch()
 
 // ComponentInterface implementation
 
-ComponentInterfaceSymbol EffectPaulstretch::GetSymbol()
+ComponentInterfaceSymbol EffectPaulstretch::GetSymbol() const
 {
-   return PAULSTRETCH_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectPaulstretch::GetDescription()
+TranslatableString EffectPaulstretch::GetDescription() const
 {
-   return _("Paulstretch is only for an extreme time-stretch or \"stasis\" effect");
+   return XO("Paulstretch is only for an extreme time-stretch or \"stasis\" effect");
 }
 
-wxString EffectPaulstretch::ManualPage()
+ManualPageID EffectPaulstretch::ManualPage() const
 {
-   return wxT("Paulstretch");
+   return L"Paulstretch";
 }
 
 // EffectDefinitionInterface implementation
 
-EffectType EffectPaulstretch::GetType()
+EffectType EffectPaulstretch::GetType() const
 {
    return EffectTypeProcess;
 }
 
-// EffectClientInterface implementation
-bool EffectPaulstretch::DefineParams( ShuttleParams & S ){
-   S.SHUTTLE_PARAM( mAmount, Amount );
-   S.SHUTTLE_PARAM( mTime_resolution, Time );
-   return true;
-}
-
-bool EffectPaulstretch::GetAutomationParameters(CommandParameters & parms)
-{
-   parms.WriteFloat(KEY_Amount, mAmount);
-   parms.WriteFloat(KEY_Time, mTime_resolution);
-
-   return true;
-}
-
-bool EffectPaulstretch::SetAutomationParameters(CommandParameters & parms)
-{
-   ReadAndVerifyFloat(Amount);
-   ReadAndVerifyFloat(Time);
-
-   mAmount = Amount;
-   mTime_resolution = Time;
-
-   return true;
-}
-
 // Effect implementation
 
-double EffectPaulstretch::CalcPreviewInputLength(double previewLength)
+double EffectPaulstretch::CalcPreviewInputLength(
+   const EffectSettings &, double previewLength) const
 {
    // FIXME: Preview is currently at the project rate, but should really be
    // at the track rate (bugs 1284 and 852).
@@ -164,53 +144,81 @@ double EffectPaulstretch::CalcPreviewInputLength(double previewLength)
 }
 
 
-bool EffectPaulstretch::Process()
+bool EffectPaulstretch::Process(EffectInstance &, EffectSettings &)
 {
-   CopyInputTracks();
-   m_t1=mT1;
-   int count=0;
-   for( auto track : mOutputTracks->Selected< WaveTrack >() ) {
+   // Pass true because sync lock adjustment is needed
+   EffectOutputTracks outputs{ *mTracks, {{ mT0, mT1 }}, true };
+   auto newT1 = mT1;
+   int count = 0;
+   // Process selected wave tracks first, to find the new t1 value
+   for (const auto track : outputs.Get().Selected<WaveTrack>()) {
       double trackStart = track->GetStartTime();
       double trackEnd = track->GetEndTime();
-      double t0 = mT0 < trackStart? trackStart: mT0;
-      double t1 = mT1 > trackEnd? trackEnd: mT1;
-
+      double t0 = mT0 < trackStart ? trackStart : mT0;
+      double t1 = mT1 > trackEnd ? trackEnd : mT1;
       if (t1 > t0) {
-         if (!ProcessOne(track, t0,t1,count))
-            return false;
+         auto tempList = track->WideEmptyCopy();
+         const auto channels = track->Channels();
+         auto iter = (*tempList->Any<WaveTrack>().begin())->Channels().begin();
+         for (const auto pChannel : channels) {
+            if (!ProcessOne(*pChannel, **iter++, t0, t1, count++))
+               return false;
+         }
+         const auto pNewTrack = *tempList->Any<WaveTrack>().begin();
+         pNewTrack->Flush();
+         newT1 = std::max(newT1, mT0 + pNewTrack->GetEndTime());
+         track->Clear(t0, t1);
+         track->Paste(t0, *tempList);
       }
-
-      count++;
+      else
+         count += track->NChannels();
    }
-   mT1=m_t1;
 
-   ReplaceProcessedTracks(true);
+   // Sync lock adjustment of other tracks
+   outputs.Get().Any().Visit(
+      [&](auto &&fallthrough){ return [&](WaveTrack &track) {
+         if (!track.IsSelected())
+            fallthrough();
+      }; },
+      [&](Track &track) {
+         if (SyncLock::IsSyncLockSelected(&track))
+            track.SyncLockAdjust(mT1, newT1);
+      }
+   );
+   mT1 = newT1;
+
+   outputs.Commit();
 
    return true;
 }
 
 
-void EffectPaulstretch::PopulateOrExchange(ShuttleGui & S)
+std::unique_ptr<EffectEditor> EffectPaulstretch::PopulateOrExchange(
+   ShuttleGui & S, EffectInstance &, EffectSettingsAccess &,
+   const EffectOutputs *)
 {
+   mUIParent = S.GetParent();
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      FloatingPointValidator<float> vldAmount(1, &mAmount);
-      vldAmount.SetMin(MIN_Amount);
+      S
+         .Validator<FloatingPointValidator<float>>(
+            1, &mAmount, NumValidatorStyle::DEFAULT, Amount.min)
+         /* i18n-hint: This is how many times longer the sound will be, e.g. applying
+          * the effect to a 1-second sample, with the default Stretch Factor of 10.0
+          * will give an (approximately) 10 second sound
+          */
+         .AddTextBox(XXO("&Stretch Factor:"), wxT(""), 10);
 
-      /* i18n-hint: This is how many times longer the sound will be, e.g. applying
-       * the effect to a 1-second sample, with the default Stretch Factor of 10.0
-       * will give an (approximately) 10 second sound
-       */
-      S.AddTextBox(_("Stretch Factor:"), wxT(""), 10)->SetValidator(vldAmount);
-
-      FloatingPointValidator<float> vldTime(3, &mTime_resolution, NumValidatorStyle::ONE_TRAILING_ZERO);
-      vldTime.SetMin(MIN_Time);
-      S.AddTextBox(_("Time Resolution (seconds):"), wxT(""), 10)->SetValidator(vldTime);
+      S
+         .Validator<FloatingPointValidator<float>>(
+            3, &mTime_resolution, NumValidatorStyle::ONE_TRAILING_ZERO, Time.min)
+         .AddTextBox(XXO("&Time Resolution (seconds):"), L"", 10);
    }
    S.EndMultiColumn();
+   return nullptr;
 };
 
-bool EffectPaulstretch::TransferDataToWindow()
+bool EffectPaulstretch::TransferDataToWindow(const EffectSettings &)
 {
    if (!mUIParent->TransferDataToWindow())
    {
@@ -220,7 +228,7 @@ bool EffectPaulstretch::TransferDataToWindow()
    return true;
 }
 
-bool EffectPaulstretch::TransferDataFromWindow()
+bool EffectPaulstretch::TransferDataFromWindow(EffectSettings &)
 {
    if (!mUIParent->Validate() || !mUIParent->TransferDataFromWindow())
    {
@@ -234,10 +242,11 @@ bool EffectPaulstretch::TransferDataFromWindow()
 
 void EffectPaulstretch::OnText(wxCommandEvent & WXUNUSED(evt))
 {
-   EnableApply(mUIParent->TransferDataFromWindow());
+   EffectEditor::EnableApply(
+      mUIParent, mUIParent->TransferDataFromWindow());
 }
 
-size_t EffectPaulstretch::GetBufferSize(double rate)
+size_t EffectPaulstretch::GetBufferSize(double rate) const
 {
    // Audacity's fft requires a power of 2
    float tmp = rate * mTime_resolution / 2.0;
@@ -255,83 +264,88 @@ size_t EffectPaulstretch::GetBufferSize(double rate)
    return std::max<size_t>(stmp, 128);
 }
 
-bool EffectPaulstretch::ProcessOne(WaveTrack *track,double t0,double t1,int count)
+bool EffectPaulstretch::ProcessOne(const WaveChannel &track,
+   WaveChannel &outputTrack, double t0, double t1, int count)
 {
-   auto badAllocMessage = _("Requested value exceeds memory capacity.");
+   const auto badAllocMessage =
+      XO("Requested value exceeds memory capacity.");
 
-   const auto stretch_buf_size = GetBufferSize(track->GetRate());
+   const auto rate = track.GetTrack().GetRate();
+   const auto stretch_buf_size = GetBufferSize(rate);
    if (stretch_buf_size == 0) {
-      ::Effect::MessageBox( badAllocMessage );
-      return false;
+      EffectUIServices::DoMessageBox(*this, badAllocMessage);
+      return {};
    }
 
    double amount = this->mAmount;
 
-   auto start = track->TimeToLongSamples(t0);
-   auto end = track->TimeToLongSamples(t1);
+   auto start = track.TimeToLongSamples(t0);
+   auto end = track.TimeToLongSamples(t1);
    auto len = end - start;
 
    const auto minDuration = stretch_buf_size * 2 + 1;
    if (minDuration < stretch_buf_size) {
       // overflow!
-      ::Effect::MessageBox( badAllocMessage );
-      return false;
+      EffectUIServices::DoMessageBox(*this, badAllocMessage);
+      return {};
    }
 
    if (len < minDuration) {   //error because the selection is too short
 
       float maxTimeRes = log( len.as_double() ) / log(2.0);
       maxTimeRes = pow(2.0, floor(maxTimeRes) + 0.5);
-      maxTimeRes = maxTimeRes / track->GetRate();
+      maxTimeRes = maxTimeRes / rate;
 
       if (this->IsPreviewing()) {
          double defaultPreviewLen;
          gPrefs->Read(wxT("/AudioIO/EffectsPreviewLen"), &defaultPreviewLen, 6.0);
 
-         /* i18n-hint: 'Time Resolution' is the name of a control in the Paulstretch effect.*/
          if ((minDuration / mProjectRate) < defaultPreviewLen) {
-            ::Effect::MessageBox (wxString::Format(_("Audio selection too short to preview.\n\n"
-                                               "Try increasing the audio selection to at least %.1f seconds,\n"
-                                               "or reducing the 'Time Resolution' to less than %.1f seconds."),
-                                             (minDuration / track->GetRate()) + 0.05, // round up to 1/10 s.
-                                             floor(maxTimeRes * 10.0) / 10.0),
-                            wxOK | wxICON_EXCLAMATION);
+            EffectUIServices::DoMessageBox(*this,
+               /* i18n-hint: 'Time Resolution' is the name of a control in the Paulstretch effect.*/
+               XO("Audio selection too short to preview.\n\n"
+                  "Try increasing the audio selection to at least %.1f seconds,\n"
+                  "or reducing the 'Time Resolution' to less than %.1f seconds.")
+                  .Format(
+                     (minDuration / rate) + 0.05, // round up to 1/10 s.
+                     floor(maxTimeRes * 10.0) / 10.0),
+               wxOK | wxICON_EXCLAMATION );
          }
          else {
-            /* i18n-hint: 'Time Resolution' is the name of a control in the Paulstretch effect.*/
-            ::Effect::MessageBox (wxString::Format(_("Unable to Preview.\n\n"
-                                               "For the current audio selection, the maximum\n"
-                                               "'Time Resolution' is %.1f seconds."),
-                                             floor(maxTimeRes * 10.0) / 10.0),
-                            wxOK | wxICON_EXCLAMATION);
+            EffectUIServices::DoMessageBox(*this,
+               /* i18n-hint: 'Time Resolution' is the name of a control in the Paulstretch effect.*/
+               XO("Unable to Preview.\n\n"
+                  "For the current audio selection, the maximum\n"
+                  "'Time Resolution' is %.1f seconds.")
+                  .Format( floor(maxTimeRes * 10.0) / 10.0 ),
+               wxOK | wxICON_EXCLAMATION );
          }
       }
       else {
-         /* i18n-hint: 'Time Resolution' is the name of a control in the Paulstretch effect.*/
-         ::Effect::MessageBox (wxString::Format(_("The 'Time Resolution' is too long for the selection.\n\n"
-                                            "Try increasing the audio selection to at least %.1f seconds,\n"
-                                            "or reducing the 'Time Resolution' to less than %.1f seconds."),
-                                          (minDuration / track->GetRate()) + 0.05, // round up to 1/10 s.
-                                          floor(maxTimeRes * 10.0) / 10.0),
-                         wxOK | wxICON_EXCLAMATION);
+         EffectUIServices::DoMessageBox(*this,
+            /* i18n-hint: 'Time Resolution' is the name of a control in the Paulstretch effect.*/
+            XO("The 'Time Resolution' is too long for the selection.\n\n"
+               "Try increasing the audio selection to at least %.1f seconds,\n"
+               "or reducing the 'Time Resolution' to less than %.1f seconds.")
+               .Format(
+                  (minDuration / rate) + 0.05, // round up to 1/10 s.
+                  floor(maxTimeRes * 10.0) / 10.0),
+            wxOK | wxICON_EXCLAMATION );
       }
 
-      return false;
+      return {};
    }
-
 
    auto dlen = len.as_double();
    double adjust_amount = dlen /
       (dlen - ((double)stretch_buf_size * 2.0));
    amount = 1.0 + (amount - 1.0) * adjust_amount;
 
-   auto outputTrack = mFactory->NewWaveTrack(track->GetSampleFormat(),track->GetRate());
-
    try {
       // This encloses all the allocations of buffers, including those in
       // the constructor of the PaulStretch object
 
-      PaulStretch stretch(amount, stretch_buf_size, track->GetRate());
+      PaulStretch stretch(amount, stretch_buf_size, rate);
 
       auto nget = stretch.get_nsamples_for_fill();
 
@@ -348,7 +362,7 @@ bool EffectPaulstretch::ProcessOne(WaveTrack *track,double t0,double t1,int coun
          decltype(len) s=0;
 
          while (s < len) {
-            track->Get((samplePtr)bufferptr0, floatSample, start + s, nget);
+            track.GetFloats(bufferptr0, start + s, nget);
             stretch.process(buffer0.get(), nget);
 
             if (first_time) {
@@ -357,8 +371,8 @@ bool EffectPaulstretch::ProcessOne(WaveTrack *track,double t0,double t1,int coun
 
             s += nget;
 
-            if (first_time){//blend the the start of the selection
-               track->Get((samplePtr)fade_track_smps.get(), floatSample, start, fade_len);
+            if (first_time){//blend the start of the selection
+               track.GetFloats(fade_track_smps.get(), start, fade_len);
                first_time = false;
                for (size_t i = 0; i < fade_len; i++){
                   float fi = (float)i / (float)fade_len;
@@ -367,7 +381,7 @@ bool EffectPaulstretch::ProcessOne(WaveTrack *track,double t0,double t1,int coun
                }
             }
             if (s >= len){//blend the end of the selection
-               track->Get((samplePtr)fade_track_smps.get(), floatSample, end - fade_len, fade_len);
+               track.GetFloats(fade_track_smps.get(), end - fade_len, fade_len);
                for (size_t i = 0; i < fade_len; i++){
                   float fi = (float)i / (float)fade_len;
                   auto i2 = bufsize / 2 - 1 - i;
@@ -377,7 +391,7 @@ bool EffectPaulstretch::ProcessOne(WaveTrack *track,double t0,double t1,int coun
                }
             }
 
-            outputTrack->Append((samplePtr)stretch.out_buf.get(), floatSample, stretch.out_bufsize);
+            outputTrack.Append((samplePtr)stretch.out_buf.get(), floatSample, stretch.out_bufsize);
 
             nget = stretch.get_nsamples();
             if (TrackProgress(count,
@@ -389,20 +403,13 @@ bool EffectPaulstretch::ProcessOne(WaveTrack *track,double t0,double t1,int coun
          }
       }
 
-      if (!cancelled){
-         outputTrack->Flush();
-
-         track->Clear(t0,t1);
-         track->Paste(t0, outputTrack.get());
-         m_t1 = mT0 + outputTrack->GetEndTime();
-      }
-      
-      return !cancelled;
+      if (!cancelled)
+         return true;
    }
    catch ( const std::bad_alloc& ) {
-      ::Effect::MessageBox( badAllocMessage );
-      return false;
+      EffectUIServices::DoMessageBox(*this, badAllocMessage);
    }
+   return false;
 };
 
 /*************************************************************/
@@ -451,7 +458,7 @@ void PaulStretch::process(float *smps, size_t nsmps)
    //get the samples from the pool
    for (size_t i = 0; i < poolsize; i++)
       fft_smps[i] = in_pool[i];
-   WindowFunc(eWinFuncHanning, poolsize, fft_smps.get());
+   WindowFunc(eWinFuncHann, poolsize, fft_smps.get());
 
    RealFFT(poolsize, fft_smps.get(), fft_c.get(), fft_s.get());
 

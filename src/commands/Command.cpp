@@ -53,7 +53,7 @@ to create messages for forwarding.
 \brief Abstract base class for command interface.  This is the version
 created by Dan Horgan.  It was previously a factory for other command classes.
 It created a separation between the type of a command and the command itself, 
-which is being removed.  These Cmmands were managed by CommandDirectory.
+which is being removed.  These Commands were managed by CommandDirectory.
 
 \class OldStyleCommandPointer
 \brief OldStyleCommandPointer is a unique_ptr to an OldStyleCommand.
@@ -75,24 +75,20 @@ classes derived from it.
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "Command.h"
 
 #include <map>
-#include <wx/string.h>
+#include <wx/log.h>
 #include <wx/variant.h>
 #include <wx/arrstr.h>
 
-#include "../AudacityException.h"
-#include "Validators.h"
-#include "CommandType.h"
-#include "CommandMisc.h"
-#include "CommandBuilder.h"
 #include "CommandTargets.h"
 #include "CommandDirectory.h"
 
 #include "CommandContext.h"
-#include "../Project.h"
+
+#include "AudacityException.h"
 
 
 
@@ -123,9 +119,10 @@ bool DecoratedCommand::SetParameter(const wxString &paramName,
    return mCommand->SetParameter(paramName, paramValue);
 }
 
-ApplyAndSendResponse::ApplyAndSendResponse(const OldStyleCommandPointer &cmd, std::unique_ptr<CommandOutputTargets> &target)
+ApplyAndSendResponse::ApplyAndSendResponse(
+   const OldStyleCommandPointer &cmd, std::unique_ptr<CommandOutputTargets> &target)
       : DecoratedCommand(cmd),
-       mCtx( std::make_unique<CommandContext>( *GetActiveProject(), std::move(target) ) )
+       mCtx( std::make_unique<CommandContext>( cmd->mProject, std::move(target) ) )
 {
 }
 
@@ -167,12 +164,14 @@ bool ApplyAndSendResponse::Apply()
    {
       response += wxT("Failed!");
    }
-   mCtx->Status(response);
+   mCtx->Status(response, true);
    return result;
 }
 
-CommandImplementation::CommandImplementation(OldStyleCommandType &type)
-: mType(type),
+CommandImplementation::CommandImplementation(
+  AudacityProject &project, OldStyleCommandType &type)
+:  OldStyleCommand{ project },
+   mType(type),
    mParams(type.GetSignature().GetDefaults()),
    mSetParams()
 {
@@ -261,7 +260,7 @@ CommandSignature &CommandImplementation::GetSignature()
 bool CommandImplementation::SetParameter(const wxString &paramName, const wxVariant &paramValue)
 {
    wxASSERT(!paramValue.IsType(wxT("null")));
-   CommandContext context( * GetActiveProject());
+   CommandContext context( mProject );
    ParamValueMap::iterator iter = mParams.find(paramName);
    if (iter == mParams.end())
    {
@@ -270,6 +269,7 @@ bool CommandImplementation::SetParameter(const wxString &paramName, const wxVari
       context.Error( wxString::Format(
          _("%s is not a parameter accepted by %s"),
             paramName, GetSymbol().Internal() ) );
+                    // neglect translation for scripting ??
       return false;
    }
 

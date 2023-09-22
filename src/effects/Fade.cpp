@@ -13,10 +13,20 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "Fade.h"
 
-#include <wx/intl.h>
+#include "LoadEffects.h"
+
+const ComponentInterfaceSymbol EffectFadeIn::Symbol
+{ XO("Fade In") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectFadeIn > reg; }
+
+const ComponentInterfaceSymbol EffectFadeOut::Symbol
+{ XO("Fade Out") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectFadeOut > reg2; }
 
 EffectFade::EffectFade(bool fadeIn)
 {
@@ -29,54 +39,53 @@ EffectFade::~EffectFade()
 
 // ComponentInterface implementation
 
-ComponentInterfaceSymbol EffectFade::GetSymbol()
+ComponentInterfaceSymbol EffectFade::GetSymbol() const
 {
    return mFadeIn
-      ? FADEIN_PLUGIN_SYMBOL
-      : FADEOUT_PLUGIN_SYMBOL;
+      ? EffectFadeIn::Symbol
+      : EffectFadeOut::Symbol;
 }
 
-wxString EffectFade::GetDescription()
+TranslatableString EffectFade::GetDescription() const
 {
    return mFadeIn
-      ? _("Applies a linear fade-in to the selected audio")
-      : _("Applies a linear fade-out to the selected audio");
+      ? XO("Applies a linear fade-in to the selected audio")
+      : XO("Applies a linear fade-out to the selected audio");
 }
 
 // EffectDefinitionInterface implementation
 
-EffectType EffectFade::GetType()
+EffectType EffectFade::GetType() const
 {
    return EffectTypeProcess;
 }
 
-bool EffectFade::IsInteractive()
+bool EffectFade::IsInteractive() const
 {
    return false;
 }
 
-// EffectClientInterface implementation
-
-unsigned EffectFade::GetAudioInCount()
+unsigned EffectFade::GetAudioInCount() const
 {
    return 1;
 }
 
-unsigned EffectFade::GetAudioOutCount()
+unsigned EffectFade::GetAudioOutCount() const
 {
    return 1;
 }
 
-bool EffectFade::ProcessInitialize(sampleCount WXUNUSED(totalLen), ChannelNames WXUNUSED(chanMap))
+bool EffectFade::ProcessInitialize(
+   EffectSettings &, double, ChannelNames chanMap)
 {
    mSample = 0;
-
    return true;
 }
 
-size_t EffectFade::ProcessBlock(float **inBlock, float **outBlock, size_t blockLen)
+size_t EffectFade::ProcessBlock(EffectSettings &,
+   const float *const *inBlock, float *const *outBlock, size_t blockLen)
 {
-   float *ibuf = inBlock[0];
+   const float *ibuf = inBlock[0];
    float *obuf = outBlock[0];
 
    if (mFadeIn)

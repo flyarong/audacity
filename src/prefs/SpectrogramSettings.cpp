@@ -13,24 +13,70 @@ Paul Licameli
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "SpectrogramSettings.h"
 
-#include "../Experimental.h"
-
-#include "../NumberScale.h"
-#include "../TranslatableStringArray.h"
+#include "AColor.h"
+#include "NumberScale.h"
 
 #include <algorithm>
 
-#include "../FFT.h"
-#include "../Prefs.h"
-#include "../RealFFTf.h"
+#include "FFT.h"
+#include "Prefs.h"
+#include "WaveTrack.h"
 
 #include <cmath>
 
-#include "../widgets/ErrorDialog.h"
-#include "../Internat.h"
+#include "AudacityMessageBox.h"
+
+IntSetting SpectrumMaxFreq{
+   L"/Spectrum/MaxFreq", 20000 };
+
+namespace {
+// Other settings not yet used outside of this file
+
+// To do: migrate these to ChoiceSetting preferences, which will store an
+// Identifier instead of a number in the preference file.
+IntSetting SpectrumAlgorithm{
+   L"/Spectrum/Algorithm", 0 }; // Default to Frequencies
+IntSetting SpectrumScale{
+   L"/Spectrum/ScaleType", 2 }; // Default to Mel
+IntSetting SpectrumWindowFunction{
+   L"/Spectrum/WindowType", eWinFuncHann };
+
+BoolSetting SpectrumEnableSelection{
+   L"/Spectrum/EnableSpectralSelection", true };
+IntSetting SpectrumFFTSize{
+   L"/Spectrum/FFTSize", 2048 };
+IntSetting SpectrumFrequencyGain{
+   L"/Spectrum/FrequencyGain", 0 };
+IntSetting SpectrumGain{
+   L"/Spectrum/Gain", 20 };
+BoolSetting SpectrumGrayscale{
+   L"/Spectrum/Grayscale", false };
+IntSetting SpectrumMinFreq{
+   L"/Spectrum/MinFreq", 0 };
+IntSetting SpectrumRange{
+   L"/Spectrum/Range", 80 };
+IntSetting SpectrumZeroPaddingFactor{
+   L"/Spectrum/ZeroPaddingFactor", 2 };
+
+#ifdef EXPERIMENTAL_FIND_NOTES
+BoolSetting SpectrumFindNotes{
+   L"/Spectrum/FFTFindNotes", false };
+DoubleSetting SpectrumFindNotesMinA{
+   L"/Spectrum/FindNotesMinA", -30.0 };
+IntSetting SpectrumFindNotesN{
+   L"/Spectrum/FindNotesN", 5 };
+BoolSetting SpectrumFindNotesQuantize{
+   L"/Spectrum/FindNotesQuantize", false };
+#endif //EXPERIMENTAL_FIND_NOTES
+
+#ifdef EXPERIMENTAL_FFT_Y_GRID
+BoolSetting SpectrumYGrid{
+   L"/Spectrum/FFTYGrid", false};
+#endif
+}
 
 SpectrogramSettings::Globals::Globals()
 {
@@ -40,15 +86,14 @@ SpectrogramSettings::Globals::Globals()
 void SpectrogramSettings::Globals::SavePrefs()
 {
 #ifdef SPECTRAL_SELECTION_GLOBAL_SWITCH
-   gPrefs->Write(wxT("/Spectrum/EnableSpectralSelection"), spectralSelection);
+   SpectrumEnableSelection.Write(spectralSelection);
 #endif
 }
 
 void SpectrogramSettings::Globals::LoadPrefs()
 {
 #ifdef SPECTRAL_SELECTION_GLOBAL_SWITCH
-   spectralSelection
-      = (gPrefs->Read(wxT("/Spectrum/EnableSpectralSelection"), 0L) != 0);
+   spectralSelection = SpectrumEnableSelection.Read();
 #endif
 }
 
@@ -57,6 +102,39 @@ SpectrogramSettings::Globals
 {
    static Globals instance;
    return instance;
+}
+
+static const ChannelGroup::Attachments::RegisteredFactory
+key1{ [](auto &) { return nullptr; } };
+
+SpectrogramSettings &SpectrogramSettings::Get(const WaveTrack &track)
+{
+   auto &mutTrack = const_cast<WaveTrack&>(track);
+   auto pSettings = mutTrack.GetGroupData().Attachments
+      ::Find<SpectrogramSettings>(key1);
+   if (pSettings)
+      return *pSettings;
+   else
+      return SpectrogramSettings::defaults();
+}
+
+SpectrogramSettings &SpectrogramSettings::Own(WaveTrack &track)
+{
+   auto pSettings = track.GetGroupData().Attachments
+      ::Find<SpectrogramSettings>(key1);
+   if (!pSettings) {
+      auto uSettings = std::make_unique<SpectrogramSettings>();
+      pSettings = uSettings.get();
+      track.GetGroupData().Attachments
+         ::Assign(key1, std::move(uSettings));
+   }
+   return *pSettings;
+}
+
+void SpectrogramSettings::Reset(WaveTrack &track)
+{
+   track.GetGroupData().Attachments
+      ::Assign(key1, nullptr);
 }
 
 SpectrogramSettings::SpectrogramSettings()
@@ -72,10 +150,8 @@ SpectrogramSettings::SpectrogramSettings(const SpectrogramSettings &other)
    , frequencyGain(other.frequencyGain)
    , windowType(other.windowType)
    , windowSize(other.windowSize)
-#ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
    , zeroPaddingFactor(other.zeroPaddingFactor)
-#endif
-   , isGrayscale(other.isGrayscale)
+   , colorScheme(other.colorScheme)
    , scaleType(other.scaleType)
 #ifndef SPECTRAL_SELECTION_GLOBAL_SWITCH
    , spectralSelection(other.spectralSelection)
@@ -109,10 +185,8 @@ SpectrogramSettings &SpectrogramSettings::operator= (const SpectrogramSettings &
       frequencyGain = other.frequencyGain;
       windowType = other.windowType;
       windowSize = other.windowSize;
-#ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
       zeroPaddingFactor = other.zeroPaddingFactor;
-#endif
-      isGrayscale = other.isGrayscale;
+      colorScheme = other.colorScheme;
       scaleType = other.scaleType;
 #ifndef SPECTRAL_SELECTION_GLOBAL_SWITCH
       spectralSelection = other.spectralSelection;
@@ -141,59 +215,84 @@ SpectrogramSettings& SpectrogramSettings::defaults()
 }
 
 //static
-const wxArrayStringEx &SpectrogramSettings::GetScaleNames()
+const EnumValueSymbols &SpectrogramSettings::GetScaleNames()
 {
-   class ScaleNamesArray final : public TranslatableStringArray
-   {
-      void Populate() override
-      {
-         mContents.insert( mContents.end(), {
-            // Keep in correspondence with enum SpectrogramSettings::ScaleType:
-            _("Linear") ,
-            _("Logarithmic") ,
-            /* i18n-hint: The name of a frequency scale in psychoacoustics */
-            _("Mel") ,
-            /* i18n-hint: The name of a frequency scale in psychoacoustics, named for Heinrich Barkhausen */
-            _("Bark") ,
-            /* i18n-hint: The name of a frequency scale in psychoacoustics, abbreviates Equivalent Rectangular Bandwidth */
-            _("ERB") ,
-            /* i18n-hint: Time units, that is Period = 1 / Frequency */
-            _("Period") ,
-         } );
-      }
+   static const EnumValueSymbols result{
+      // Keep in correspondence with enum SpectrogramSettings::ScaleType:
+      XO("Linear") ,
+      XO("Logarithmic") ,
+      /* i18n-hint: The name of a frequency scale in psychoacoustics */
+      XO("Mel") ,
+      /* i18n-hint: The name of a frequency scale in psychoacoustics, named for Heinrich Barkhausen */
+      XO("Bark") ,
+      /* i18n-hint: The name of a frequency scale in psychoacoustics, abbreviates Equivalent Rectangular Bandwidth */
+      XO("ERB") ,
+      /* i18n-hint: Time units, that is Period = 1 / Frequency */
+      XO("Period") ,
    };
-
-   static ScaleNamesArray theArray;
-   return theArray.Get();
+   return result;
 }
 
 //static
-const wxArrayStringEx &SpectrogramSettings::GetAlgorithmNames()
+const EnumValueSymbols &SpectrogramSettings::GetColorSchemeNames()
 {
-   class AlgorithmNamesArray final : public TranslatableStringArray
-   {
-      void Populate() override
-      {
-         mContents.insert( mContents.end(), {
-            // Keep in correspondence with enum SpectrogramSettings::Algorithm:
-            _("Frequencies") ,
-            /* i18n-hint: the Reassignment algorithm for spectrograms */
-            _("Reassignment") ,
-            /* i18n-hint: EAC abbreviates "Enhanced Autocorrelation" */
-            _("Pitch (EAC)") ,
-         } );
-      }
+   static const EnumValueSymbols result{
+      // Keep in correspondence with enum SpectrogramSettings::ColorScheme:
+      /* i18n-hint: New color scheme for spectrograms, Roseus is proper name of the color scheme */
+      { wxT("SpecColorNew"),     XC("Color (Roseus)",    "spectrum prefs") },
+      /* i18n-hint: Classic color scheme(from theme) for spectrograms */
+      { wxT("SpecColorTheme"),   XC("Color (classic)",   "spectrum prefs") },
+      /* i18n-hint: Grayscale color scheme for spectrograms */
+      { wxT("SpecGrayscale"),    XC("Grayscale",         "spectrum prefs") },
+      /* i18n-hint: Inverse grayscale color scheme for spectrograms */
+      { wxT("SpecInvGrayscale"), XC("Inverse grayscale", "spectrum prefs") },
    };
 
-   static AlgorithmNamesArray theArray;
-   return theArray.Get();
+   wxASSERT(csNumColorScheme == result.size());
+   static_assert(csNumColorScheme == AColor::colorSchemes, "Broken correspondence");
+
+   return result;
+}
+
+
+void SpectrogramSettings::ColorSchemeEnumSetting::Migrate(wxString &value)
+{
+   // Migrate old grayscale option to Color scheme choice
+   bool isGrayscale = SpectrumGrayscale.Read();
+   if (isGrayscale && !gPrefs->Read(wxT("/Spectrum/ColorScheme"), &value)) {
+      value = GetColorSchemeNames().at(csGrayscale).Internal();
+      Write(value);
+      gPrefs->Flush();
+   }
+}
+
+SpectrogramSettings::ColorSchemeEnumSetting SpectrogramSettings::colorSchemeSetting{
+   wxT("/Spectrum/ColorScheme"),
+   GetColorSchemeNames(),
+   csColorNew, // default to Color(New)
+   { csColorNew, csColorTheme, csGrayscale, csInvGrayscale },
+};
+
+
+//static
+const TranslatableStrings &SpectrogramSettings::GetAlgorithmNames()
+{
+   static const TranslatableStrings results{
+      // Keep in correspondence with enum SpectrogramSettings::Algorithm:
+      XO("Frequencies") ,
+      /* i18n-hint: the Reassignment algorithm for spectrograms */
+      XO("Reassignment") ,
+      /* i18n-hint: EAC abbreviates "Enhanced Autocorrelation" */
+      XO("Pitch (EAC)") ,
+   };
+   return results;
 }
 
 bool SpectrogramSettings::Validate(bool quiet)
 {
    if (!quiet &&
       maxFreq < 100) {
-      AudacityMessageBox(_("Maximum frequency must be 100 Hz or above"));
+      AudacityMessageBox( XO("Maximum frequency must be 100 Hz or above") );
       return false;
    }
    else
@@ -201,7 +300,7 @@ bool SpectrogramSettings::Validate(bool quiet)
 
    if (!quiet &&
       minFreq < 0) {
-      AudacityMessageBox(_("Minimum frequency must be at least 0 Hz"));
+      AudacityMessageBox( XO("Minimum frequency must be at least 0 Hz") );
       return false;
    }
    else
@@ -209,7 +308,8 @@ bool SpectrogramSettings::Validate(bool quiet)
 
    if (!quiet &&
       maxFreq <= minFreq) {
-      AudacityMessageBox(_("Minimum frequency must be less than maximum frequency"));
+      AudacityMessageBox( XO(
+"Minimum frequency must be less than maximum frequency") );
       return false;
    }
    else
@@ -217,7 +317,7 @@ bool SpectrogramSettings::Validate(bool quiet)
 
    if (!quiet &&
       range <= 0) {
-      AudacityMessageBox(_("The range must be at least 1 dB"));
+      AudacityMessageBox( XO("The range must be at least 1 dB") );
       return false;
    }
    else
@@ -225,12 +325,13 @@ bool SpectrogramSettings::Validate(bool quiet)
 
    if (!quiet &&
       frequencyGain < 0) {
-      AudacityMessageBox(_("The frequency gain cannot be negative"));
+      AudacityMessageBox( XO("The frequency gain cannot be negative") );
       return false;
    }
    else if (!quiet &&
       frequencyGain > 60) {
-      AudacityMessageBox(_("The frequency gain must be no more than 60 dB/dec"));
+      AudacityMessageBox( XO(
+"The frequency gain must be no more than 60 dB/dec") );
       return false;
    }
    else
@@ -246,6 +347,9 @@ bool SpectrogramSettings::Validate(bool quiet)
       ScaleType(std::max(0,
          std::min((int)(SpectrogramSettings::stNumScaleTypes) - 1,
             (int)(scaleType))));
+   colorScheme = ColorScheme(
+      std::max(0, std::min<int>(csNumColorScheme-1, colorScheme))
+   );
    algorithm = Algorithm(
       std::max(0, std::min((int)(algNumAlgorithms) - 1, (int)(algorithm)))
    );
@@ -257,41 +361,39 @@ bool SpectrogramSettings::Validate(bool quiet)
 
 void SpectrogramSettings::LoadPrefs()
 {
-   minFreq = gPrefs->Read(wxT("/Spectrum/MinFreq"), 0L);
+   minFreq = SpectrumMinFreq.Read();
 
-   maxFreq = gPrefs->Read(wxT("/Spectrum/MaxFreq"), 8000L);
+   maxFreq = SpectrumMaxFreq.Read();
 
-   range = gPrefs->Read(wxT("/Spectrum/Range"), 80L);
-   gain = gPrefs->Read(wxT("/Spectrum/Gain"), 20L);
-   frequencyGain = gPrefs->Read(wxT("/Spectrum/FrequencyGain"), 0L);
+   range = SpectrumRange.Read();
+   gain = SpectrumGain.Read();
+   frequencyGain = SpectrumFrequencyGain.Read();
 
-   windowSize = gPrefs->Read(wxT("/Spectrum/FFTSize"), 1024);
+   windowSize = SpectrumFFTSize.Read();
 
-#ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
-   zeroPaddingFactor = gPrefs->Read(wxT("/Spectrum/ZeroPaddingFactor"), 1);
-#endif
+   zeroPaddingFactor = SpectrumZeroPaddingFactor.Read();
 
-   gPrefs->Read(wxT("/Spectrum/WindowType"), &windowType, eWinFuncHanning);
+   windowType = SpectrumWindowFunction.Read();
 
-   isGrayscale = (gPrefs->Read(wxT("/Spectrum/Grayscale"), 0L) != 0);
+   colorScheme = colorSchemeSetting.ReadEnum();
 
-   scaleType = ScaleType(gPrefs->Read(wxT("/Spectrum/ScaleType"), 0L));
+   scaleType = static_cast<ScaleType>(SpectrumScale.Read());
 
 #ifndef SPECTRAL_SELECTION_GLOBAL_SWITCH
-   spectralSelection = (gPrefs->Read(wxT("/Spectrum/EnableSpectralSelection"), 1L) != 0);
+   spectralSelection = SpectrumEnableSelection.Read();
 #endif
 
-   algorithm = Algorithm(gPrefs->Read(wxT("/Spectrum/Algorithm"), 0L));
+   algorithm = static_cast<Algorithm>(SpectrumAlgorithm.Read());
 
 #ifdef EXPERIMENTAL_FFT_Y_GRID
-   fftYGrid = (gPrefs->Read(wxT("/Spectrum/FFTYGrid"), 0L) != 0);
+   fftYGrid = SpectrumYGrid.Read();
 #endif //EXPERIMENTAL_FFT_Y_GRID
 
 #ifdef EXPERIMENTAL_FIND_NOTES
-   fftFindNotes = (gPrefs->Read(wxT("/Spectrum/FFTFindNotes"), 0L) != 0);
-   findNotesMinA = gPrefs->Read(wxT("/Spectrum/FindNotesMinA"), -30.0);
-   numberOfMaxima = gPrefs->Read(wxT("/Spectrum/FindNotesN"), 5L);
-   findNotesQuantize = (gPrefs->Read(wxT("/Spectrum/FindNotesQuantize"), 0L) != 0);
+   fftFindNotes = SpectrumFindNotes.Read();
+   findNotesMinA = SpectrumFindNotesMinA.Read();
+   numberOfMaxima = SpectrumFindNotesN.Read();
+   findNotesQuantize = SpectrumFindNotesQuantize.Read();
 #endif //EXPERIMENTAL_FIND_NOTES
 
    // Enforce legal values
@@ -302,45 +404,108 @@ void SpectrogramSettings::LoadPrefs()
 
 void SpectrogramSettings::SavePrefs()
 {
-   gPrefs->Write(wxT("/Spectrum/MinFreq"), minFreq);
-   gPrefs->Write(wxT("/Spectrum/MaxFreq"), maxFreq);
+   SpectrumMinFreq.Write(minFreq);
+   SpectrumMaxFreq.Write(maxFreq);
 
    // Nothing wrote these.  They only varied from the linear scale bounds in-session. -- PRL
    // gPrefs->Write(wxT("/SpectrumLog/MaxFreq"), logMinFreq);
    // gPrefs->Write(wxT("/SpectrumLog/MinFreq"), logMaxFreq);
 
-   gPrefs->Write(wxT("/Spectrum/Range"), range);
-   gPrefs->Write(wxT("/Spectrum/Gain"), gain);
-   gPrefs->Write(wxT("/Spectrum/FrequencyGain"), frequencyGain);
+   SpectrumRange.Write(range);
+   SpectrumGain.Write(gain);
+   SpectrumFrequencyGain.Write(frequencyGain);
 
-   gPrefs->Write(wxT("/Spectrum/FFTSize"), windowSize);
+   SpectrumFFTSize.Write(windowSize);
 
-#ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
-   gPrefs->Write(wxT("/Spectrum/ZeroPaddingFactor"), zeroPaddingFactor);
-#endif
+   SpectrumZeroPaddingFactor.Write(zeroPaddingFactor);
 
-   gPrefs->Write(wxT("/Spectrum/WindowType"), windowType);
+   SpectrumWindowFunction.Write(windowType);
 
-   gPrefs->Write(wxT("/Spectrum/Grayscale"), isGrayscale);
+   colorSchemeSetting.WriteEnum(colorScheme);
 
-   gPrefs->Write(wxT("/Spectrum/ScaleType"), (int) scaleType);
+   SpectrumScale.Write(static_cast<int>(scaleType));
 
 #ifndef SPECTRAL_SELECTION_GLOBAL_SWITCH
-   gPrefs->Write(wxT("/Spectrum/EnableSpectralSelection"), spectralSelection);
+   SpectrumEnableSelection.Write(spectralSelection);
 #endif
 
-   gPrefs->Write(wxT("/Spectrum/Algorithm"), (int) algorithm);
+   SpectrumAlgorithm.Write(static_cast<int>(algorithm));
 
 #ifdef EXPERIMENTAL_FFT_Y_GRID
-   gPrefs->Write(wxT("/Spectrum/FFTYGrid"), fftYGrid);
+   SpectrumYGrid.Write(fftYGrid);
 #endif //EXPERIMENTAL_FFT_Y_GRID
 
 #ifdef EXPERIMENTAL_FIND_NOTES
-   gPrefs->Write(wxT("/Spectrum/FFTFindNotes"), fftFindNotes);
-   gPrefs->Write(wxT("/Spectrum/FindNotesMinA"), findNotesMinA);
-   gPrefs->Write(wxT("/Spectrum/FindNotesN"), numberOfMaxima);
-   gPrefs->Write(wxT("/Spectrum/FindNotesQuantize"), findNotesQuantize);
+   SpectrumFindNotes.Write(fftFindNotes);
+   SpectrumFindNotesMinA.Write(findNotesMinA);
+   SpectrumFindNotesN.Write(numberOfMaxima);
+   SpectrumFindNotesQuantize.Write(findNotesQuantize);
 #endif //EXPERIMENTAL_FIND_NOTES
+}
+
+// This is a temporary hack until SpectrogramSettings gets fully integrated
+void SpectrogramSettings::UpdatePrefs()
+{
+   if (minFreq == defaults().minFreq)
+      minFreq = SpectrumMinFreq.Read();
+
+   if (maxFreq == defaults().maxFreq)
+      maxFreq = SpectrumMaxFreq.Read();
+
+   if (range == defaults().range)
+      range = SpectrumRange.Read();
+
+   if (gain == defaults().gain)
+      gain = SpectrumGain.Read();
+
+   if (frequencyGain == defaults().frequencyGain)
+      frequencyGain = SpectrumFrequencyGain.Read();
+
+   if (windowSize == defaults().windowSize)
+      windowSize = SpectrumFFTSize.Read();
+
+   if (zeroPaddingFactor == defaults().zeroPaddingFactor)
+      zeroPaddingFactor = SpectrumZeroPaddingFactor.Read();
+
+   if (windowType == defaults().windowType)
+      windowType = SpectrumWindowFunction.Read();
+
+   if (colorScheme == defaults().colorScheme) {
+      colorScheme = colorSchemeSetting.ReadEnum();
+   }
+
+   if (scaleType == defaults().scaleType)
+      scaleType = static_cast<ScaleType>(SpectrumScale.Read());
+
+#ifndef SPECTRAL_SELECTION_GLOBAL_SWITCH
+   if (spectralSelection == defaults().spectralSelection)
+      spectralSelection = SpectrumEnableSelection.Read();
+#endif
+
+   if (algorithm == defaults().algorithm)
+      algorithm = static_cast<Algorithm>(SpectrumAlgorithm.Read());
+
+#ifdef EXPERIMENTAL_FFT_Y_GRID
+   if (fftYGrid == defaults().fftYGrid)
+      fftYGrid = SpectrumYGrid.Read();
+#endif //EXPERIMENTAL_FFT_Y_GRID
+
+#ifdef EXPERIMENTAL_FIND_NOTES
+   if (fftFindNotes == defaults().fftFindNotes)
+      fftFindNotes = SpectrumFindNotes.Read();
+
+   if (findNotesMinA == defaults().findNotesMinA)
+      findNotesMinA = SpectrumFindNotesMinA.Read();
+
+   if (numberOfMaxima == defaults().numberOfMaxima)
+      numberOfMaxima = SpectrumFindNotesN.Read();
+
+   if (findNotesQuantize == defaults().findNotesQuantize)
+      findNotesQuantize = SpectrumFindNotesQuantize.Read();
+#endif //EXPERIMENTAL_FIND_NOTES
+
+   // Enforce legal values
+   Validate(true);
 }
 
 void SpectrogramSettings::InvalidateCaches()
@@ -351,6 +516,11 @@ void SpectrogramSettings::InvalidateCaches()
 SpectrogramSettings::~SpectrogramSettings()
 {
    DestroyWindows();
+}
+
+auto SpectrogramSettings::Clone() const -> PointerType
+{
+   return std::make_unique<SpectrogramSettings>(*this);
 }
 
 void SpectrogramSettings::DestroyWindows()
@@ -418,13 +588,14 @@ namespace
    }
 }
 
-void SpectrogramSettings::CacheWindows() const
+void SpectrogramSettings::CacheWindows()
 {
    if (hFFT == NULL || window == NULL) {
 
       double scale;
-      const auto fftLen = WindowSize() * ZeroPaddingFactor();
-      const auto padding = (WindowSize() * (zeroPaddingFactor - 1)) / 2;
+      auto factor = ZeroPaddingFactor();
+      const auto fftLen = WindowSize() * factor;
+      const auto padding = (WindowSize() * (factor - 1)) / 2;
 
       hFFT = GetFFT(fftLen);
       RecreateWindow(window, WINDOW, fftLen, padding, windowType, windowSize, scale);
@@ -446,7 +617,6 @@ void SpectrogramSettings::ConvertToEnumeratedWindowSizes()
       size >>= 1, ++logarithm;
    windowSize = std::max(0, std::min(NumWindowSizes - 1, logarithm));
 
-#ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
    // Choices for zero padding begin at 1
    logarithm = 0;
    size = unsigned(zeroPaddingFactor);
@@ -456,15 +626,12 @@ void SpectrogramSettings::ConvertToEnumeratedWindowSizes()
       std::min(LogMaxWindowSize - (windowSize + LogMinWindowSize),
          logarithm
    ));
-#endif
 }
 
 void SpectrogramSettings::ConvertToActualWindowSizes()
 {
    windowSize = 1 << (windowSize + LogMinWindowSize);
-#ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
    zeroPaddingFactor = 1 << zeroPaddingFactor;
-#endif
 }
 
 float SpectrogramSettings::findBin( float frequency, float binUnit ) const
@@ -478,11 +645,11 @@ float SpectrogramSettings::findBin( float frequency, float binUnit ) const
 
 size_t SpectrogramSettings::GetFFTLength() const
 {
-   return windowSize
-#ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
-      * ((algorithm != algPitchEAC) ? zeroPaddingFactor : 1);
-#endif
-   ;
+//#ifndef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
+  // return windowSize;
+//#else
+   return windowSize * ((algorithm != algPitchEAC) ? zeroPaddingFactor : 1);
+//#endif
 }
 
 size_t SpectrogramSettings::NBins() const
@@ -524,4 +691,71 @@ bool SpectrogramSettings::SpectralSelectionEnabled() const
 #else
    return spectralSelection;
 #endif
+}
+
+static const ChannelGroup::Attachments::RegisteredFactory
+key2{ [](auto &) { return std::make_unique<SpectrogramBounds>(); } };
+
+SpectrogramBounds &SpectrogramBounds::Get( WaveTrack &track )
+{
+   return track.GetGroupData().Attachments
+      ::Get<SpectrogramBounds>(key2);
+}
+
+const SpectrogramBounds &SpectrogramBounds::Get(
+   const WaveTrack &track )
+{
+   return Get(const_cast<WaveTrack&>(track));
+}
+
+SpectrogramBounds::~SpectrogramBounds() = default;
+
+auto SpectrogramBounds::Clone() const -> PointerType
+{
+   return std::make_unique<SpectrogramBounds>(*this);
+}
+
+void SpectrogramBounds::GetBounds(
+   const WaveTrack &wt, float &min, float &max) const
+{
+   const double rate = wt.GetRate();
+
+   const auto &settings = SpectrogramSettings::Get(wt);
+   const auto type = settings.scaleType;
+
+   const float top = (rate / 2.);
+
+   float bottom;
+   if (type == SpectrogramSettings::stLinear)
+      bottom = 0.0f;
+   else if (type == SpectrogramSettings::stPeriod) {
+      // special case
+      const auto half = settings.GetFFTLength() / 2;
+      // EAC returns no data for below this frequency:
+      const float bin2 = rate / half;
+      bottom = bin2;
+   }
+   else
+      // logarithmic, etc.
+      bottom = 1.0f;
+
+   {
+      float spectrumMax = mSpectrumMax;
+      if (spectrumMax < 0)
+         spectrumMax = settings.maxFreq;
+      if (spectrumMax < 0)
+         max = top;
+      else
+         max = std::clamp(spectrumMax, bottom, top);
+   }
+
+   {
+      float spectrumMin = mSpectrumMin;
+      if (spectrumMin < 0)
+         spectrumMin = settings.minFreq;
+      if (spectrumMin < 0)
+         min = std::max(bottom, top / 1000.0f);
+      else
+         min = std::clamp(spectrumMin, bottom, top);
+   }
 }

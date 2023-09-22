@@ -20,18 +20,17 @@ around to NEW positions.
 
 *//**********************************************************************/
 
-#include "../Audacity.h"
+
 #include "Grabber.h"
 
 #include <wx/defs.h>
 #include <wx/dcclient.h>
-#include <wx/event.h>
-#include <wx/intl.h>
 #include <wx/window.h>
 
-#include "../AColor.h"
-#include "../AllThemeResources.h"
-#include "../Internat.h"
+#include "AColor.h"
+#include "AllThemeResources.h"
+#include "Internat.h"
+#include "Theme.h"
 
 ////////////////////////////////////////////////////////////
 /// Methods for Grabber
@@ -43,6 +42,7 @@ BEGIN_EVENT_TABLE(Grabber, wxWindow)
    EVT_ENTER_WINDOW(Grabber::OnEnter)
    EVT_LEAVE_WINDOW(Grabber::OnLeave)
    EVT_LEFT_DOWN(Grabber::OnLeftDown)
+   EVT_LEFT_UP(Grabber::OnLeftUp)
    EVT_ERASE_BACKGROUND( Grabber::OnErase )
    EVT_PAINT(Grabber::OnPaint)
    EVT_KEY_DOWN(Grabber::OnKeyDown)
@@ -51,12 +51,13 @@ END_EVENT_TABLE()
 //
 // Constructor
 //
-Grabber::Grabber(wxWindow * parent, wxWindowID id)
+Grabber::Grabber(wxWindow * parent, Identifier id)
 : wxWindow(parent,
-           id,
+           wxID_ANY,
            wxDefaultPosition,
            wxSize(grabberWidth, 27),
            wxFULL_REPAINT_ON_RESIZE)
+, mIdentifier{ id }
 {
    mOver = false;
    mPressed = false;
@@ -67,7 +68,6 @@ Grabber::Grabber(wxWindow * parent, wxWindowID id)
    It's used to drag a track around (when in multi-tool mode) rather
    than requiring that you use the drag tool.  It's shown as a series
    of horizontal bumps */
-
    SetLabel(_("Grabber"));
    SetName(_("Grabber"));
 }
@@ -87,7 +87,7 @@ void Grabber::SendEvent(wxEventType type, const wxPoint & pos, bool escaping)
    wxWindow *parent = GetParent();
 
    // Initialize event and convert mouse coordinates to screen space
-   GrabberEvent e(type, GetId(), parent->ClientToScreen(pos), escaping);
+   GrabberEvent e(type, mIdentifier, parent->ClientToScreen(pos), escaping);
 
    // Set the object of our desire
    e.SetEventObject(parent);
@@ -106,6 +106,10 @@ void Grabber::SetAsSpacer( bool bIsSpacer ) {
    mAsSpacer = bIsSpacer;
 };
 
+void Grabber::SetToolTip(const TranslatableString &toolTip)
+{
+   wxWindow::SetToolTip( toolTip.Stripped().Translation() );
+}
 
 //
 // Draw the grabber
@@ -184,6 +188,8 @@ void Grabber::PushButton(bool state )
 {
    if( mAsSpacer )
       return;
+   if (!state)
+      mPressed = state;
    wxRect r = GetRect();
    mOver = r.Contains(ScreenToClient(wxGetMousePosition()));
 
@@ -207,15 +213,38 @@ void Grabber::OnLeftDown(wxMouseEvent & event)
 }
 
 //
+// Handle left button up events
+//
+void Grabber::OnLeftUp(wxMouseEvent & event)
+{
+   // Normally, "left up" events are handled by the ToolManager::OnMouse() method
+   // but, if the user double clicks a grabber, the "left up" event will come here
+   // instead, so just "unpush" the button.
+   PushButton(false);
+
+   event.Skip();
+}
+
+//
 // Handle mouse enter events
 //
 void Grabber::OnEnter(wxMouseEvent & WXUNUSED(event))
 {
+#if defined(__WXMAC__)
+   // Bug 2416:  On Mac, we can get Enter events from grabbers other
+   // than the one being dragged. So, ignore Enter events if another
+   // window has captured the mouse.
+   if (wxWindow::GetCapture() != nullptr)
+   {
+      return;
+   }
+#endif
+
    // Bug 1201:  On Mac, unsetting and re-setting the tooltip may be needed
    // to make it pop up when we want it.
    const auto text = GetToolTipText();
    UnsetToolTip();
-   SetToolTip(text);
+   wxWindow::SetToolTip(text);
 
    if( mAsSpacer )
       return;
@@ -230,6 +259,16 @@ void Grabber::OnEnter(wxMouseEvent & WXUNUSED(event))
 //
 void Grabber::OnLeave(wxMouseEvent & WXUNUSED(event))
 {
+#if defined(__WXMAC__)
+   // Bug 2416:  On Mac, we can get Leave events from grabbers other
+   // than the one being dragged. So, ignore Leave events if another
+   // window has captured the mouse.
+   if (wxWindow::GetCapture() != nullptr)
+   {
+      return;
+   }
+#endif
+
    if (!GetCapture()) {
       // Redraw plain
       mOver = false;
@@ -266,7 +305,7 @@ void Grabber::OnKeyDown(wxKeyEvent &event)
 }
 
 // Piggy back in same source file as Grabber.
-// Audcaity Flicker-free StaticBitmap.
+// Audacity Flicker-free StaticBitmap.
 BEGIN_EVENT_TABLE(AStaticBitmap,wxStaticBitmap)
     EVT_ERASE_BACKGROUND(AStaticBitmap::OnErase)
 END_EVENT_TABLE()

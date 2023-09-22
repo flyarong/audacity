@@ -19,23 +19,27 @@
 
 class ShuttleGui;
 
-class ImportExportPrefs final : public PrefsPanel
+#define IMPORT_EXPORT_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("IMPORT EXPORT") }
+
+template< typename Enum > class EnumSetting;
+
+class AUDACITY_DLL_API ImportExportPrefs final : public PrefsPanel
 {
  public:
+   static EnumSetting< bool > LabelStyleSetting;
+   static EnumSetting< bool > AllegroStyleSetting;
+
    ImportExportPrefs(wxWindow * parent, wxWindowID winid);
    ~ImportExportPrefs();
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+
    bool Commit() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
  private:
    void Populate();
 };
 
-/// A PrefsPanelFactory that creates one ImportExportPrefs panel.
-class ImportExportPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
 #endif

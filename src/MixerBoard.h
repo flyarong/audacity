@@ -8,8 +8,8 @@
 
 **********************************************************************/
 
-#include "Audacity.h" // for USE_* macros
-#include "Experimental.h"
+
+
 
 #ifndef __AUDACITY_MIXER_BOARD__
 #define __AUDACITY_MIXER_BOARD__
@@ -20,12 +20,19 @@
 #include "widgets/ASlider.h" // to inherit
 #include "commands/CommandManagerWindowClasses.h"
 
+#include "Observer.h"
+#include "Prefs.h"
+
 class wxArrayString;
 class wxBitmapButton;
 class wxImage;
 class wxMemoryDC;
 class AButton;
+struct AudioIOEvent;
 struct TrackListEvent;
+class AudioSegmentSampleView;
+
+using ChannelGroupSampleView = std::vector<std::vector<AudioSegmentSampleView>>;
 
 // containment hierarchy:
 //    MixerBoardFrame -> MixerBoard -> MixerBoardScrolledWindow -> MixerTrackCluster(s)
@@ -38,7 +45,7 @@ class MixerTrackSlider final : public ASlider
 public:
    MixerTrackSlider(wxWindow * parent,
                      wxWindowID id,
-                     const wxString &name,
+                     const TranslatableString &name,
                      const wxPoint & pos,
                      const wxSize & size,
                      const ASlider::Options &options = ASlider::Options{});
@@ -67,6 +74,7 @@ class NoteTrack;
 #endif
 class PlayableTrack;
 
+class WaveChannel;
 class WaveTrack;
 class auStaticText;
 
@@ -81,7 +89,7 @@ public:
    virtual ~MixerTrackCluster() {}
 
    WaveTrack *GetWave() const;
-   WaveTrack *GetRight() const;
+   WaveChannel *GetRight() const;
 #ifdef EXPERIMENTAL_MIDI_OUT
    NoteTrack *GetNote() const;
 #endif
@@ -140,6 +148,7 @@ private:
    MixerTrackSlider* mSlider_Velocity;
 #endif
    wxWeakRef<MeterPanel> mMeter;
+   ChannelGroupSampleView mSampleView;
 
 public:
    DECLARE_EVENT_TABLE()
@@ -188,7 +197,7 @@ public:
 class MixerBoardFrame;
 class TrackList;
 
-class MixerBoard final : public wxWindow
+class MixerBoard final : public wxWindow, private PrefsListener
 {
    friend class MixerBoardFrame;
 
@@ -198,10 +207,10 @@ public:
                const wxPoint& pos = wxDefaultPosition,
                const wxSize& size = wxDefaultSize);
 
-   void UpdatePrefs();
+   void UpdatePrefs() override;
 
    // Add clusters for any tracks we're not yet showing.
-   // Update pointers for tracks we're aleady showing.
+   // Update pointers for tracks we're already showing.
    void UpdateTrackClusters();
 
    int GetTrackClustersWidth();
@@ -219,10 +228,10 @@ public:
    void UpdateWidth();
 
 private:
-   void ResetMeters(const bool bResetClipping);   
+   void ResetMeters(const bool bResetClipping);
    void RemoveTrackCluster(size_t nIndex);
    void MakeButtonBitmap( wxMemoryDC & dc, wxBitmap & bitmap,
-      wxRect & bev, const wxString & str, bool up );
+      wxRect & bev, const TranslatableString & str, bool up );
    void CreateMuteSoloImages();
    int FindMixerTrackCluster(const PlayableTrack* pTrack,
                               MixerTrackCluster** hMixerTrackCluster) const;
@@ -231,10 +240,10 @@ private:
    // event handlers
    void OnPaint(wxPaintEvent& evt);
    void OnSize(wxSizeEvent &evt);
-   void OnTimer(wxCommandEvent &event);
-   void OnTrackSetChanged(wxEvent &event);
-   void OnTrackChanged(TrackListEvent &event);
-   void OnStartStop(wxCommandEvent &event);
+   void OnTimer(Observer::Message);
+   void OnTrackSetChanged();
+   void OnTrackChanged(const TrackListEvent &event);
+   void OnStartStop(AudioIOEvent);
 
 public:
    // mute & solo button images: Create once and store on MixerBoard for use in all MixerTrackClusters.
@@ -245,6 +254,10 @@ public:
    int mMuteSoloWidth;
 
 private:
+   Observer::Subscription mPlaybackScrollerSubscription,
+      mTrackPanelSubscription,
+      mAudioIOSubscription;
+
    // Track clusters are maintained in the same order as the WaveTracks.
    std::vector<MixerTrackCluster*> mMixerTrackClusters;
 
@@ -277,6 +290,10 @@ private:
    void OnSize(wxSizeEvent &evt);
    void OnKeyEvent(wxKeyEvent &evt);
 
+   void SetWindowTitle();
+
+   Observer::Subscription mTitleChangeSubscription;
+   AudacityProject *mProject;
 public:
    MixerBoard* mMixerBoard;
 

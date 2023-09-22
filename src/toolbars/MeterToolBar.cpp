@@ -17,8 +17,9 @@
 *//*******************************************************************/
 
 
-#include "../Audacity.h"
+
 #include "MeterToolBar.h"
+#include "widgets/AButton.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
@@ -26,17 +27,97 @@
 #include <wx/setup.h> // for wxUSE_* macros
 
 #ifndef WX_PRECOMP
-#include <wx/event.h>
-#include <wx/intl.h>
 #include <wx/tooltip.h>
 #endif
 
 #include <wx/gbsizer.h>
 
-#include "../AllThemeResources.h"
-#include "../AudioIO.h"
-#include "../Project.h"
-#include "../widgets/Meter.h"
+#include "AllThemeResources.h"
+#include "Decibels.h"
+#include "ToolManager.h"
+#include "ProjectAudioIO.h"
+#include "../widgets/MeterPanel.h"
+
+#if wxUSE_ACCESSIBILITY
+
+class MeterButtonAx : public AButtonAx
+{
+   wxWeakRef<MeterPanel> mAssociatedMeterPanel{nullptr};
+   bool mAccSilent{false};
+public:
+
+   MeterButtonAx(AButton& button, MeterPanel& panel)
+      : AButtonAx(&button)
+      , mAssociatedMeterPanel(&panel)
+   { }
+
+   wxAccStatus GetName(int childId, wxString* name) override
+   {
+      if(childId != wxACC_SELF)
+         return wxACC_NOT_IMPLEMENTED;
+
+      if(mAccSilent)
+         *name = wxEmptyString; // Jaws reads nothing, and nvda reads "unknown"
+      else
+      {
+         const auto button = static_cast<AButton*>(GetWindow());
+
+         *name = button->GetName();
+
+         if(const auto panel = mAssociatedMeterPanel.get())
+         {
+            // translations of strings such as " Monitoring " did not
+            // always retain the leading space. Therefore a space has
+            // been added to ensure at least one space, and stop
+            // words from being merged
+            if(panel->IsMonitoring())
+               *name += wxT(" ") + _(" Monitoring ");
+            else if(panel->IsActive())
+               *name += wxT(" ") + _(" Active ");
+
+            const auto dbRange = panel->GetDBRange();
+            if (dbRange != -1)
+               *name += wxT(" ") + wxString::Format(_(" Peak %2.f dB"), panel->GetPeakHold() * dbRange - dbRange);
+            else
+               *name += wxT(" ") + wxString::Format(_(" Peak %.2f "), panel->GetPeakHold());
+
+            if(panel->IsClipping())
+               *name += wxT(" ") + _(" Clipped ");
+         }
+      }
+      return wxACC_OK;
+   }
+
+   wxAccStatus GetRole(int childId, wxAccRole* role) override
+   {
+      if(childId != wxACC_SELF)
+         return wxACC_NOT_IMPLEMENTED;
+
+      if(mAccSilent)
+         *role = wxROLE_NONE; // Jaws and nvda both read nothing 
+      else
+         *role = wxROLE_SYSTEM_PUSHBUTTON;
+      return wxACC_OK;
+   }
+
+   void SetSilent(bool silent)
+   {
+      if(mAccSilent != silent)
+      {
+         mAccSilent = silent;
+         if(!silent)
+         {
+            NotifyEvent(
+               wxACC_EVENT_OBJECT_FOCUS,
+               GetWindow(),
+               wxOBJID_CLIENT,
+               wxACC_SELF);
+         }
+      }
+   }
+};
+
+#endif
 
 IMPLEMENT_CLASS(MeterToolBar, ToolBar);
 
@@ -48,35 +129,73 @@ BEGIN_EVENT_TABLE( MeterToolBar, ToolBar )
    EVT_SIZE( MeterToolBar::OnSize )
 END_EVENT_TABLE()
 
-//Standard contructor
-MeterToolBar::MeterToolBar(AudacityProject *project, int type)
-: ToolBar(type, _("Combined Meter"), wxT("CombinedMeter"), true)
+Identifier MeterToolBar::ID()
 {
-   mProject = project;
+   return wxT("CombinedMeter");
+}
 
-   if( mType == RecordMeterBarID ){
-      mWhichMeters = kWithRecordMeter;
-      mLabel = _("Recording Meter");
-      mSection = wxT("RecordMeter");
-   } else if( mType == PlayMeterBarID ){
-      mWhichMeters = kWithPlayMeter;
-      mLabel = _("Playback Meter");
-      mSection = wxT("PlayMeter");
-   } else {
-      mWhichMeters = kWithPlayMeter | kWithRecordMeter;
-   }
-   mSizer = NULL;
-   mPlayMeter = NULL;
-   mRecordMeter = NULL;
+Identifier MeterToolBar::PlayID()
+{
+   return wxT("PlayMeter");
+}
+
+Identifier MeterToolBar::RecordID()
+{
+   return wxT("RecordMeter");
+}
+
+//Standard constructor
+MeterToolBar::MeterToolBar(AudacityProject &project,
+   unsigned whichMeters,
+   const TranslatableString &label, Identifier ID)
+: ToolBar(project, label, ID, true)
+, mWhichMeters{ whichMeters }
+{
 }
 
 MeterToolBar::~MeterToolBar()
 {
 }
 
+MeterToolBars MeterToolBar::GetToolBars(AudacityProject &project)
+{
+   return MeterToolBars{
+      Get(project, true),
+      Get(project, false)
+   };
+}
+
+ConstMeterToolBars MeterToolBar::GetToolBars(const AudacityProject &project)
+{
+   return ConstMeterToolBars{
+      Get(project, true),
+      Get(project, false)
+   };
+}
+
+MeterToolBar & MeterToolBar::Get(AudacityProject &project, bool forPlayMeterToolBar)
+{
+   auto& toolManager = ToolManager::Get(project);
+   const auto &toolBarID = forPlayMeterToolBar ? PlayID() : RecordID();
+   return *static_cast<MeterToolBar*>(toolManager.GetToolBar(toolBarID));
+}
+
+const MeterToolBar & MeterToolBar::Get(const AudacityProject &project, bool forPlayMeterToolBar)
+{
+   return Get(const_cast<AudacityProject&>(project), forPlayMeterToolBar);
+}
+
+bool MeterToolBar::ShownByDefault() const
+{
+   // The combined meter hides by default
+   return mWhichMeters != (kWithPlayMeter|kWithRecordMeter);
+}
+
 void MeterToolBar::Create(wxWindow * parent)
 {
    ToolBar::Create(parent);
+
+   UpdatePrefs();
 
    // Simulate a size event to set initial meter placement/size
    wxSizeEvent dummy;
@@ -87,201 +206,415 @@ void MeterToolBar::ReCreateButtons()
 {
    MeterPanel::State playState{ false }, recordState{ false };
 
-   if (mPlayMeter && mProject->GetPlaybackMeter() == mPlayMeter)
+   auto &projectAudioIO = ProjectAudioIO::Get( mProject );
+   if (mPlayMeter &&
+      projectAudioIO.GetPlaybackMeter() == mPlayMeter->GetMeter())
    {
       playState = mPlayMeter->SaveState();
-      mProject->SetPlaybackMeter( NULL );
+      projectAudioIO.SetPlaybackMeter( nullptr );
    }
 
-   if (mRecordMeter && mProject->GetCaptureMeter() == mRecordMeter)
+   if (mRecordMeter &&
+      projectAudioIO.GetCaptureMeter() == mRecordMeter->GetMeter())
    {
       recordState = mRecordMeter->SaveState();
-      mProject->SetCaptureMeter( NULL );
+      projectAudioIO.SetCaptureMeter( nullptr );
    }
 
    ToolBar::ReCreateButtons();
 
    mPlayMeter->RestoreState(playState);
    if( playState.mSaved  ){
-      mProject->SetPlaybackMeter( mPlayMeter );
+      projectAudioIO.SetPlaybackMeter( mPlayMeter->GetMeter() );
    }
    mRecordMeter->RestoreState(recordState);
    if( recordState.mSaved ){
-      mProject->SetCaptureMeter( mRecordMeter );
+      projectAudioIO.SetCaptureMeter( mRecordMeter->GetMeter() );
    }
 }
 
 void MeterToolBar::Populate()
 {
+   MakeButtonBackgroundsSmall();
    SetBackgroundColour( theTheme.Colour( clrMedium  ) );
-   wxASSERT(mProject); // to justify safenew
-   Add((mSizer = safenew wxGridBagSizer()), 1, wxEXPAND);
 
    if( mWhichMeters & kWithRecordMeter ){
       //JKC: Record on left, playback on right.  Left to right flow
       //(maybe we should do it differently for Arabic language :-)  )
-      mRecordMeter = safenew MeterPanel( mProject,
+      mRecordSetupButton = safenew AButton(this);
+      mRecordSetupButton->SetLabel({});
+      mRecordSetupButton->SetName(_("Record Meter"));
+      mRecordSetupButton->SetToolTip(XO("Record Meter"));
+      mRecordSetupButton->SetImages(
+         theTheme.Image(bmpRecoloredUpSmall),
+         theTheme.Image(bmpRecoloredUpHiliteSmall),
+         theTheme.Image(bmpRecoloredDownSmall),
+         theTheme.Image(bmpRecoloredHiliteSmall),
+         theTheme.Image(bmpRecoloredUpSmall));
+      mRecordSetupButton->SetIcon(theTheme.Image(bmpMic));
+      mRecordSetupButton->SetButtonType(AButton::Type::FrameButton);
+      mRecordSetupButton->SetMinSize({toolbarSingle, toolbarSingle});
+
+      mRecordMeter = safenew MeterPanel( &mProject,
                                 this,
                                 wxID_ANY,
                                 true,
                                 wxDefaultPosition,
-                                wxSize( 260, 28 ) );
+                                wxSize( 260, toolbarSingle) );
       /* i18n-hint: (noun) The meter that shows the loudness of the audio being recorded.*/
-      mRecordMeter->SetName( _("Record Meter"));
+      mRecordMeter->SetName( XO("Recording Level"));
       /* i18n-hint: (noun) The meter that shows the loudness of the audio being recorded.
        This is the name used in screen reader software, where having 'Meter' first
        apparently is helpful to partially sighted people.  */
-      mRecordMeter->SetLabel( _("Meter-Record") );
-      mSizer->Add( mRecordMeter, wxGBPosition( 0, 0 ), wxDefaultSpan, wxEXPAND );
+      mRecordMeter->SetLabel( XO("Meter-Record") );
+
+#if wxUSE_ACCESSIBILITY
+      auto meterButtonAcc = safenew MeterButtonAx(*mRecordSetupButton, *mRecordMeter);
+#endif
+      mRecordSetupButton->Bind(wxEVT_BUTTON, [=](wxCommandEvent&)
+      {
+#if wxUSE_ACCESSIBILITY
+         meterButtonAcc->SetSilent(true);
+#endif
+         mRecordMeter->ShowMenu(
+            mRecordMeter->ScreenToClient(
+               ClientToScreen(mRecordSetupButton->GetClientRect().GetBottomLeft())
+            )
+         );
+#if wxUSE_ACCESSIBILITY
+         /* if stop/start monitoring was chosen in the menu, then by this point
+         OnMonitoring has been called and variables which affect the accessibility
+         name have been updated so it's now ok for screen readers to read the name of
+         the button */
+         meterButtonAcc->SetSilent(false);
+#endif
+      });
    }
 
    if( mWhichMeters & kWithPlayMeter ){
-      mPlayMeter = safenew MeterPanel( mProject,
+      mPlaySetupButton = safenew AButton(this);
+      mPlaySetupButton->SetLabel({});
+      mPlaySetupButton->SetName(_("Playback Meter"));
+      mPlaySetupButton->SetToolTip(XO("Playback Meter"));
+      mPlaySetupButton->SetImages(
+         theTheme.Image(bmpRecoloredUpSmall),
+         theTheme.Image(bmpRecoloredUpHiliteSmall),
+         theTheme.Image(bmpRecoloredDownSmall),
+         theTheme.Image(bmpRecoloredHiliteSmall),
+         theTheme.Image(bmpRecoloredUpSmall));
+      mPlaySetupButton->SetIcon(theTheme.Image(bmpSpeaker));
+      mPlaySetupButton->SetButtonType(AButton::Type::FrameButton);
+      mPlaySetupButton->SetMinSize({toolbarSingle, toolbarSingle});
+
+
+      mPlayMeter = safenew MeterPanel( &mProject,
                               this,
                               wxID_ANY,
                               false,
                               wxDefaultPosition,
-                              wxSize( 260, 28 ) );
+                              wxSize( 260, toolbarSingle ) );
       /* i18n-hint: (noun) The meter that shows the loudness of the audio playing.*/
-      mPlayMeter->SetName( _("Play Meter"));
+      mPlayMeter->SetName( XO("Playback Level"));
       /* i18n-hint: (noun) The meter that shows the loudness of the audio playing.
        This is the name used in screen reader software, where having 'Meter' first
        apparently is helpful to partially sighted people.  */
-      mPlayMeter->SetLabel( _("Meter-Play"));
-      mSizer->Add( mPlayMeter, wxGBPosition( (mWhichMeters & kWithRecordMeter)?1:0, 0 ), wxDefaultSpan, wxEXPAND );
+      mPlayMeter->SetLabel( XO("Meter-Play"));
+
+#if wxUSE_ACCESSIBILITY
+      auto meterButtonAcc = safenew MeterButtonAx(*mPlaySetupButton, *mPlayMeter);
+#endif
+      mPlaySetupButton->Bind(wxEVT_BUTTON, [=](wxCommandEvent&)
+      {
+#if wxUSE_ACCESSIBILITY
+         meterButtonAcc->SetSilent(true);
+#endif
+         mPlayMeter->ShowMenu(
+            mPlayMeter->ScreenToClient(
+               ClientToScreen(mPlaySetupButton->GetClientRect().GetBottomLeft())
+            )
+         );
+#if wxUSE_ACCESSIBILITY
+         meterButtonAcc->SetSilent(false);
+#endif
+      });
    }
 
+   RebuildLayout(true);
+
    RegenerateTooltips();
+
+   Layout();
 }
 
 void MeterToolBar::UpdatePrefs()
 {
-   if( mPlayMeter )
-   {
-      mPlayMeter->UpdatePrefs();
-      mPlayMeter->Refresh();
-   }
-
-   if( mRecordMeter )
-   {
-      mRecordMeter->UpdatePrefs();
-      mRecordMeter->Refresh();
-   }
-
    RegenerateTooltips();
 
+   // Since the same widget is provides both the Recording Meter as
+   // well as the Playback Meter, we choose an appropriate label
+   // based on which it is
+   auto label = (mWhichMeters & kWithRecordMeter)
+      ? XO("Recording Meter")
+      : XO("Playback Meter");
+
    // Set label to pull in language change
-   SetLabel(_("Meter"));
+   SetLabel(label);
 
    // Give base class a chance
    ToolBar::UpdatePrefs();
-
-
 }
 
-void MeterToolBar::RegenerateTooltips()
+void MeterToolBar::UpdateControls()
 {
-#if wxUSE_TOOLTIPS
-   if( mPlayMeter )
-      mPlayMeter->SetToolTip( _("Playback Level") );
-   if( mRecordMeter )
-      mRecordMeter->SetToolTip( _("Recording Level") );
-#endif
+   if ( mPlayMeter )
+      mPlayMeter->UpdateSliderControl();
+
+   if ( mRecordMeter )
+      mRecordMeter->UpdateSliderControl();
 }
 
-void MeterToolBar::OnSize( wxSizeEvent & event) //WXUNUSED(event) )
+void MeterToolBar::RebuildLayout(bool force)
 {
-   event.Skip();
-   int width, height;
+   const auto size = GetSize();
+   const auto isHorizontal = size.x > size.y;
 
-   // We can be resized before populating...protect against it
-   if( !mSizer ) {
-      return;
-   }
-
-   // Update the layout
-   Layout();
-
-   // Get the usable area
-   wxSize sz = GetSizer()->GetSize();
-   width = sz.x; height = sz.y;
-
-   int nMeters = 
-      ((mRecordMeter ==NULL) ? 0:1) +
-      ((mPlayMeter ==NULL) ? 0:1);
-
-   bool bHorizontal = ( width > height );
-   bool bEndToEnd   = ( nMeters > 1 ) && wxMin( width, height ) < (60 * nMeters);
-
-   // Default location for second meter
-   wxGBPosition pos( 0, 0 );
-   // If 2 meters, share the height or width.
-   if( nMeters > 1 ){
-      if( bHorizontal ^ bEndToEnd ){
-         height /= nMeters;
-         pos = wxGBPosition( 1, 0 );
-      } else {
-         width /= nMeters;
-         pos = wxGBPosition( 0, 1 );
+   if(!force)
+   {
+      const auto sizerOrientation = mWhichMeters == kCombinedMeter
+         ? (isHorizontal ? wxVERTICAL : wxHORIZONTAL)
+         : (isHorizontal ? wxHORIZONTAL : wxVERTICAL);
+      
+      if(mRootSizer->GetOrientation() == sizerOrientation)
+      {
+         Layout();
+         return;
       }
    }
 
-   if( mRecordMeter ) {
-      mRecordMeter->SetMinSize( wxSize( width, height ));
+   if(mRootSizer != nullptr)
+      GetSizer()->Remove(mRootSizer);
+
+   std::unique_ptr<wxBoxSizer> playBarSizer;
+   std::unique_ptr<wxBoxSizer> recordBarSizer;
+   if(mWhichMeters & kWithPlayMeter)
+   {
+      playBarSizer = std::make_unique<wxBoxSizer>(isHorizontal ? wxHORIZONTAL : wxVERTICAL);
+      playBarSizer->Add(mPlaySetupButton, 0, wxEXPAND);
+      playBarSizer->Add(mPlayMeter, 1, wxEXPAND);
    }
-   if( mPlayMeter ) {
-      mPlayMeter->SetMinSize( wxSize( width, height));
-      mSizer->SetItemPosition( mPlayMeter, pos );
+   if(mWhichMeters & kWithRecordMeter)
+   {
+      recordBarSizer = std::make_unique<wxBoxSizer>(isHorizontal ? wxHORIZONTAL : wxVERTICAL);
+      recordBarSizer->Add(mRecordSetupButton, 0, wxEXPAND);
+      recordBarSizer->Add(mRecordMeter, 1, wxEXPAND);
    }
 
-   // And make it happen
-   Layout();
-   Fit();
+   if(playBarSizer && recordBarSizer)
+   {
+      Add(mRootSizer = safenew wxBoxSizer(isHorizontal ? wxVERTICAL : wxHORIZONTAL), 1, wxEXPAND);
+      mRootSizer->Add(playBarSizer.release());
+      mRootSizer->Add(recordBarSizer.release());
+   }
+   else if(playBarSizer)
+      Add(mRootSizer = playBarSizer.release(), 1, wxEXPAND);
+   else if(recordBarSizer)
+      Add(mRootSizer = recordBarSizer.release(), 1, wxEXPAND);
+}
+
+
+void MeterToolBar::OnSize( wxSizeEvent & event)
+{
+   event.Skip();
+
+   if(mRootSizer == nullptr)
+      return;// We can be resized before populating...protect against it
+   RebuildLayout(false);
 }
 
 bool MeterToolBar::Expose( bool show )
 {
+   auto &projectAudioIO = ProjectAudioIO::Get( mProject );
    if( show ) {
       if( mPlayMeter ) {
-         mProject->SetPlaybackMeter( mPlayMeter );
+         projectAudioIO.SetPlaybackMeter( mPlayMeter->GetMeter() );
       }
 
       if( mRecordMeter ) {
-         mProject->SetCaptureMeter( mRecordMeter );
+         projectAudioIO.SetCaptureMeter( mRecordMeter->GetMeter() );
       }
    } else {
-      if( mPlayMeter && mProject->GetPlaybackMeter() == mPlayMeter ) {
-         mProject->SetPlaybackMeter( NULL );
+      if( mPlayMeter &&
+         projectAudioIO.GetPlaybackMeter() == mPlayMeter->GetMeter() ) {
+         projectAudioIO.SetPlaybackMeter( nullptr );
       }
 
-      if( mRecordMeter && mProject->GetCaptureMeter() == mRecordMeter ) {
-         mProject->SetCaptureMeter( NULL );
+      if( mRecordMeter &&
+         projectAudioIO.GetCaptureMeter() == mRecordMeter->GetMeter() ) {
+         projectAudioIO.SetCaptureMeter( nullptr );
       }
    }
 
    return ToolBar::Expose( show );
 }
 
-wxSize MeterToolBar::GetDockedSize()
+int MeterToolBar::GetInitialWidth()
 {
-   const int tbs = toolbarSingle + toolbarGap;
-   wxSize sz = GetSize();
-   wxSize sz2 = GetMinSize();
-   sz.x = wxMax( sz.x, sz2.x );
-   sz.y = wxMax( sz.y, sz2.y );
-   // 50 is the size where we switch from expanded to compact.
-   if( sz.y < 50 )
-      sz.y = tbs-1;
-   else 
-      sz.y = 2 * tbs -1;
-   return sz;
+   return (mWhichMeters ==
+      (kWithRecordMeter + kWithPlayMeter)) ? 338 : 290;
 }
 
-// The meter's sizing code does not take account of the resizer
-// Hence after docking we need to enlarge the bar (using fit)
-// so that the resizer can be reached.
-void MeterToolBar::SetDocked(ToolDock *dock, bool pushed) {
-   ToolBar::SetDocked(dock, pushed);
-   Fit();
+void MeterToolBar::ShowOutputGainDialog()
+{
+   mPlayMeter->ShowDialog();
+   mPlayMeter->UpdateSliderControl();
 }
 
+void MeterToolBar::ShowInputGainDialog()
+{
+   mRecordMeter->ShowDialog();
+   mRecordMeter->UpdateSliderControl();
+}
+
+void MeterToolBar::AdjustOutputGain(int adj)
+{
+   if (adj < 0) {
+      mPlayMeter->Decrease(-adj);
+   }
+   else {
+      mPlayMeter->Increase(adj);
+   }
+
+   mPlayMeter->UpdateSliderControl();
+}
+
+void MeterToolBar::AdjustInputGain(int adj)
+{
+   if (adj < 0) {
+      mRecordMeter->Decrease(-adj);
+   }
+   else {
+      mRecordMeter->Increase(adj);
+   }
+
+   mRecordMeter->UpdateSliderControl();
+}
+
+static RegisteredToolbarFactory factory1{
+   []( AudacityProject &project ){
+      return ToolBar::Holder{
+         safenew MeterToolBar{ project, kWithRecordMeter,
+            XO("Recording Meter"), MeterToolBar::RecordID() } }; }
+};
+static RegisteredToolbarFactory factory2{
+   []( AudacityProject &project ){
+      return ToolBar::Holder{
+         safenew MeterToolBar{ project, kWithPlayMeter,
+            XO("Playback Meter"), MeterToolBar::PlayID() } }; }
+};
+static RegisteredToolbarFactory factory3{
+   []( AudacityProject &project ){
+      return ToolBar::Holder{
+         safenew MeterToolBar{ project,
+            (kWithPlayMeter|kWithRecordMeter),
+            XO("Combined Meter"), MeterToolBar::ID() } }; }
+};
+
+#include "ToolManager.h"
+
+namespace {
+AttachedToolBarMenuItem sAttachment1{
+   /* i18n-hint: Clicking this menu item shows the toolbar
+      with the recording level meters */
+   MeterToolBar::RecordID(),
+   wxT("ShowRecordMeterTB"), XXO("&Recording Meter Toolbar"),
+   {}, { MeterToolBar::ID() }
+};
+AttachedToolBarMenuItem sAttachment2{
+   /* i18n-hint: Clicking this menu item shows the toolbar
+      with the playback level meter */
+   MeterToolBar::PlayID(),
+   wxT("ShowPlayMeterTB"), XXO("&Playback Meter Toolbar"),
+   {}, { MeterToolBar::ID() }
+};
+//AttachedToolBarMenuItem sAttachment3{
+//   /* --i18nhint: Clicking this menu item shows the toolbar
+//      which has sound level meters */
+//   MeterToolBar::ID(), wxT("ShowMeterTB"), XXO("Co&mbined Meter Toolbar"),
+//   { Registry::OrderingHint::After, "ShowPlayMeterTB" },
+//   { PlayMeterBarID, RecordMeterBarID }
+//};
+}
+
+// Now define other related menu items
+#include "../commands/CommandContext.h"
+
+namespace {
+void OnOutputGain(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tb = MeterToolBar::Get( project, true );
+   tb.ShowOutputGainDialog();
+}
+
+void OnOutputGainInc(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tb = MeterToolBar::Get( project, true );
+   tb.AdjustOutputGain(1);
+}
+
+void OnOutputGainDec(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tb = MeterToolBar::Get( project, true );
+   tb.AdjustOutputGain(-1);
+}
+
+void OnInputGain(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tb = MeterToolBar::Get( project, false );
+   tb.ShowInputGainDialog();
+}
+
+void OnInputGainInc(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tb = MeterToolBar::Get( project, false );
+   tb.AdjustInputGain(1);
+}
+
+void OnInputGainDec(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tb = MeterToolBar::Get( project, false );
+   tb.AdjustInputGain(-1);
+}
+   
+using namespace MenuTable;
+BaseItemSharedPtr ExtraMixerMenu()
+{
+   static BaseItemSharedPtr menu{
+   Menu( wxT("Mixer"), XXO("Mi&xer"),
+      Command( wxT("OutputGain"), XXO("Ad&just Playback Volume..."),
+         OnOutputGain, AlwaysEnabledFlag ),
+      Command( wxT("OutputGainInc"), XXO("&Increase Playback Volume"),
+         OnOutputGainInc, AlwaysEnabledFlag ),
+      Command( wxT("OutputGainDec"), XXO("&Decrease Playback Volume"),
+         OnOutputGainDec, AlwaysEnabledFlag ),
+      Command( wxT("InputGain"), XXO("Adj&ust Recording Volume..."),
+         OnInputGain, AlwaysEnabledFlag ),
+      Command( wxT("InputGainInc"), XXO("I&ncrease Recording Volume"),
+         OnInputGainInc, AlwaysEnabledFlag ),
+      Command( wxT("InputGainDec"), XXO("D&ecrease Recording Volume"),
+         OnInputGainDec, AlwaysEnabledFlag )
+   ) };
+   return menu;
+}
+
+AttachedItem sAttachment4{
+   wxT("Optional/Extra/Part1"),
+   Indirect(ExtraMixerMenu())
+};
+
+}

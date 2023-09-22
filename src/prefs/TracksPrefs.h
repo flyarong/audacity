@@ -17,17 +17,23 @@
 
 #include <vector>
 #include "PrefsPanel.h"
-#include "../WaveTrack.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveChannelViewConstants.h"
+#include "WaveformSettings.h" // for ScaleTypeValues
 
 class ShuttleGui;
 
-class TracksPrefs final : public PrefsPanel
+#define TRACKS_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Tracks") }
+
+class AUDACITY_DLL_API TracksPrefs final : public PrefsPanel
 {
  public:
    TracksPrefs(wxWindow * parent, wxWindowID winid);
    ~TracksPrefs();
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+
    bool Commit() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
 
    static bool GetPinnedHeadPreference();
    static void SetPinnedHeadPreference(bool value, bool flush = false);
@@ -35,12 +41,11 @@ class TracksPrefs final : public PrefsPanel
    static double GetPinnedHeadPositionPreference();
    static void SetPinnedHeadPositionPreference(double value, bool flush = false);
    
-   static wxString GetDefaultAudioTrackNamePreference();
-
-   static WaveTrack::WaveTrackDisplay ViewModeChoice();
-   static WaveTrack::SampleDisplay SampleViewChoice();
-   static WaveTrack::ZoomPresets Zoom1Choice();
-   static WaveTrack::ZoomPresets Zoom2Choice();
+   static WaveChannelViewConstants::Display ViewModeChoice();
+   static WaveformSettings::ScaleTypeValues WaveformScaleChoice();
+   static WaveChannelViewConstants::SampleDisplay SampleViewChoice();
+   static WaveChannelViewConstants::ZoomPresets Zoom1Choice();
+   static WaveChannelViewConstants::ZoomPresets Zoom2Choice();
 
  private:
    void Populate();
@@ -49,10 +54,4 @@ class TracksPrefs final : public PrefsPanel
    static int iPreferencePinned;
 };
 
-/// A PrefsPanelFactory that creates one TracksPrefs panel.
-class TracksPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
 #endif

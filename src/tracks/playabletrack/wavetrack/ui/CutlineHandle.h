@@ -11,9 +11,7 @@ Paul Licameli
 #ifndef __AUDACITY_CUTLINE_HANDLE__
 #define __AUDACITY_CUTLINE_HANDLE__
 
-#include "../../../../MemoryX.h"
 #include "../../../../UIHandle.h"
-#include "../../../../MemoryX.h"
 #include "../../../../WaveTrackLocation.h"
 
 class wxMouseEvent;
@@ -26,26 +24,27 @@ class CutlineHandle final : public UIHandle
    static HitTestPreview HitPreview(bool cutline, bool unsafe);
 
 public:
-   explicit CutlineHandle
-      ( const std::shared_ptr<WaveTrack> &pTrack,
-        WaveTrackLocation location );
+   explicit CutlineHandle(const std::shared_ptr<WaveTrack> &pTrack,
+      WaveTrackLocations locations, WaveTrackLocation location);
 
    CutlineHandle &operator=(const CutlineHandle&) = default;
 
-   static UIHandlePtr HitAnywhere
-      (const AudacityProject *pProject, bool cutline, UIHandlePtr ptr);
-   static UIHandlePtr HitTest
-      (std::weak_ptr<CutlineHandle> &holder,
-       const wxMouseState &state, const wxRect &rect,
-       const AudacityProject *pProject,
-       const std::shared_ptr<WaveTrack> &pTrack);
+   static UIHandlePtr HitAnywhere(
+      const AudacityProject *pProject, bool cutline, UIHandlePtr ptr);
+   static UIHandlePtr HitTest(
+      std::weak_ptr<CutlineHandle> &holder,
+      const wxMouseState &state, const wxRect &rect,
+      const AudacityProject *pProject,
+      std::shared_ptr<WaveTrack> pTrack);
 
    virtual ~CutlineHandle();
 
    const WaveTrackLocation &GetLocation() { return mLocation; }
    std::shared_ptr<WaveTrack> GetTrack() { return mpTrack; }
 
-   void Enter(bool forward) override;
+   void Enter(bool forward, AudacityProject *) override;
+
+   bool HandlesRightClick() override;
 
    Result Click
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
@@ -54,7 +53,7 @@ public:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release
@@ -70,7 +69,8 @@ private:
    enum Operation { Merge, Expand, Remove };
    Operation mOperation{ Merge };
    double mStartTime{}, mEndTime{};
-   WaveTrackLocation mLocation {};
+   WaveTrackLocations mLocations;
+   WaveTrackLocation mLocation{};
 };
 
 #endif

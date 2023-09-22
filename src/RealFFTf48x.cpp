@@ -54,10 +54,10 @@
 *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
-#include "Audacity.h" // for USE_* macros
+
 #include "RealFFTf48x.h"
 
-#include "Experimental.h"
+
 
 #ifdef EXPERIMENTAL_EQ_SSE_THREADED
 
@@ -70,7 +70,6 @@
 #endif
 
 #include <stdlib.h>
-#include <stdio.h>
 #include <math.h>
 #include "RealFFTf.h"
 #ifdef __WXMSW__
@@ -150,7 +149,7 @@ int SmallRB(int bits, int numberBits)
    return ( (sSmallRBTable[*((unsigned char *)&bits)]<<8) + (sSmallRBTable[*(((unsigned char *)&bits)+1)]) )>>(16-numberBits);
 };
 
-/* wrapper funcitons. If passed -1 function choice will be made locally */
+/* wrapper functions. If passed -1 function choice will be made locally */
 void RealFFTf1x(fft_type *buffer, FFTParam *h, int functionType)
 {
    switch(functionType) {
@@ -1799,7 +1798,7 @@ void RealFFTf1xFastMathBR24(fft_type *buffer, FFTParam *h)
 //               vx.m128_f32[i]=((fft_type )SmallRB(iSinCosIndex+i,h->pow2Bits-1))*iToRad;
             }
             //"Warning C4701 potentially uninitialized local variable 'vx' " is OK.
-            //vx is initilased component by component, and MSVC doesn't realize.
+            //vx is initialised component by component, and MSVC doesn't realize.
             sincos_ps(vx, &sin4_2, &cos4_2);
             sin=-sin4_2.m128_f32[0];
             cos=-cos4_2.m128_f32[0];

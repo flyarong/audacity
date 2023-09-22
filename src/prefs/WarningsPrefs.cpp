@@ -17,25 +17,39 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "WarningsPrefs.h"
 
 #include <wx/defs.h>
 
-#include "../ShuttleGui.h"
-
-#include "../Internat.h"
+#include "Prefs.h"
+#include "ShuttleGui.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
 WarningsPrefs::WarningsPrefs(wxWindow * parent, wxWindowID winid)
-:  PrefsPanel(parent, winid, _("Warnings"))
+:  PrefsPanel(parent, winid, XO("Warnings"))
 {
    Populate();
 }
 
 WarningsPrefs::~WarningsPrefs()
 {
+}
+
+ComponentInterfaceSymbol WarningsPrefs::GetSymbol() const
+{
+   return WARNINGS_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString WarningsPrefs::GetDescription() const
+{
+   return XO("Preferences for Warnings");
+}
+
+ManualPageID WarningsPrefs::HelpPageName()
+{
+   return "Warnings_Preferences";
 }
 
 void WarningsPrefs::Populate()
@@ -54,29 +68,26 @@ void WarningsPrefs::PopulateOrExchange(ShuttleGui & S)
    S.SetBorder(2);
    S.StartScroller();
 
-   S.StartStatic(_("Show Warnings/Prompts for"));
+   S.StartStatic(XO("Show Warnings/Prompts for"));
    {
-      S.TieCheckBox(_("Saving &projects"),
-                    wxT("/Warnings/FirstProjectSave"),
-                    true);
-      S.TieCheckBox(_("Saving &empty project"),
-                    wxT("/GUI/EmptyCanBeDirty"),
-                    true);
-      S.TieCheckBox(_("&Low disk space at launch or new project"),
-                    wxT("/Warnings/DiskSpaceWarning"),
-                    true);
-      S.TieCheckBox(_("Mixing down to &mono during export"),
-                    wxT("/Warnings/MixMono"),
-                    true);
-      S.TieCheckBox(_("Mixing down to &stereo during export"),
-                    wxT("/Warnings/MixStereo"),
-                    true);
-      S.TieCheckBox(_("Mixing down on export (&Custom FFmpeg or external program)"),
-                    wxT("/Warnings/MixUnknownChannels"),
-                    true);
-      S.TieCheckBox(_("&Importing uncompressed audio files"),
-                    wxT("/Warnings/CopyOrEditUncompressedDataAsk"),
-                    true);
+      S.TieCheckBox(XXO("Saving &projects versus exporting audio"),
+                    {wxT("/Warnings/FirstProjectSave"),
+                     true});
+      S.TieCheckBox(XXO("Saving &empty project"),
+                    {wxT("/GUI/EmptyCanBeDirty"),
+                     true});
+      S.TieCheckBox(XXO("Mixing down to &mono during export"),
+                    {wxT("/Warnings/MixMono"),
+                     true});
+      S.TieCheckBox(XXO("Mixing down to &stereo during export"),
+                    {wxT("/Warnings/MixStereo"),
+                     true});
+      S.TieCheckBox(XXO("Mixing down on export (&Custom FFmpeg or external program)"),
+                    {wxT("/Warnings/MixUnknownChannels"),
+                     true});
+      S.TieCheckBox(XXO("Missing file &name extension during export"),
+                    {wxT("/Warnings/MissingExtension"),
+                     true});
    }
    S.EndStatic();
    S.EndScroller();
@@ -91,13 +102,12 @@ bool WarningsPrefs::Commit()
    return true;
 }
 
-wxString WarningsPrefs::HelpPageName()
-{
-   return "Warnings_Preferences";
-}
-
-PrefsPanel *WarningsPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew WarningsPrefs(parent, winid);
+namespace{
+PrefsPanel::Registration sAttachment{ "Warnings",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew WarningsPrefs(parent, winid);
+   }
+};
 }

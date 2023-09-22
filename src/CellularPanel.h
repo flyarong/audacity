@@ -2,7 +2,7 @@
 
  Audacity: A Digital Audio Editor
 
- TrackPanel.h
+ CellularPanel.h
 
  Paul Licameli
 
@@ -17,10 +17,12 @@ class ViewInfo;
 class AudacityProject;
 
 class TrackPanelCell;
+struct TrackPanelDrawingContext;
 class TrackPanelGroup;
 class TrackPanelNode;
 struct TrackPanelMouseEvent;
 struct TrackPanelMouseState;
+class TranslatableString;
 
 class UIHandle;
 using UIHandlePtr = std::shared_ptr<UIHandle>;
@@ -54,7 +56,7 @@ public:
    (TrackPanelCell *pClickedCell, TrackPanelCell *pLatestCell,
     unsigned refreshResult) = 0;
    
-   virtual void UpdateStatusMessage( const wxString & )  = 0;
+   virtual void UpdateStatusMessage( const TranslatableString & )  = 0;
    
 public:
    // Structure and functions for generalized visitation of the subdivision
@@ -107,6 +109,12 @@ public:
    wxCoord MostRecentXCoord() const;
    
    void HandleCursorForPresentMouseState(bool doHit = true);
+
+   // Visit the Draw functions of all cells that intersect the panel area,
+   // and of handles associated with such cells,
+   // and of all groups of cells,
+   // repeatedly with a pass count from 0 to nPasses - 1
+   void Draw( TrackPanelDrawingContext &context, unsigned nPasses );
    
 protected:
    bool HasEscape();
@@ -131,6 +139,7 @@ private:
    
    void OnSetFocus(wxFocusEvent & event);
    void OnKillFocus(wxFocusEvent & event);
+   void DoKillFocus();
    
    void OnContextMenu(wxContextMenuEvent & event);
    

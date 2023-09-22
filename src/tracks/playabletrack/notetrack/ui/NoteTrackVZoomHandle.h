@@ -14,7 +14,6 @@ Paul Licameli split from TrackPanel.cpp
 class wxMouseState;
 class NoteTrack;
 
-#include "../../../../MemoryX.h"
 #include "../../../../UIHandle.h"
 
 class NoteTrackVZoomHandle : public UIHandle
@@ -37,7 +36,9 @@ public:
 
    std::shared_ptr<NoteTrack> GetTrack() const { return mpTrack.lock(); }
 
-   void Enter(bool forward) override;
+   void Enter(bool forward, AudacityProject *) override;
+
+   bool HandlesRightClick() override;
 
    Result Click
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
@@ -46,7 +47,7 @@ public:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release
@@ -55,12 +56,16 @@ public:
 
    Result Cancel(AudacityProject *pProject) override;
 
-   void DrawExtras
-      (DrawingPass pass,
-       wxDC * dc, const wxRegion &updateRegion, const wxRect &panelRect)
-      override;
-
 private:
+   // TrackPanelDrawable implementation
+   void Draw(
+      TrackPanelDrawingContext &context,
+      const wxRect &rect, unsigned iPass ) override;
+
+   wxRect DrawingArea(
+      TrackPanelDrawingContext &,
+      const wxRect &rect, const wxRect &panelRect, unsigned iPass ) override;
+
    std::weak_ptr<NoteTrack> mpTrack;
 
    int mZoomStart, mZoomEnd;

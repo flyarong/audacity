@@ -8,7 +8,7 @@ Paul Licameli
 
 **********************************************************************/
 
-#include "Audacity.h"
+
 #include "UIHandle.h"
 
 #include "RefreshCode.h"
@@ -17,7 +17,7 @@ UIHandle::~UIHandle()
 {
 }
 
-void UIHandle::Enter(bool)
+void UIHandle::Enter(bool, AudacityProject *)
 {
 }
 
@@ -31,19 +31,19 @@ bool UIHandle::Rotate(bool)
    return false;
 }
 
-bool UIHandle::HasEscape() const
+bool UIHandle::HasEscape(AudacityProject *) const
 {
    return false;
 }
 
-bool UIHandle::Escape()
+bool UIHandle::Escape(AudacityProject *)
 {
    return false;
 }
 
-void UIHandle::DrawExtras
-   (DrawingPass, wxDC *, const wxRegion &, const wxRect &)
+bool UIHandle::HandlesRightClick()
 {
+   return false;
 }
 
 bool UIHandle::StopsOnKeystroke()

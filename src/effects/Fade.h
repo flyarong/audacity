@@ -11,12 +11,9 @@
 #ifndef __AUDACITY_EFFECT_FADE__
 #define __AUDACITY_EFFECT_FADE__
 
-#include "Effect.h"
+#include "StatefulPerTrackEffect.h"
 
-#define FADEIN_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Fade In") }
-#define FADEOUT_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Fade Out") }
-
-class EffectFade final : public Effect
+class EffectFade : public StatefulPerTrackEffect
 {
 public:
    EffectFade(bool fadeIn = false);
@@ -24,26 +21,44 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-   bool IsInteractive() override;
+   EffectType GetType() const override;
+   bool IsInteractive() const override;
 
-   // EffectClientInterface implementation
-
-   unsigned GetAudioInCount() override;
-   unsigned GetAudioOutCount() override;
-   bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
-   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
+   unsigned GetAudioInCount() const override;
+   unsigned GetAudioOutCount() const override;
+   bool ProcessInitialize(EffectSettings &settings, double sampleRate,
+      ChannelNames chanMap) override;
+   size_t ProcessBlock(EffectSettings &settings,
+      const float *const *inBlock, float *const *outBlock, size_t blockLen)
+      override;
 
 private:
-   // EffectFadeIn implementation
+   // EffectFade implementation
 
    bool mFadeIn;
    sampleCount mSample;
+};
+
+class EffectFadeIn final : public EffectFade
+{
+public:
+   static const ComponentInterfaceSymbol Symbol;
+
+   EffectFadeIn() : EffectFade{ true } {}
+};
+
+
+class EffectFadeOut final : public EffectFade
+{
+public:
+   static const ComponentInterfaceSymbol Symbol;
+
+   EffectFadeOut() : EffectFade{ false } {}
 };
 
 #endif

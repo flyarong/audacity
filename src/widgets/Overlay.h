@@ -9,6 +9,8 @@
 #ifndef __AUDACITY_OVERLAY__
 #define __AUDACITY_OVERLAY__
 
+
+
 #include <utility>
 
 class OverlayPanel;
@@ -62,7 +64,7 @@ Notice that the zoom guidelines, the focused track highlight,
 and snap guidelines could be drawn directly to the screen rather than to
 the bitmap, generally eliminating redraw work.
 
-One problem is slider udpates. Sliders are in the left area of the track
+One problem is slider updates. Sliders are in the left area of the track
 panel. They are not wxWindows like wxSliders, but instead are just drawn
 on the TrackPanel. When slider state changes, *all* tracks do a full
 refresh, including recomputing the backing store. It would make more sense
@@ -88,10 +90,17 @@ AdornedRulerPanel.
 
 */
 
-class Overlay
+class AUDACITY_DLL_API Overlay
 {
 public:
+   Overlay() = default;
+   Overlay( const Overlay & ) = delete;
+   Overlay &operator=( const Overlay & ) = delete;
    virtual ~Overlay() = 0;
+
+   ///\brief This number determines an ordering of overlays, so that those
+   /// with higher numbers overpaint those with lower numbers that intersect
+   virtual unsigned SequenceNumber() const = 0;
 
    // nonvirtual wrapper
    std::pair<wxRect, bool> GetRectangle(wxSize size);

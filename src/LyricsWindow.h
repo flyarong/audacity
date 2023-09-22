@@ -13,11 +13,17 @@
 #define __AUDACITY_LYRICS_WINDOW__
 
 #include <wx/frame.h> // to inherit
+#include <memory>
+
+#include "Observer.h"
+#include "Prefs.h"
 
 class AudacityProject;
 class LyricsPanel;
 
-class LyricsWindow final : public wxFrame {
+class LyricsWindow final : public wxFrame,
+                           public PrefsListener
+{
 
  public:
    LyricsWindow(AudacityProject* parent);
@@ -29,10 +35,17 @@ class LyricsWindow final : public wxFrame {
 
    void OnStyle_BouncingBall(wxCommandEvent &evt);
    void OnStyle_Highlight(wxCommandEvent &evt);
-   void OnTimer(wxCommandEvent &event);
+   void OnTimer(Observer::Message);
 
-   AudacityProject *mProject;
+   void SetWindowTitle();
+
+   // PrefsListener implementation
+   void UpdatePrefs() override;
+
+   std::weak_ptr<AudacityProject> mProject;
    LyricsPanel *mLyricsPanel;
+   Observer::Subscription mTimerSubscription,
+      mTitleChangeSubscription;
 
  public:
    DECLARE_EVENT_TABLE()

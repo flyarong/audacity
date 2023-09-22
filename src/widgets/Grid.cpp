@@ -13,22 +13,22 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "Grid.h"
 
 #include <wx/setup.h> // for wxUSE_* macros
 
 #include <wx/defs.h>
 #include <wx/choice.h>
+#include <wx/clipbrd.h>
 #include <wx/dc.h>
 #include <wx/grid.h>
-#include <wx/intl.h>
 #include <wx/settings.h>
 #include <wx/toplevel.h>
 
-#include "NumericTextCtrl.h"
-#include "../SelectedRegion.h"
-#include "../Internat.h"
+#include "NumericConverterFormats.h"
+
+#include "SelectedRegion.h"
 
 #if wxUSE_ACCESSIBILITY
 #include "WindowAccessible.h"
@@ -42,7 +42,7 @@ class GridAx final : public WindowAccessible
 
  public:
 
-   GridAx(Grid *grid);
+   GridAx(const FormatterContext& project, Grid *grid);
 
    void SetCurrentCell(int row, int col);
    void TableUpdated();
@@ -113,6 +113,7 @@ class GridAx final : public WindowAccessible
    // Selects the object or child.
    wxAccStatus Select(int childId, wxAccSelectionFlags selectFlags) override;
 #endif
+   FormatterContext mContext;
 
    Grid *mGrid;
    int mLastId;
@@ -120,12 +121,13 @@ class GridAx final : public WindowAccessible
 };
 #endif
 
-NumericEditor::NumericEditor
-   (NumericConverter::Type type, const NumericFormatSymbol &format, double rate)
+NumericEditor::NumericEditor(
+   const FormatterContext& context, NumericConverterType type,
+   const NumericFormatSymbol& format)
+    : mContext { context }
 {
-   mType = type;
+   mType = std::move(type);
    mFormat = format;
-   mRate = rate;
    mOld = 0.0;
 }
 
@@ -136,15 +138,14 @@ NumericEditor::~NumericEditor()
 void NumericEditor::Create(wxWindow *parent, wxWindowID id, wxEvtHandler *handler)
 {
    wxASSERT(parent); // to justify safenew
-   auto control = safenew NumericTextCtrl(
+   auto control = safenew NumericTextCtrl(mContext,
       parent, wxID_ANY,
       mType,
       mFormat,
       mOld,
-      mRate,
       NumericTextCtrl::Options{}
          .AutoPos(true)
-         .InvalidValue(mType == NumericTextCtrl::FREQUENCY,
+         .InvalidValue(mType == NumericConverterType_FREQUENCY(),
                        SelectedRegion::UndefinedFrequency)
    );
    m_control = control;
@@ -215,7 +216,7 @@ bool NumericEditor::IsAcceptedKey(wxKeyEvent &event)
 // Clone is required by wxwidgets; implemented via copy constructor
 wxGridCellEditor *NumericEditor::Clone() const
 {
-   return safenew NumericEditor{ mType, mFormat, mRate };
+   return safenew NumericEditor{ mContext, mType, mFormat };
 }
 
 wxString NumericEditor::GetValue() const
@@ -228,19 +229,9 @@ NumericFormatSymbol NumericEditor::GetFormat() const
    return mFormat;
 }
 
-double NumericEditor::GetRate() const
-{
-   return mRate;
-}
-
 void NumericEditor::SetFormat(const NumericFormatSymbol &format)
 {
    mFormat = format;
-}
-
-void NumericEditor::SetRate(double rate)
-{
-   mRate = rate;
 }
 
 NumericRenderer::~NumericRenderer()
@@ -267,11 +258,10 @@ void NumericRenderer::Draw(wxGrid &grid,
 
       table->GetValue(row, col).ToDouble(&value);
 
-      NumericTextCtrl tt(&grid, wxID_ANY,
+      NumericTextCtrl tt(mContext, &grid, wxID_ANY,
                       mType,
                       ne->GetFormat(),
                       value,
-                      ne->GetRate(),
                       NumericTextCtrl::Options{}.AutoPos(true),
                       wxPoint(10000, 10000));  // create offscreen
       tstr = tt.GetString();
@@ -323,11 +313,10 @@ wxSize NumericRenderer::GetBestSize(wxGrid &grid,
    if (ne) {
       double value;
       table->GetValue(row, col).ToDouble(&value);
-      NumericTextCtrl tt(&grid, wxID_ANY,
+      NumericTextCtrl tt(mContext, &grid, wxID_ANY,
                       mType,
                       ne->GetFormat(),
                       value,
-                      ne->GetRate(),
                       NumericTextCtrl::Options{}.AutoPos(true),
                       wxPoint(10000, 10000));  // create offscreen
       sz = tt.GetSize();
@@ -341,7 +330,7 @@ wxSize NumericRenderer::GetBestSize(wxGrid &grid,
 // Clone is required by wxwidgets; implemented via copy constructor
 wxGridCellRenderer *NumericRenderer::Clone() const
 {
-   return safenew NumericRenderer{ mType };
+   return safenew NumericRenderer{ mContext, mType };
 }
 
 ChoiceEditor::ChoiceEditor(size_t count, const wxString choices[])
@@ -469,37 +458,43 @@ BEGIN_EVENT_TABLE(Grid, wxGrid)
    EVT_SET_FOCUS(Grid::OnSetFocus)
    EVT_KEY_DOWN(Grid::OnKeyDown)
    EVT_GRID_SELECT_CELL(Grid::OnSelectCell)
+   EVT_GRID_EDITOR_SHOWN(Grid::OnEditorShown)
 END_EVENT_TABLE()
 
-Grid::Grid(wxWindow *parent,
+Grid::Grid(
+           const FormatterContext& context,
+           wxWindow* parent,
            wxWindowID id,
            const wxPoint& pos,
            const wxSize& size,
            long style,
            const wxString& name)
-: wxGrid(parent, id, pos, size, style | wxWANTS_CHARS, name)
+: wxGrid(parent, id, pos, size, style | wxWANTS_CHARS, name), mContext(context)
 {
 #if wxUSE_ACCESSIBILITY
-   GetGridWindow()->SetAccessible(mAx = safenew GridAx(this));
+   GetGridWindow()->SetAccessible(mAx = safenew GridAx(mContext, this));
 #endif
 
    // RegisterDataType takes ownership of renderer and editor
 
    RegisterDataType(GRID_VALUE_TIME,
-                    safenew NumericRenderer{ NumericConverter::TIME },
-                    safenew NumericEditor
-                      { NumericTextCtrl::TIME,
-                        NumericConverter::SecondsFormat(), 44100.0 });
+                    safenew NumericRenderer{ mContext, NumericConverterType_TIME() },
+                    safenew NumericEditor { mContext, NumericConverterType_TIME(),
+                        NumericConverterFormats::SecondsFormat() });
 
    RegisterDataType(GRID_VALUE_FREQUENCY,
-                    safenew NumericRenderer{ NumericConverter::FREQUENCY },
-                    safenew NumericEditor
-                    { NumericTextCtrl::FREQUENCY,
-                      NumericConverter::HertzFormat(), 44100.0 });
+                    safenew NumericRenderer{ mContext, NumericConverterType_FREQUENCY() },
+                    safenew NumericEditor { mContext, NumericConverterType_FREQUENCY(),
+                      NumericConverterFormats::HertzFormat() });
 
    RegisterDataType(GRID_VALUE_CHOICE,
                     safenew wxGridCellStringRenderer,
                     safenew ChoiceEditor);
+
+   // Bug #2803:
+   // Ensure selection doesn't show up.
+   SetSelectionForeground(GetDefaultCellTextColour());
+   SetSelectionBackground(GetDefaultCellBackgroundColour());
 }
 
 Grid::~Grid()
@@ -527,43 +522,107 @@ void Grid::OnSelectCell(wxGridEvent &event)
 {
    event.Skip();
 
+   MakeCellVisible(event.GetRow(), event.GetCol());
+
 #if wxUSE_ACCESSIBILITY
    mAx->SetCurrentCell(event.GetRow(), event.GetCol());
 #endif
 }
 
+void Grid::OnEditorShown(wxGridEvent &event)
+{
+   event.Skip();
+
+   // Bug #2803 (comment 7):
+   // Select row whenever an editor is displayed
+   SelectRow(GetGridCursorRow());
+}
+
 void Grid::OnKeyDown(wxKeyEvent &event)
 {
-   switch (event.GetKeyCode())
+   auto keyCode = event.GetKeyCode();
+   int crow = GetGridCursorRow();
+   int ccol = GetGridCursorCol();
+
+   if (event.CmdDown() && crow != wxGridNoCellCoords.GetRow() && ccol != wxGridNoCellCoords.GetCol())
+   {
+      wxClipboardLocker cb;
+
+      switch (keyCode)
+      {
+         case 'C': // Copy
+         {
+            wxTextDataObject *data = safenew wxTextDataObject(GetCellValue(crow, ccol));
+            wxClipboard::Get()->SetData(data);
+            return;
+         }
+         break;
+
+         case 'X': // Cut
+         {
+            wxTextDataObject *data = safenew wxTextDataObject(GetCellValue(crow, ccol));
+            wxClipboard::Get()->SetData(data);
+            SetCellValue(crow, ccol, "" );
+            return;
+         }
+         break;
+
+         case 'V': // Paste
+         {
+            if (wxClipboard::Get()->IsSupported(wxDF_UNICODETEXT))
+            {
+               wxTextDataObject data;
+               if (wxClipboard::Get()->GetData(data))
+               {
+                  SetCellValue(crow, ccol, data.GetText());
+                  return;
+               }
+            }
+         }
+         break;
+      }
+   }
+
+   switch (keyCode)
    {
       case WXK_LEFT:
       case WXK_RIGHT:
       {
          int rows = GetNumberRows();
          int cols = GetNumberCols();
-         int crow = GetGridCursorRow();
-         int ccol = GetGridCursorCol();
 
-         if (event.GetKeyCode() == WXK_LEFT) {
-            if (crow == 0 && ccol == 0) {
-               // do nothing
+         const bool has_cells = rows > 0 && cols > 0;
+
+         if (has_cells) {
+            int crow = GetGridCursorRow();
+            int ccol = GetGridCursorCol();
+
+            const bool has_no_selection = crow == wxGridNoCellCoords.GetRow() || ccol == wxGridNoCellCoords.GetCol();
+
+            if (has_no_selection) {
+               SetGridCursor(0, 0);
             }
-            else if (ccol == 0) {
-               SetGridCursor(crow - 1, cols - 1);
+            else if (event.GetKeyCode() == WXK_LEFT) {
+               if (crow == 0 && ccol == 0) {
+                  // do nothing
+               }
+               else if (ccol == 0) {
+                  SetGridCursor(crow - 1, cols - 1);
+               }
+               else {
+                  SetGridCursor(crow, ccol - 1);
+               }
             }
             else {
-               SetGridCursor(crow, ccol - 1);
-            }
-         }
-         else {
-            if (crow == rows - 1 && ccol == cols - 1) {
-               // do nothing
-            }
-            else if (ccol == cols - 1) {
-               SetGridCursor(crow + 1, 0);
-            }
-            else {
-               SetGridCursor(crow, ccol + 1);
+               if (crow == rows - 1 && ccol == cols - 1) {
+                  // do nothing
+               }
+               else if (ccol == cols - 1) {
+                  SetGridCursor(crow + 1, 0);
+               }
+               else {
+                  SetGridCursor(crow, ccol + 1);
+               }
             }
          }
 
@@ -576,11 +635,6 @@ void Grid::OnKeyDown(wxKeyEvent &event)
 
       case WXK_TAB:
       {
-         int rows = GetNumberRows();
-         int cols = GetNumberCols();
-         int crow = GetGridCursorRow();
-         int ccol = GetGridCursorCol();
-
          if (event.ControlDown()) {
             int flags = wxNavigationKeyEvent::FromTab |
                         ( event.ShiftDown() ?
@@ -589,10 +643,28 @@ void Grid::OnKeyDown(wxKeyEvent &event)
             Navigate(flags);
             return;
          }
-         else if (event.ShiftDown()) {
+
+         int rows = GetNumberRows();
+         int cols = GetNumberCols();
+         int crow = GetGridCursorRow();
+         int ccol = GetGridCursorCol();
+
+         const auto is_empty = rows <= 0 || cols <= 0;
+         const auto has_no_selection = crow == wxGridNoCellCoords.GetRow() || ccol == wxGridNoCellCoords.GetCol();
+
+         if (event.ShiftDown()) {
+            if (is_empty) {
+               Navigate(wxNavigationKeyEvent::FromTab | wxNavigationKeyEvent::IsBackward);
+               return;
+            }
+
             if (crow == 0 && ccol == 0) {
                Navigate(wxNavigationKeyEvent::FromTab | wxNavigationKeyEvent::IsBackward);
                return;
+            }
+
+            if (has_no_selection) {
+               SetGridCursor(rows -1, cols - 1);
             }
             else if (ccol == 0) {
                SetGridCursor(crow - 1, cols - 1);
@@ -602,9 +674,18 @@ void Grid::OnKeyDown(wxKeyEvent &event)
             }
          }
          else {
+            if (is_empty) {
+               Navigate(wxNavigationKeyEvent::FromTab | wxNavigationKeyEvent::IsForward);
+               return;
+            }
+
             if (crow == rows - 1 && ccol == cols - 1) {
                Navigate(wxNavigationKeyEvent::FromTab | wxNavigationKeyEvent::IsForward);
                return;
+            }
+
+            if (has_no_selection) {
+               SetGridCursor(0, 0);
             }
             else if (ccol == cols - 1) {
                SetGridCursor(crow + 1, 0);
@@ -613,6 +694,7 @@ void Grid::OnKeyDown(wxKeyEvent &event)
                SetGridCursor(crow, ccol + 1);
             }
          }
+
          MakeCellVisible(GetGridCursorRow(), GetGridCursorCol());
 
 #if wxUSE_ACCESSIBILITY
@@ -631,6 +713,7 @@ void Grid::OnKeyDown(wxKeyEvent &event)
             if (def && def->IsEnabled()) {
                wxCommandEvent cevent(wxEVT_COMMAND_BUTTON_CLICKED,
                                      def->GetId());
+               cevent.SetEventObject( def );
                GetParent()->GetEventHandler()->ProcessEvent(cevent);
             }
          }
@@ -715,8 +798,9 @@ bool Grid::DeleteCols(int pos, int numCols, bool updateLabels)
    return res;
 }
 
-GridAx::GridAx(Grid *grid)
-: WindowAccessible(grid->GetGridWindow())
+GridAx::GridAx(const FormatterContext& context, Grid* grid)
+    : WindowAccessible(grid->GetGridWindow())
+    , mContext(context)
 {
    mGrid = grid;
    mLastId = -1;
@@ -741,10 +825,12 @@ void GridAx::SetCurrentCell(int row, int col)
                mLastId);
    }
 
-   NotifyEvent(wxACC_EVENT_OBJECT_FOCUS,
-               mGrid->GetGridWindow(),
-               wxOBJID_CLIENT,
-               id);
+   if (mGrid == wxWindow::FindFocus()) {
+      NotifyEvent(wxACC_EVENT_OBJECT_FOCUS,
+                  mGrid->GetGridWindow(),
+                  wxOBJID_CLIENT,
+                  id);
+   }
 
    NotifyEvent(wxACC_EVENT_OBJECT_SELECTION,
                mGrid->GetGridWindow(),
@@ -839,6 +925,7 @@ wxAccStatus GridAx::GetLocation(wxRect & rect, int elementId)
 
    if (GetRowCol(elementId, row, col)) {
       rect = mGrid->CellToRect(row, col);
+      rect.SetPosition(mGrid->CalcScrolledPosition(rect.GetPosition()));
       rect.SetPosition(mGrid->GetGridWindow()->ClientToScreen(rect.GetPosition()));
    }
    else {
@@ -870,13 +957,12 @@ wxAccStatus GridAx::GetName(int childId, wxString *name)
       NumericEditor *c =
          static_cast<NumericEditor *>(mGrid->GetCellEditor(row, col));
 
-      if (c && dt && df && ( c == dt || c == df)) {        
+      if (c && dt && df && ( c == dt || c == df)) {
          double value;
          v.ToDouble(&value);
-         NumericConverter converter(c == dt ? NumericConverter::TIME : NumericConverter::FREQUENCY,
+         NumericConverter converter(mContext, c == dt ? NumericConverterType_TIME() : NumericConverterType_FREQUENCY(),
                         c->GetFormat(),
-                        value,
-                        c->GetRate() );
+                        value);
 
          v = converter.GetString();
       }
@@ -950,7 +1036,7 @@ wxAccStatus GridAx::GetState(int childId, long *state)
 
       if (mGrid->IsReadOnly(row, col)) {
          // It would be more logical to also include the state
-         // wxACC_STATE_SYSTEM_FOCUSABLE, but this causes Window-Eyes to 
+         // wxACC_STATE_SYSTEM_FOCUSABLE, but this causes Window-Eyes to
          // no longer read the cell as disabled
          flag = wxACC_STATE_SYSTEM_UNAVAILABLE | wxACC_STATE_SYSTEM_FOCUSED;
       }

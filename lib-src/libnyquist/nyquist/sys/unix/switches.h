@@ -39,7 +39,7 @@
 */
 #define nyquist_printf printf
 
-#if __APPLE__ && __GNUC__ /* Mac OS X */
+#if (__APPLE__ && __GNUC__) || FreeBSD /* Mac OS X or FreeBSD */
 #define NEED_ULONG 1
 #else
 #include <sys/types.h>
@@ -191,7 +191,9 @@
 /* NYQUIST tells some CMT code that we're really in
  * XLISP and NYQUIST
  */
+#ifndef NYQUIST
 #define NYQUIST 1
+#endif
 
 /* If SAFE_NYQUIST is defined, Nyquist will prevent:
  * - writes anywhere except in the directory tree

@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop">
+  <developer_name>Muse Group</developer_name>
   <id>org.audacityteam.Audacity</id>
-  <launchable type="desktop">audacity.desktop</launchable>
-  <project_license>GPL-2.0 and CC-BY-3.0</project_license>
+  <launchable type="desktop-id">audacity.desktop</launchable>
+  <project_license>GPL-3.0-only</project_license>
   <metadata_license>CC0-1.0</metadata_license>
   <name>Audacity</name>
   <summary>Record and edit audio files</summary>
   <description>
-    <p>Audacity® is a free, easy-to-use, multi-track audio editor and recorder for Windows, Mac OS X, GNU/Linux and other operating systems. The interface is translated into many languages.</p>
+    <p>Audacity® is a free, easy-to-use, multi-track audio editor and recorder for Windows, macOS, GNU/Linux and other operating systems. The interface is translated into many languages.</p>
     <p>You can use Audacity to:</p>
     <ul>
       <li>Record live audio</li>
@@ -22,11 +23,11 @@
     <category>AudioVideo</category>
     <category>Audio</category>
   </categories>
+  <content_rating type="oars-1.1" />
   <url type="homepage">https://www.audacityteam.org/</url>
   <url type="bugtracker">https://bugzilla.audacityteam.org/</url>
   <url type="faq">https://manual.audacityteam.org/man/faq.html</url>
   <url type="help">https://manual.audacityteam.org/</url>
-  <url type="donation">https://www.audacityteam.org/donate/</url>
   <url type="translate">https://www.audacityteam.org/community/translators/</url>
   <screenshots>
     <screenshot type="default">

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """Automate Audacity via mod-script-pipe.
@@ -93,7 +93,7 @@ else:
     EOL = '\n'
 
 
-class PipeClient(object):
+class PipeClient():
     """Write / read client access to Audacity via named pipes.
 
     Normally there should be just one instance of this class. If
@@ -129,16 +129,17 @@ class PipeClient(object):
 
     _shared_state = {}
 
-    def __new__(cls, *p, **k):
+    def __new__(cls, enc='', *p, **k):
         self = object.__new__(cls, *p, **k)
         self.__dict__ = cls._shared_state
         return self
 
-    def __init__(self):
+    def __init__(self, enc=''):
         self.timer = False
         self._start_time = 0
         self._write_pipe = None
         self.reply = ''
+        self.enc = enc
         if not self._write_pipe:
             self._write_thread_start()
         self._read_thread_start()
@@ -157,7 +158,11 @@ class PipeClient(object):
 
     def _write_pipe_open(self):
         """Open _write_pipe."""
-        self._write_pipe = open(WRITE_NAME, 'w')
+        if self.enc:
+            self._write_pipe = open(WRITE_NAME, 'w', newline='',
+                                    encoding=self.enc)
+        else:
+            self._write_pipe = open(WRITE_NAME, 'w', newline='')
 
     def _read_thread_start(self):
         """Start read_pipe thread."""
@@ -202,19 +207,25 @@ class PipeClient(object):
         """Read FIFO in worker thread."""
         # Thread will wait at this read until it connects.
         # Connection should occur as soon as _write_pipe has connected.
-        read_pipe = open(READ_NAME, 'r')
+        read_pipe = None
+        if self.enc:
+            read_pipe = open(READ_NAME, 'r', newline='', encoding=self.enc)
+        else:
+            read_pipe = open(READ_NAME, 'r', newline='')
         message = ''
-        while True:
+        pipe_ok = True
+        while pipe_ok:
             line = read_pipe.readline()
             # Stop timer as soon as we get first line of response.
             stop_time = time.time()
-            while line != EOL:
+            while pipe_ok and line != '\n':
                 message += line
                 line = read_pipe.readline()
                 if line == '':
                     # No data in read_pipe indicates that the pipe is broken
                     # (Audacity may have crashed).
                     PipeClient.reader_pipe_broken.set()
+                    pipe_ok = False
             if self.timer:
                 xtime = (stop_time - self._start_time) * 1000
                 message += 'Execution time: {0:.2f}ms'.format(xtime)
@@ -236,18 +247,17 @@ class PipeClient(object):
         """
         if not PipeClient.reply_ready.isSet():
             return ''
-        else:
-            return self.reply
+        return self.reply
 
 
 def bool_from_string(strval):
     """Return boolean value from string"""
     if strval.lower() in ('true', 't', '1', 'yes', 'y'):
         return True
-    elif strval.lower() in ('false', 'f', '0', 'no', 'n'):
+    if strval.lower() in ('false', 'f', '0', 'no', 'n'):
         return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
+    raise argparse.ArgumentTypeError('Boolean value expected.')
+
 
 def main():
     """Interactive command-line for PipeClient"""
@@ -261,21 +271,21 @@ def main():
                         help='show command execution time (default: True)')
     parser.add_argument('-d', '--docs', action='store_true',
                         help='show documentation and exit')
+    parser.add_argument('-e', '--pipe-encoding', type=str, default='',
+                        help='non-default encoding to use for r/w pipes')
     args = parser.parse_args()
 
     if args.docs:
         print(__doc__)
         sys.exit(0)
 
-    client = PipeClient()
+    client = PipeClient(enc=args.pipe_encoding)
     while True:
         reply = ''
         if sys.version_info[0] < 3:
-            #pylint: disable=undefined-variable
             message = raw_input("\nEnter command or 'Q' to quit: ")
         else:
-            message = input( #pylint: disable=bad-builtin
-                "\nEnter command or 'Q' to quit: ")
+            message = input("\nEnter command or 'Q' to quit: ")
         start = time.time()
         if message.upper() == 'Q':
             sys.exit(0)

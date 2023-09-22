@@ -13,14 +13,11 @@
 #ifndef __AUDACITY_EFFECT_NOISE_REDUCTION__
 #define __AUDACITY_EFFECT_NOISE_REDUCTION__
 
-#include "Effect.h"
+#include "StatefulEffect.h"
 
-#include "../MemoryX.h"
-
-#define NOISEREDUCTION_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Noise Reduction") }
-
-class EffectNoiseReduction final : public Effect {
+class EffectNoiseReduction final : public StatefulEffect {
 public:
+   static const ComponentInterfaceSymbol Symbol;
 
    EffectNoiseReduction();
    virtual ~EffectNoiseReduction();
@@ -29,29 +26,30 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
+   EffectType GetType() const override;
 
    // Effect implementation
 
 //   using Effect::TrackProgress;
 
-   bool PromptUser(wxWindow *parent) override;
+   int ShowHostInterface(EffectBase &plugin, wxWindow &parent,
+      const EffectDialogFactory &factory,
+      std::shared_ptr<EffectInstance> &pInstance, EffectSettingsAccess &access,
+      bool forceModal = false) override;
 
-   bool Init() override;
-   bool CheckWhetherSkipEffect() override;
-   bool Process() override;
+   bool Process(EffectInstance &instance, EffectSettings &settings) override;
 
    class Settings;
    class Statistics;
    class Dialog;
+   class Worker;
 
 private:
-   class Worker;
    friend class Dialog;
 
    std::unique_ptr<Settings> mSettings;
