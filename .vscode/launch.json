@@ -1,0 +1,83 @@
+{
+    "configurations": [
+        {
+            "name": "Launch",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/${command:cmake.buildType}/install/bin/audacity.exe",
+            "args": [
+                // Comment this out to run audacity in plugin registration mode
+                // "--register-audio-plugin", "C:/Program Files/Common Files/VST3/Your plugin.vst3"
+            ],
+            "preLaunchTask": "CMake: install",
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "QTDIR",
+                    "value": "C:/Qt/6.2.4/msvc2019_64"
+                }
+            ],
+            "sourceFileMap": {
+                "C:/work/build/qt5_workdir/w/s": "${env:QTDIR}/../Src",
+                "C:/Users/qt/worwk/install": "${env:QTDIR}/../Src",
+                "C:/Users/qt/work/qt": "${env:QTDIR}/../Src",
+                "Q:/qt_workdir/w/s": "${env:QTDIR}/../Src",
+            },
+            "symbolSearchPath": "${env:QTDIR}/bin",
+            "visualizerFile": "${workspaceFolder}/.vscode/qt6.natvis",
+        },
+        {
+            // Requires CodeLLDB extension
+            // Doesn't support visualizerFile but is much faster than cppvsdbg
+            "name": "Launch (Linux - lldb)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/${command:cmake.buildType}/src/app/audacity",
+            "preLaunchTask": "CMake: build",
+            "args": [
+                // "--register-audio-plugin",
+                // "https://wasted.audio/software/wstd_flangr"
+            ],
+            // If you need to debug a plugin, you can do something like this.
+            // (If you don't have these plugins, you'll only get a harmless warning.)
+            "initCommands": [
+                "settings set target.load-cwd-lldbinit true"
+            ],
+            "postRunCommands": [
+                "target symbols add /usr/lib/lv2/meters.lv2/meters.so",
+                "target symbols add /usr/lib/lv2/meters.lv2/meters_glui.so",
+            ],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Launch (Linux - cppdbg)",
+            "type": "cppdbg",
+            "MIMode": "gdb",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/${command:cmake.buildType}/src/app/audacity",
+            "preLaunchTask": "CMake: build",
+            "args": [
+                // "--register-audio-plugin",
+                // "https://wasted.audio/software/wstd_flangr"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/build/${command:cmake.buildType}/src/app",
+            "visualizerFile": "${workspaceFolder}/.vscode/qt6.natvis",
+            "showDisplayString": true
+        },
+        {
+            "name": "run audacity (MacOS)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/${command:cmake.buildType}/src/app/audacity.app/Contents/MacOS/audacity",
+            "args": [],
+            "preLaunchTask": "CMake: install",
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb"
+        }
+    ]
+}
